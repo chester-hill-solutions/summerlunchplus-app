@@ -29,7 +29,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     if (!userResponse?.data?.user) {
       throw redirect("/login", { headers: sbServerClient.headers });
     } else {
-      throw redirect("/home", { headers: sbServerClient.headers });
+      throw redirect("/protected", { headers: sbServerClient.headers });
     }
   } catch (error) {
     console.error(error);

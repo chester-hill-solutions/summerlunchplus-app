@@ -1,8 +1,3 @@
-_**
-!_index.tsx
-.env**
-!.env.template
-
 .DS_Store
 .env
 /node_modules/
