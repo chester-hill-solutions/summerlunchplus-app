@@ -8,8 +8,13 @@ export const getServerClient = (request: Request) => {
     process.env.SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll(): ReturnType<typeof parseCookieHeader> {
-          return parseCookieHeader(request.headers.get("Cookie") ?? "") ?? [];
+        async getAll() {
+          const cookies = parseCookieHeader(request.headers.get("Cookie") ?? "") ?? [];
+          return cookies
+            .filter((cookie): cookie is { name: string; value: string } =>
+              Boolean(cookie?.name) && typeof cookie?.value === "string",
+            )
+            .map((cookie) => ({ name: cookie.name, value: cookie.value }));
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) =>

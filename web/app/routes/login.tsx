@@ -9,7 +9,25 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { type ActionFunctionArgs, Link, redirect, useFetcher } from 'react-router'
+import {
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+  Link,
+  redirect,
+  useFetcher,
+} from 'react-router'
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { supabase, headers } = createClient(request)
+
+  const { data } = await supabase.auth.getUser()
+
+  if (data.user) {
+    throw redirect('/home', { headers })
+  }
+
+  return null
+}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { supabase, headers } = createClient(request)
@@ -31,7 +49,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // Update this route to redirect to an authenticated route. The user already has an active session.
-  return redirect('/protected', { headers })
+  return redirect('/home', { headers })
 }
 
 export default function Login() {
