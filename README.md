@@ -1,3 +1,24 @@
+# summerlunch+ Class Management
+
+# Prerequisities
+- Docker desktop
+- NodeJS
+
+Open docker desktop
+
+```bash
+
+git switch -c <YOUR-NAME> #your name will be your remote branch
+cp ./web/.env.template ./web/.env.local
+supabase start --debug
+# Update ./web/.env.local with the supabase variables printed out
+supabase status -o json # use this if you need to print out the variables again
+cd web
+npm run dev
+
+```
+
+
 # Welcome to React Router!
 
 A modern, production-ready template for building full-stack React applications using React Router.
