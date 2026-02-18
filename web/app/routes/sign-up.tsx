@@ -10,10 +10,29 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { type ActionFunctionArgs, Link, redirect, useFetcher, useSearchParams } from 'react-router'
+import {
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+  Link,
+  redirect,
+  useFetcher,
+  useSearchParams,
+} from 'react-router'
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { supabase, headers } = createClient(request)
+
+  const { data } = await supabase.auth.getUser()
+
+  if (data.user) {
+    throw redirect('/home', { headers })
+  }
+
+  return null
+}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { supabase } = createClient(request)
+  const { supabase, headers } = createClient(request)
 
   const url = new URL(request.url)
   const origin = url.origin
@@ -38,7 +57,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     email,
     password,
     options: {
-      emailRedirectTo: `${origin}/protected`,
+      emailRedirectTo: `${origin}/home`,
     },
   })
 
@@ -46,7 +65,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { error: error.message }
   }
 
-  return redirect('/sign-up?success')
+  return redirect('/sign-up?success', { headers })
 }
 
 export default function SignUp() {

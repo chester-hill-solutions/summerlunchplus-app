@@ -1,0 +1,1 @@
+select user_id, role from public.user_roles where user_id = auth.uid();

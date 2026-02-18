@@ -1,14 +1,16 @@
-import {
-  isRouteErrorResponse,
-  Links,
-  Meta,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
-} from "react-router";
+import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData } from "react-router";
 
 import type { Route } from "./+types/root";
+import { Navbar } from "./components/navbar";
+import { getServerClient } from "./server";
 import "./app.css";
+
+export async function loader({ request }: Route.LoaderArgs) {
+  const { client } = getServerClient(request);
+  const { data } = await client.auth.getUser();
+
+  return { user: data.user ?? null };
+}
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -42,7 +44,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  return <Outlet />;
+  const { user } = useLoaderData<typeof loader>();
+
+  return (
+    <>
+      <Navbar user={user} />
+      <Outlet />
+    </>
+  );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
