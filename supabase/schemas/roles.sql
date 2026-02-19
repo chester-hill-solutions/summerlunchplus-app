@@ -18,6 +18,10 @@ create type app_permissions as enum (
   'form_assignment.create', 'form_assignment.read', 'form_assignment.update', 'form_assignment.delete',
   'form_submission.create', 'form_submission.read', 'form_submission.update', 'form_submission.delete',
   'form_answer.create', 'form_answer.read', 'form_answer.update', 'form_answer.delete',
+  'semester.create', 'semester.read', 'semester.update', 'semester.delete',
+  'cohort.create', 'cohort.read', 'cohort.update', 'cohort.delete',
+  'class.create', 'class.read', 'class.update', 'class.delete',
+  'cohort_enrollment.create', 'cohort_enrollment.read', 'cohort_enrollment.update', 'cohort_enrollment.update_status',
   'user_roles.manage', 'role_permission.manage',
   'profiles.read', 'profiles.update'
 );

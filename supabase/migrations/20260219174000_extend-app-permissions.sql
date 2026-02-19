@@ -1,0 +1,16 @@
+alter type "public"."app_permissions" add value if not exists 'semester.create';
+alter type "public"."app_permissions" add value if not exists 'semester.read';
+alter type "public"."app_permissions" add value if not exists 'semester.update';
+alter type "public"."app_permissions" add value if not exists 'semester.delete';
+alter type "public"."app_permissions" add value if not exists 'cohort.create';
+alter type "public"."app_permissions" add value if not exists 'cohort.read';
+alter type "public"."app_permissions" add value if not exists 'cohort.update';
+alter type "public"."app_permissions" add value if not exists 'cohort.delete';
+alter type "public"."app_permissions" add value if not exists 'class.create';
+alter type "public"."app_permissions" add value if not exists 'class.read';
+alter type "public"."app_permissions" add value if not exists 'class.update';
+alter type "public"."app_permissions" add value if not exists 'class.delete';
+alter type "public"."app_permissions" add value if not exists 'cohort_enrollment.create';
+alter type "public"."app_permissions" add value if not exists 'cohort_enrollment.read';
+alter type "public"."app_permissions" add value if not exists 'cohort_enrollment.update';
+alter type "public"."app_permissions" add value if not exists 'cohort_enrollment.update_status';
