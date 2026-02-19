@@ -44,6 +44,11 @@ function AuthenticatedNav({ role }: { role: string | null }) {
       {import.meta.env.DEV && (
         <span className="text-xs text-muted-foreground">Your role: {role ?? 'unknown'}</span>
       )}
+      {(role === 'admin' || role === 'manager') && (
+        <Button variant="ghost" asChild>
+          <Link to="/team">Team</Link>
+        </Button>
+      )}
       <IconButton to="/profile" label="Profile">
         <UserIcon className="size-5" />
       </IconButton>

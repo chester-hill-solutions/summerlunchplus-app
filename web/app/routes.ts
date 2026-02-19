@@ -16,4 +16,14 @@ export default [
   route("protected", "routes/protected.tsx"),
   route("auth/confirm", "routes/auth/confirm.tsx"),
   route("auth/error", "routes/auth/error.tsx"),
+  route("team", "routes/team.tsx", [
+    index("routes/team._index.tsx"),
+    route("users", "routes/team.users.tsx"),
+    route("class-management", "routes/team.class-management.tsx", [
+      route("semesters", "routes/team.class-management.semesters.tsx"),
+      route("cohorts", "routes/team.class-management.cohorts.tsx"),
+      route("classes", "routes/team.class-management.classes.tsx"),
+    ]),
+  ]),
+  route("team/class-managemtn", "routes/team.class-managemtn.tsx"),
 ] satisfies RouteConfig;
