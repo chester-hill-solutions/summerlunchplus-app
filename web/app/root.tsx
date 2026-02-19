@@ -15,11 +15,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     "/forgot-password",
     "/auth.confirm",
     "/auth.error",
-    "/my-forms",
     "/",
   ]);
+  const isMyFormsPath = pathname === "/my-forms" || pathname.startsWith("/my-forms/");
 
-  if (!allowlist.has(pathname)) {
+  if (!allowlist.has(pathname) && !isMyFormsPath) {
     try {
       await enforceOnboardingGuard(request, { allowMyForms: false });
     } catch (err) {

@@ -387,13 +387,25 @@ create policy form_answer_read_auth_admin
   using (true);
 
 -- Assignee access.
+create or replace function public.assignee_can_read_form(p_form_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists(
+    select 1
+    from public.form_assignment fa
+    where fa.form_id = p_form_id
+      and fa.user_id = auth.uid()
+  );
+$$;
+
+drop policy if exists form_assignee_read on public.form;
 create policy form_assignee_read
   on public.form
   for select
-  using (exists (
-    select 1 from public.form_assignment fa
-    where fa.form_id = id and fa.user_id = auth.uid()
-  ));
+  using (public.assignee_can_read_form(id));
 
 create policy form_question_assignee_read
   on public.form_question
