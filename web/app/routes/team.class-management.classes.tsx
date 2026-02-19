@@ -103,6 +103,7 @@ export default function ClassesPage() {
   const isSubmitting = navigation.state === 'submitting'
 
   const [editId, setEditId] = useState<string>(classes[0]?.id ?? '')
+  const [showCreate, setShowCreate] = useState(false)
   const current = useMemo(() => classes.find((c) => c.id === editId), [classes, editId])
 
   return (
@@ -115,41 +116,6 @@ export default function ClassesPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border bg-card p-4 shadow-sm">
-          <h3 className="text-lg font-semibold">Create class</h3>
-          <Form method="post" className="mt-3 space-y-3">
-            <input type="hidden" name="intent" value="create" />
-            <div className="space-y-1">
-              <Label htmlFor="create-cohort">Cohort</Label>
-              <select id="create-cohort" name="cohort_id" className="w-full rounded-md border px-3 py-2 text-sm">
-                <option value="">Unassigned</option>
-                {cohorts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-1">
-                <Label htmlFor="create-starts">Starts at</Label>
-                <Input id="create-starts" type="datetime-local" name="starts_at" required />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="create-ends">Ends at</Label>
-                <Input id="create-ends" type="datetime-local" name="ends_at" required />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="create-location">Location</Label>
-              <Input id="create-location" name="location" placeholder="Room / Zoom link" />
-            </div>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving…' : 'Create class'}
-            </Button>
-          </Form>
-        </div>
-
         <div className="rounded-lg border bg-card p-4 shadow-sm">
           <h3 className="text-lg font-semibold">Edit class</h3>
           {classes.length === 0 ? (
@@ -238,7 +204,46 @@ export default function ClassesPage() {
             <h3 className="text-lg font-semibold">Classes</h3>
             <p className="text-sm text-muted-foreground">All classes with timing and cohort.</p>
           </div>
+          <Button size="sm" variant={showCreate ? 'secondary' : 'default'} onClick={() => setShowCreate((v) => !v)}>
+            {showCreate ? 'Hide create' : 'Create'}
+          </Button>
         </div>
+        {showCreate && (
+          <div className="mb-4 rounded-md border bg-muted/40 p-4">
+            <h4 className="text-sm font-semibold">Create class</h4>
+            <Form method="post" className="mt-3 space-y-3">
+              <input type="hidden" name="intent" value="create" />
+              <div className="space-y-1">
+                <Label htmlFor="create-cohort">Cohort</Label>
+                <select id="create-cohort" name="cohort_id" className="w-full rounded-md border px-3 py-2 text-sm">
+                  <option value="">Unassigned</option>
+                  {cohorts.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="create-starts">Starts at</Label>
+                  <Input id="create-starts" type="datetime-local" name="starts_at" required />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="create-ends">Ends at</Label>
+                  <Input id="create-ends" type="datetime-local" name="ends_at" required />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="create-location">Location</Label>
+                <Input id="create-location" name="location" placeholder="Room / Zoom link" />
+              </div>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving…' : 'Create class'}
+              </Button>
+            </Form>
+          </div>
+        )}
         {classes.length === 0 ? (
           <p className="text-sm text-muted-foreground">No classes yet.</p>
         ) : (
@@ -250,6 +255,7 @@ export default function ClassesPage() {
                   <TableHead>Ends</TableHead>
                   <TableHead>Cohort</TableHead>
                   <TableHead>Location</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -259,6 +265,15 @@ export default function ClassesPage() {
                     <TableCell className="text-muted-foreground">{new Date(c.ends_at).toLocaleString()}</TableCell>
                     <TableCell className="text-muted-foreground">{c.cohort_name ?? 'Unassigned'}</TableCell>
                     <TableCell className="text-muted-foreground">{c.location ?? '—'}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant={editId === c.id ? 'secondary' : 'ghost'}
+                        onClick={() => setEditId(c.id)}
+                      >
+                        Edit
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

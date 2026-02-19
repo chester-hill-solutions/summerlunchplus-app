@@ -39,8 +39,8 @@ export async function enforceOnboardingGuard(request: Request, opts?: { allowMyF
   const mode = getOnboardingMode();
   const isUnassigned = auth.claims.role === "unassigned";
   const hasSiteRead = auth.claims.permissions.includes("site.read");
-  const needsOnboarding = isUnassigned || auth.claims.onboardingComplete === false;
-  const permissionBlocked = mode === "permission" && !hasSiteRead;
+  const needsOnboarding = isUnassigned;
+  const permissionBlocked = isUnassigned && mode === "permission" && !hasSiteRead;
 
   const shouldRedirectToForms = needsOnboarding || permissionBlocked;
 

@@ -91,6 +91,7 @@ export default function CohortsPage() {
   const isSubmitting = navigation.state === 'submitting'
 
   const [editId, setEditId] = useState<string>(cohorts[0]?.id ?? '')
+  const [showCreate, setShowCreate] = useState(false)
   const current = useMemo(() => cohorts.find((c) => c.id === editId), [cohorts, editId])
 
   return (
@@ -103,31 +104,6 @@ export default function CohortsPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border bg-card p-4 shadow-sm">
-          <h3 className="text-lg font-semibold">Create cohort</h3>
-          <Form method="post" className="mt-3 space-y-3">
-            <input type="hidden" name="intent" value="create" />
-            <div className="space-y-1">
-              <Label htmlFor="create-name">Name</Label>
-              <Input id="create-name" name="name" required />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="create-semester">Semester</Label>
-              <select id="create-semester" name="semester_id" className="w-full rounded-md border px-3 py-2 text-sm">
-                <option value="">Unassigned</option>
-                {semesters.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving…' : 'Create cohort'}
-            </Button>
-          </Form>
-        </div>
-
         <div className="rounded-lg border bg-card p-4 shadow-sm">
           <h3 className="text-lg font-semibold">Edit cohort</h3>
           {cohorts.length === 0 ? (
@@ -186,7 +162,36 @@ export default function CohortsPage() {
             <h3 className="text-lg font-semibold">Cohorts</h3>
             <p className="text-sm text-muted-foreground">All cohorts with their semester.</p>
           </div>
+          <Button size="sm" variant={showCreate ? 'secondary' : 'default'} onClick={() => setShowCreate((v) => !v)}>
+            {showCreate ? 'Hide create' : 'Create'}
+          </Button>
         </div>
+        {showCreate && (
+          <div className="mb-4 rounded-md border bg-muted/40 p-4">
+            <h4 className="text-sm font-semibold">Create cohort</h4>
+            <Form method="post" className="mt-3 space-y-3">
+              <input type="hidden" name="intent" value="create" />
+              <div className="space-y-1">
+                <Label htmlFor="create-name">Name</Label>
+                <Input id="create-name" name="name" required />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="create-semester">Semester</Label>
+                <select id="create-semester" name="semester_id" className="w-full rounded-md border px-3 py-2 text-sm">
+                  <option value="">Unassigned</option>
+                  {semesters.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving…' : 'Create cohort'}
+              </Button>
+            </Form>
+          </div>
+        )}
         {cohorts.length === 0 ? (
           <p className="text-sm text-muted-foreground">No cohorts yet.</p>
         ) : (
@@ -196,6 +201,7 @@ export default function CohortsPage() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Semester</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -203,6 +209,15 @@ export default function CohortsPage() {
                   <TableRow key={c.id}>
                     <TableCell className="font-medium">{c.name}</TableCell>
                     <TableCell className="text-muted-foreground">{c.semester_name ?? 'Unassigned'}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant={editId === c.id ? 'secondary' : 'ghost'}
+                        onClick={() => setEditId(c.id)}
+                      >
+                        Edit
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
