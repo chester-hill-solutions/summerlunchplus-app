@@ -1,6 +1,6 @@
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
 
-import type { Route } from "./+types/my-forms_.$formId";
+import type { Route } from "./+types/my-forms.$formId";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
