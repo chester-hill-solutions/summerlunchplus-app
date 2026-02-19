@@ -49,6 +49,7 @@ Supabase Usage
 - Route helper: `createClient(request)` in `app/lib/supabase/server.ts` returns `{ supabase, headers }` using `VITE_SUPABASE_*`; attach returned headers to responses to persist cookies.
 - Favor server-side Supabase; only publishable keys belong on the client. Avoid client-side service-role access entirely.
 - When adding tables, always: (1) add granular `app_permissions` values, (2) seed `role_permission` (admins/managers at minimum) via migration, (3) enable RLS with policies using `authorize(<perm>)`, and (4) regenerate types.
+- For existing tables, if RLS is updated to require new permissions, also seed those permissions to admin/manager (or intended roles) in the same change to avoid RLS blocks.
 
 Styling and UI
 - Tailwind v4; theme tokens live in `app/app.css`. Dark mode via `.dark`. Keep tokens literal to avoid purge misses.

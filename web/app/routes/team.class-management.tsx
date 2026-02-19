@@ -1,15 +1,24 @@
-import { NavLink, Outlet } from 'react-router'
+import { NavLink, Outlet, redirect } from 'react-router'
 
 import type { Route } from './+types/team.class-management'
 import { cn } from '@/lib/utils'
+import { requireAuth } from '@/lib/auth.server'
 
-export const loader = ({ context }: Route.LoaderArgs) => context
+export async function loader({ request }: Route.LoaderArgs) {
+  const auth = await requireAuth(request)
+  if (!['admin', 'manager'].includes(auth.claims.role)) {
+    throw redirect('/home', { headers: auth.headers })
+  }
+
+
+  return { role: auth.claims.role }
+}
 
 const nav = [
-  { to: '/team/class-management/semesters', label: 'Semesters' },
-  { to: '/team/class-management/cohorts', label: 'Cohorts' },
-  { to: '/team/class-management/classes', label: 'Classes' },
-  { to: '/team/class-management/enrollments', label: 'Enrollments' },
+  { to: 'enrollments', label: 'Enrollments' },
+  { to: 'classes', label: 'Classes' },
+  { to: 'cohorts', label: 'Cohorts' },
+  { to: 'semesters', label: 'Semesters' },
 ]
 
 export default function ClassManagementLayout() {
@@ -28,6 +37,7 @@ export default function ClassManagementLayout() {
           <NavLink
             key={item.to}
             to={item.to}
+            end={item.to === 'enrollments'}
             className={({ isActive }) =>
               cn(
                 'rounded-md px-3 py-2 text-sm font-medium transition-colors',

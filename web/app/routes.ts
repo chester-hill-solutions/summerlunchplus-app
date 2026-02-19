@@ -1,4 +1,4 @@
-import { type RouteConfig, route, index, layout } from "@react-router/dev/routes";
+import { type RouteConfig, route, index } from "@react-router/dev/routes";
 
 export default [
   index("routes/_index.tsx"),
@@ -21,12 +21,11 @@ export default [
     index("routes/team._index.tsx"),
     route("users", "routes/team.users.tsx"),
     route("forms", "routes/team.forms.tsx"),
-    layout("class-management", "routes/team.class-management.tsx", [
+    route("class-management", "routes/team.class-management.tsx", [
       index("routes/team.class-management.enrollments.tsx"),
       route("semesters", "routes/team.class-management.semesters.tsx"),
       route("cohorts", "routes/team.class-management.cohorts.tsx"),
       route("classes", "routes/team.class-management.classes.tsx"),
-      route("enrollments", "routes/team.class-management.enrollments.tsx"),
     ]),
   ]),
   route("team/class-managemtn", "routes/team.class-managemtn.tsx"),
