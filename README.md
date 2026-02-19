@@ -8,6 +8,12 @@
 - New users start as `unassigned` and are auto-assigned the required "Onboarding Survey" form. Completing all required forms auto-promotes them to `student` by default.
 - Permissions are defined via `app_permissions`/`role_permission` and included in JWT claims (`permissions`, `onboarding_complete`). Default permission `site.read` is granted to non-`unassigned` roles.
 - To switch to permission-only mode (no auto-promotion), set `ONBOARDING_MODE=permission` in `web/.env.local` and set the database parameter: `alter database postgres set app.onboarding_mode = 'permission';` (restart connections for it to take effect).
+- Form assignments: forms declare `auto_assign` as an array of roles. A trigger syncs assignments whenever a user’s role changes or a form’s `auto_assign` changes; completed submissions are kept even if the role no longer matches. Required forms (`is_required = true`) must be submitted before `unassigned` users get access (or before `onboarding_complete` is set in permission mode).
+- Access model in the schema:
+  - Tables: `form`, `form_question`, `form_assignment`, `form_submission`, `form_answer`. Required gating uses `form.is_required` plus per-user `form_assignment`/`form_submission` rows to track completion.
+  - Auto-assign: `form.auto_assign` (array of `app_role`) drives `form_assignment` syncing on role changes and form updates; submissions flip assignments to `submitted`.
+  - Claims: `custom_access_token_hook` injects `user_role`, `permissions` (from `role_permission`), and `onboarding_complete` (from `has_completed_required_forms`) into JWTs for app-side gating.
+  - RLS: admins/managers manage forms; `supabase_auth_admin` can read for hooks; assignees can read assigned forms/questions and only submit answers for their assignments. The app should deny protected areas when `onboarding_complete` is false or the role remains `unassigned` (in auto-promotion mode).
 
 ## Local database workflow
 - Edit schema under `supabase/schemas/*.sql` (source of truth). Generate a migration: `supabase db diff -f onboarding-forms`.
