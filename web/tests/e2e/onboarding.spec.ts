@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { createServiceRoleClient, generateTestUser } from "../utils/supabase";
+import { createAnonClient, generateTestUser } from "../utils/supabase";
 
 test("unassigned user must complete onboarding form before home", async ({ page }) => {
   const { email, password } = generateTestUser();
@@ -14,26 +14,11 @@ test("unassigned user must complete onboarding form before home", async ({ page 
   await page.waitForTimeout(1500);
 
   // Ensure onboarding assignment exists (fallback for local if trigger lags).
-  const service = createServiceRoleClient();
-  if (service) {
-    let userId: string | null = null;
-    for (let i = 0; i < 5; i++) {
-      const { data: userRow } = await service.auth.admin.getUserByEmail(email);
-      if (userRow?.user?.id) {
-        userId = userRow.user.id;
-        break;
-      }
-      await new Promise((res) => setTimeout(res, 300));
-    }
-    const { data: formRow } = await service.from("form").select("id").eq("name", "Onboarding Survey").maybeSingle();
-    if (formRow?.id && userId) {
-      const { error: assignError } = await service
-        .from("form_assignment")
-        .upsert({ form_id: formRow.id, user_id: userId });
-      if (assignError) {
-        throw new Error(`Failed to seed assignment: ${assignError.message}`);
-      }
-    }
+  const anon = createAnonClient();
+  const { data: formRow } = await anon.from("form").select("id").eq("name", "Onboarding Survey").maybeSingle();
+  const { data: loginSession } = await anon.auth.signInWithPassword({ email, password });
+  if (formRow?.id && loginSession.session?.user?.id) {
+    await anon.from("form_assignment").upsert({ form_id: formRow.id, user_id: loginSession.session.user.id });
   }
 
   // Log in
@@ -58,6 +43,9 @@ test("unassigned user must complete onboarding form before home", async ({ page 
   await expect(page.getByRole("heading", { name: /Your forms/i })).toBeVisible({ timeout: 10000 });
   const labels = await page.locator("label").allTextContents();
   console.log("Labels on page", labels);
+  if (labels.length === 0) {
+    console.log("Page content", await page.content());
+  }
 
   // Submit onboarding survey
   await page.getByLabel("Where do you live?").fill("Test City");

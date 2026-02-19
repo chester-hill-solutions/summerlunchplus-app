@@ -3,7 +3,7 @@ import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, 
 import type { Route } from "./+types/root";
 import { Navbar } from "./components/navbar";
 import { enforceOnboardingGuard } from "./lib/auth.server";
-import { getServerClient } from "./server";
+import { createClient } from "./lib/supabase/server";
 import "./app.css";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -27,10 +27,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
-  const { client } = getServerClient(request);
-  const { data } = await client.auth.getUser();
+  const { supabase } = createClient(request);
+  const { data: userData, error: userError } = await supabase.auth.getUser();
 
-  return { user: data.user ?? null };
+  const user = userData?.user ?? null;
+
+  if (userError || !user) {
+    return { user: null, role: null };
+  }
+
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const claims = claimsData.claims as { user_role?: string } | null | undefined;
+  const role = typeof claims?.user_role === "string" ? claims.user_role : null;
+
+  return { user, role };
 }
 
 export const links: Route.LinksFunction = () => [
@@ -65,11 +75,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { user } = useLoaderData<typeof loader>();
+  const { user, role } = useLoaderData<typeof loader>();
 
   return (
     <>
-      <Navbar user={user} />
+      <Navbar user={user} role={role} />
       <Outlet />
     </>
   );

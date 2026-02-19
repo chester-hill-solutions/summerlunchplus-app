@@ -8,9 +8,10 @@ import { cn } from '@/lib/utils'
 
 type NavbarProps = {
   user: User | null
+  role: string | null
 }
 
-export function Navbar({ user }: NavbarProps) {
+export function Navbar({ user, role }: NavbarProps) {
   return (
     <header className="border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-4">
@@ -18,7 +19,7 @@ export function Navbar({ user }: NavbarProps) {
           summerlunch+
         </Link>
 
-        {user ? <AuthenticatedNav /> : <UnauthenticatedNav />}
+        {user ? <AuthenticatedNav role={role} /> : <UnauthenticatedNav />}
       </div>
     </header>
   )
@@ -37,9 +38,12 @@ function UnauthenticatedNav() {
   )
 }
 
-function AuthenticatedNav() {
+function AuthenticatedNav({ role }: { role: string | null }) {
   return (
     <div className="flex items-center gap-2">
+      {import.meta.env.DEV && (
+        <span className="text-xs text-muted-foreground">Your role: {role ?? 'unknown'}</span>
+      )}
       <IconButton to="/profile" label="Profile">
         <UserIcon className="size-5" />
       </IconButton>

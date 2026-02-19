@@ -2,31 +2,6 @@ import { redirect } from "react-router";
 
 import { createClient } from "@/lib/supabase/server";
 
-type Claims = {
-  role: string | null;
-  permissions: string[];
-  onboardingComplete: boolean;
-};
-
-function decodeToken(accessToken: string | null): Partial<Claims> {
-  if (!accessToken) return {};
-  const parts = accessToken.split(".");
-  if (parts.length < 2) return {};
-  try {
-    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-    const permissions = Array.isArray(payload.permissions)
-      ? payload.permissions.filter((p: unknown) => typeof p === "string")
-      : [];
-    return {
-      role: typeof payload.user_role === "string" ? payload.user_role : null,
-      permissions,
-      onboardingComplete: Boolean(payload.onboarding_complete),
-    };
-  } catch {
-    return {};
-  }
-}
-
 function getOnboardingMode() {
   const mode = process.env.ONBOARDING_MODE;
   return mode === "permission" ? "permission" : "role";
@@ -34,22 +9,23 @@ function getOnboardingMode() {
 
 export async function requireAuth(request: Request) {
   const { supabase, headers } = createClient(request);
-  const [{ data: userData }, { data: sessionData }] = await Promise.all([
-    supabase.auth.getUser(),
-    supabase.auth.getSession(),
-  ]);
-  const user = userData.user;
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const user = userData?.user;
 
-  if (!user) {
+  if (userError || !user) {
     throw redirect("/login", { headers });
   }
 
-  const token = sessionData.session?.access_token ?? null;
-  const tokenClaims = decodeToken(token);
-  const appMetaRole = (user.app_metadata as { user_role?: string } | null)?.user_role ?? null;
-  const role = tokenClaims.role ?? appMetaRole;
-  const permissions = tokenClaims.permissions ?? [];
-  const onboardingComplete = tokenClaims.onboardingComplete ?? false;
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const claims = claimsData.claims as
+    | { user_role?: string; permissions?: string[]; onboarding_complete?: boolean }
+    | null
+    | undefined;
+  const role = typeof claims?.user_role === "string" ? claims.user_role : "unassigned";
+  const permissions = Array.isArray(claims?.permissions)
+    ? claims.permissions.filter((p): p is string => typeof p === "string")
+    : [];
+  const onboardingComplete = Boolean(claims?.onboarding_complete);
 
   return {
     user,

@@ -2,7 +2,7 @@ import type { Route } from "./+types/_index";
 import { redirect } from "react-router";
 
 import { enforceOnboardingGuard } from "@/lib/auth.server";
-import { getServerClient } from "@/server";
+import { createClient } from "@/lib/supabase/server";
 
 export async function loader({ request }: Route.LoaderArgs) {
   // Try to enforce onboarding guard; if not authenticated fall through to info.
@@ -13,8 +13,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     // not authenticated, fall back to legacy flow
   }
 
-  const { client, headers } = getServerClient(request);
-  const { data } = await client.auth.getUser();
+  const { supabase, headers } = createClient(request);
+  const { data } = await supabase.auth.getUser();
 
   if (data.user) {
     throw redirect("/home", { headers });

@@ -51,12 +51,35 @@ export async function loader({ request }: Route.LoaderArgs) {
   const auth = await enforceOnboardingGuard(request, { allowMyForms: true });
   const { supabase, headers } = createClient(request);
 
+  console.log(
+    "[my-forms] user",
+    auth.user.id,
+    "role",
+    auth.claims.role,
+    "supabase url",
+    process.env.VITE_SUPABASE_URL,
+  );
+
+  const { data: rawAssignments, error: rawAssignmentError } = await supabase
+    .from("form_assignment")
+    .select("id, form_id, user_id, status, due_at, assigned_at")
+    .eq("user_id", auth.user.id);
+  if (rawAssignmentError) {
+    console.error("[my-forms] raw assignment error", rawAssignmentError);
+  } else {
+    console.log("[my-forms] raw assignments count", rawAssignments?.length ?? 0);
+  }
+
   const { data: assignments, error: assignmentError } = await supabase
     .from("form_assignment")
-    .select("id, status, due_at, form:form_id!inner ( id, name, is_required, due_at )")
+    .select("id, status, due_at, form:form_id ( id, name, is_required, due_at )")
     .eq("user_id", auth.user.id)
-    .order("created_at", { ascending: true });
+    .order("assigned_at", { ascending: true });
+  if (assignmentError) {
+    console.error("[my-forms] assignment error", assignmentError);
+  }
   const assignmentList = assignmentError ? [] : assignments ?? [];
+  console.log("[my-forms] initial assignments", assignmentList.length);
 
   const normalizedAssignments: Assignment[] = (assignments ?? []).map((a: any) => {
     const formRaw = a.form;
@@ -81,12 +104,18 @@ export async function loader({ request }: Route.LoaderArgs) {
     .select("id, form_id, prompt, kind, position, options")
     .in("form_id", formIds)
     .order("position", { ascending: true });
+  if (questionsError) {
+    console.error("[my-forms] questions error", questionsError);
+  }
   const questionList = questionsError ? [] : questions ?? [];
 
   const { data: submissions, error: submissionError } = await supabase
     .from("form_submission")
     .select("id, form_id, submitted_at")
     .eq("user_id", auth.user.id);
+  if (submissionError) {
+    console.error("[my-forms] submission error", submissionError);
+  }
   const submissionList = submissionError ? [] : submissions ?? [];
 
   const assignmentsWithSubmission: Assignment[] = normalizedAssignments.map((a) => {
@@ -99,23 +128,54 @@ export async function loader({ request }: Route.LoaderArgs) {
   let resultAssignments = assignmentsWithSubmission;
   // If no assignments, attempt to sync and refetch once.
   if (resultAssignments.length === 0) {
+    // Try RPC sync (security definer) first.
+    console.log("[my-forms] no assignments, attempting rpc sync");
+    await supabase.rpc("sync_auto_assigned_forms_for_user", { p_user_id: auth.user.id });
+    const retryFromRpc = await supabase
+      .from("form_assignment")
+      .select("id, status, due_at, form:form_id ( id, name, is_required, due_at )")
+      .eq("user_id", auth.user.id)
+      .order("assigned_at", { ascending: true });
+    if (retryFromRpc.error) {
+      console.error("[my-forms] rpc retry error", retryFromRpc.error);
+    }
+    if (!retryFromRpc.error && (retryFromRpc.data?.length ?? 0) > 0) {
+      resultAssignments = (retryFromRpc.data ?? []).map((a: any) => {
+        const formRaw = a.form;
+        const form: Assignment["form"] = {
+          id: String(formRaw?.id ?? ""),
+          name: String(formRaw?.name ?? ""),
+          is_required: Boolean(formRaw?.is_required),
+          due_at: formRaw?.due_at ?? null,
+        };
+        const submission = submissionList.find((s) => s.form_id === form.id) ?? null;
+        return { id: String(a.id), status: String(a.status), due_at: a.due_at ?? null, form, submission };
+      });
+    }
+
+    if (resultAssignments.length === 0) {
     // Attempt to self-create assignments based on auto_assign.
     const role = auth.claims.role ?? "unassigned";
+    console.log("[my-forms] auto-assign pass role", role);
     const { data: autoForms } = await supabase
       .from("form")
       .select("id, name, is_required, due_at, auto_assign");
     const eligible = (autoForms ?? []).filter((f: any) => (f.auto_assign ?? []).includes(role));
-    if (eligible.length > 0) {
-      await Promise.all(
-        eligible.map((f: any) =>
-          supabase.from("form_assignment").upsert({ form_id: f.id, user_id: auth.user.id })
-        )
-      );
-      const retryAssignments = await supabase
-        .from("form_assignment")
-        .select("id, status, due_at, form:form_id!inner ( id, name, is_required, due_at )")
-        .eq("user_id", auth.user.id)
-        .order("created_at", { ascending: true });
+    console.log("[my-forms] eligible auto-assign forms", eligible.length);
+      if (eligible.length > 0) {
+        await Promise.all(
+          eligible.map((f: any) =>
+            supabase.from("form_assignment").upsert({ form_id: f.id, user_id: auth.user.id })
+          )
+        );
+        const retryAssignments = await supabase
+          .from("form_assignment")
+          .select("id, status, due_at, form:form_id ( id, name, is_required, due_at )")
+          .eq("user_id", auth.user.id)
+          .order("assigned_at", { ascending: true });
+        if (retryAssignments.error) {
+          console.error("[my-forms] auto-assign retry error", retryAssignments.error);
+        }
       if (!retryAssignments.error) {
         const normalizedRetry: Assignment[] = (retryAssignments.data ?? []).map((a: any) => {
           const formRaw = a.form;
@@ -137,13 +197,56 @@ export async function loader({ request }: Route.LoaderArgs) {
         resultAssignments = normalizedRetry;
       }
     }
+
+    if (resultAssignments.length === 0) {
+      const { data: onboardingForm } = await supabase
+        .from("form")
+        .select("id, name, is_required, due_at")
+        .eq("name", "Onboarding Survey")
+        .maybeSingle();
+      console.log("[my-forms] onboarding fallback found", Boolean(onboardingForm?.id));
+      if (onboardingForm?.id) {
+        await supabase
+          .from("form_assignment")
+          .upsert({ form_id: onboardingForm.id, user_id: auth.user.id, status: "pending" });
+        resultAssignments = [
+          {
+            id: onboardingForm.id,
+            status: "pending",
+            due_at: onboardingForm.due_at ?? null,
+            form: {
+              id: onboardingForm.id,
+              name: onboardingForm.name,
+              is_required: onboardingForm.is_required,
+              due_at: onboardingForm.due_at ?? null,
+            },
+            submission: null,
+          },
+        ];
+      }
+    }
+    }
+  }
+
+  // If we created fallback assignments and have no questions, fetch questions for those forms now.
+  let finalQuestions = questionList as Question[];
+  const missingQuestions = resultAssignments.length > 0 && finalQuestions.length === 0;
+  if (missingQuestions) {
+    const ids = resultAssignments.map((a) => a.form.id);
+    const { data: q2 } = await supabase
+      .from("form_question")
+      .select("id, form_id, prompt, kind, position, options")
+      .in("form_id", ids)
+      .order("position", { ascending: true });
+    finalQuestions = (q2 ?? []) as Question[];
   }
 
   const payload: LoaderData = {
     assignments: resultAssignments,
-    questions: questionList as Question[],
+    questions: finalQuestions,
     claims: auth.claims as Claims,
   };
+  console.log("[my-forms] final assignments", resultAssignments.length, "questions", finalQuestions.length);
   return new Response(JSON.stringify(payload), { headers: responseHeaders });
 }
 
