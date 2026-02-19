@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Form, useLoaderData, useNavigation } from 'react-router'
+import { useEffect, useMemo, useState } from 'react'
+import { Form, useFetcher, useLoaderData, useNavigation } from 'react-router'
 
 import type { Route } from './+types/team.class-management.classes'
 import { Button } from '@/components/ui/button'
@@ -24,6 +24,8 @@ type LoaderData = {
   cohorts: Cohort[]
   classes: ClassRow[]
 }
+
+type ActionResult = { ok: boolean; error?: string }
 
 function toLocalInput(ts: string) {
   if (!ts) return ''
@@ -84,17 +86,31 @@ export async function action({ request }: Route.ActionArgs) {
 
   const { supabase, headers } = createClient(request)
 
+  let error: string | null = null
+
   if (intent === 'create') {
-    await supabase.from('class').insert({ cohort_id, starts_at, ends_at, location })
+    const { error: insertError } = await supabase.from('class').insert({ cohort_id, starts_at, ends_at, location })
+    if (insertError) error = insertError.message
   } else if (intent === 'update') {
     const id = String(formData.get('id') ?? '')
-    await supabase.from('class').update({ cohort_id, starts_at, ends_at, location }).eq('id', id)
+    const { error: updateError } = await supabase.from('class').update({ cohort_id, starts_at, ends_at, location }).eq('id', id)
+    if (updateError) error = updateError.message
+  } else {
+    error = 'Unknown intent'
   }
 
   const merged = new Headers(headers)
   auth.headers.forEach((value, key) => merged.set(key, value))
+  merged.set('Content-Type', 'application/json')
 
-  return new Response(null, { status: 204, headers: merged })
+  if (error) {
+    return new Response(JSON.stringify({ ok: false, error } satisfies ActionResult), {
+      status: 400,
+      headers: merged,
+    })
+  }
+
+  return new Response(JSON.stringify({ ok: true } satisfies ActionResult), { status: 200, headers: merged })
 }
 
 export default function ClassesPage() {
@@ -102,9 +118,25 @@ export default function ClassesPage() {
   const navigation = useNavigation()
   const isSubmitting = navigation.state === 'submitting'
 
+  const createFetcher = useFetcher<ActionResult>()
+  const editFetcher = useFetcher<ActionResult>()
+
   const [editId, setEditId] = useState<string>(classes[0]?.id ?? '')
   const [showCreate, setShowCreate] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
   const current = useMemo(() => classes.find((c) => c.id === editId), [classes, editId])
+
+  useEffect(() => {
+    if (createFetcher.data?.ok) {
+      setShowCreate(false)
+    }
+  }, [createFetcher.data])
+
+  useEffect(() => {
+    if (editFetcher.data?.ok) {
+      setShowEdit(false)
+    }
+  }, [editFetcher.data])
 
   return (
     <div className="space-y-6">
@@ -113,89 +145,6 @@ export default function ClassesPage() {
         <p className="text-sm text-muted-foreground">
           Schedule class sessions with start and end times for each cohort.
         </p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border bg-card p-4 shadow-sm">
-          <h3 className="text-lg font-semibold">Edit class</h3>
-          {classes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No classes yet.</p>
-          ) : (
-            <Form method="post" className="mt-3 space-y-3">
-              <input type="hidden" name="intent" value="update" />
-              <div className="space-y-1">
-                <Label htmlFor="edit-select">Select class</Label>
-                <select
-                  id="edit-select"
-                  name="id"
-                  className="w-full rounded-md border px-3 py-2 text-sm"
-                  value={editId}
-                  onChange={(e) => setEditId(e.target.value)}
-                >
-                  {classes.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.cohort_name ? `${c.cohort_name} — ` : ''}{new Date(c.starts_at).toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="edit-cohort">Cohort</Label>
-                <select
-                  id="edit-cohort"
-                  name="cohort_id"
-                  className="w-full rounded-md border px-3 py-2 text-sm"
-                  defaultValue={current?.cohort_id ?? ''}
-                  key={`${current?.id ?? 'cohort'}-select`}
-                >
-                  <option value="">Unassigned</option>
-                  {cohorts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="edit-starts">Starts at</Label>
-                  <Input
-                    id="edit-starts"
-                    type="datetime-local"
-                    name="starts_at"
-                    required
-                    defaultValue={current ? toLocalInput(current.starts_at) : ''}
-                    key={`${current?.id ?? 'start'}-starts`}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="edit-ends">Ends at</Label>
-                  <Input
-                    id="edit-ends"
-                    type="datetime-local"
-                    name="ends_at"
-                    required
-                    defaultValue={current ? toLocalInput(current.ends_at) : ''}
-                    key={`${current?.id ?? 'end'}-ends`}
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="edit-location">Location</Label>
-                <Input
-                  id="edit-location"
-                  name="location"
-                  defaultValue={current?.location ?? ''}
-                  key={`${current?.id ?? 'loc'}-loc`}
-                  placeholder="Room / Zoom link"
-                />
-              </div>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Saving…' : 'Save changes'}
-              </Button>
-            </Form>
-          )}
-        </div>
       </div>
 
       <div className="rounded-lg border bg-card p-4 shadow-sm">
@@ -211,7 +160,7 @@ export default function ClassesPage() {
         {showCreate && (
           <div className="mb-4 rounded-md border bg-muted/40 p-4">
             <h4 className="text-sm font-semibold">Create class</h4>
-            <Form method="post" className="mt-3 space-y-3">
+            <createFetcher.Form method="post" className="mt-3 space-y-3">
               <input type="hidden" name="intent" value="create" />
               <div className="space-y-1">
                 <Label htmlFor="create-cohort">Cohort</Label>
@@ -238,10 +187,14 @@ export default function ClassesPage() {
                 <Label htmlFor="create-location">Location</Label>
                 <Input id="create-location" name="location" placeholder="Room / Zoom link" />
               </div>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Saving…' : 'Create class'}
+              <Button type="submit" disabled={createFetcher.state === 'submitting'}>
+                {createFetcher.state === 'submitting' ? 'Saving…' : 'Create class'}
               </Button>
-            </Form>
+              {createFetcher.data?.ok ? <p className="text-sm text-emerald-600">Class created.</p> : null}
+              {createFetcher.data?.error ? (
+                <p className="text-sm text-destructive">{createFetcher.data.error}</p>
+              ) : null}
+            </createFetcher.Form>
           </div>
         )}
         {classes.length === 0 ? (
@@ -269,7 +222,10 @@ export default function ClassesPage() {
                       <Button
                         size="sm"
                         variant={editId === c.id ? 'secondary' : 'ghost'}
-                        onClick={() => setEditId(c.id)}
+                        onClick={() => {
+                          setEditId(c.id)
+                          setShowEdit(true)
+                        }}
                       >
                         Edit
                       </Button>
@@ -281,6 +237,84 @@ export default function ClassesPage() {
           </div>
         )}
       </div>
+
+      {showEdit && current ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg border bg-card p-6 shadow-xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm uppercase tracking-wide text-muted-foreground">Edit class</p>
+                <h3 className="text-lg font-semibold">
+                  {current.cohort_name ? `${current.cohort_name} — ` : ''}
+                  {new Date(current.starts_at).toLocaleString()}
+                </h3>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowEdit(false)} aria-label="Close">
+                ×
+              </Button>
+            </div>
+
+            <editFetcher.Form method="post" className="mt-4 space-y-3">
+              <input type="hidden" name="intent" value="update" />
+              <input type="hidden" name="id" value={current.id} />
+              <div className="space-y-1">
+                <Label htmlFor="edit-cohort">Cohort</Label>
+                <select
+                  id="edit-cohort"
+                  name="cohort_id"
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  defaultValue={current.cohort_id ?? ''}
+                >
+                  <option value="">Unassigned</option>
+                  {cohorts.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="edit-starts">Starts at</Label>
+                  <Input
+                    id="edit-starts"
+                    type="datetime-local"
+                    name="starts_at"
+                    required
+                    defaultValue={toLocalInput(current.starts_at)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-ends">Ends at</Label>
+                  <Input
+                    id="edit-ends"
+                    type="datetime-local"
+                    name="ends_at"
+                    required
+                    defaultValue={toLocalInput(current.ends_at)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-location">Location</Label>
+                <Input id="edit-location" name="location" defaultValue={current.location ?? ''} placeholder="Room / Zoom link" />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setShowEdit(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={editFetcher.state === 'submitting'}>
+                  {editFetcher.state === 'submitting' ? 'Saving…' : 'Save changes'}
+                </Button>
+              </div>
+              {editFetcher.data?.ok ? <p className="text-sm text-emerald-600">Class updated.</p> : null}
+              {editFetcher.data?.error ? (
+                <p className="text-sm text-destructive">{editFetcher.data.error}</p>
+              ) : null}
+            </editFetcher.Form>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

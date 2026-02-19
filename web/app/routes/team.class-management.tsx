@@ -9,6 +9,7 @@ const nav = [
   { to: '/team/class-management/semesters', label: 'Semesters' },
   { to: '/team/class-management/cohorts', label: 'Cohorts' },
   { to: '/team/class-management/classes', label: 'Classes' },
+  { to: '/team/class-management/enrollments', label: 'Enrollments' },
 ]
 
 export default function ClassManagementLayout() {

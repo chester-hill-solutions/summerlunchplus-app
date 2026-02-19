@@ -106,6 +106,7 @@ export default function SemestersPage() {
 
   const [editId, setEditId] = useState<string>(semesters[0]?.id ?? '')
   const [showCreate, setShowCreate] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
   const current = useMemo(() => semesters.find((s) => s.id === editId), [editId, semesters])
 
   useEffect(() => {
@@ -114,6 +115,12 @@ export default function SemestersPage() {
     }
   }, [createFetcher.data])
 
+  useEffect(() => {
+    if (editFetcher.data?.ok) {
+      setShowEdit(false)
+    }
+  }, [editFetcher.data])
+
   return (
     <div className="space-y-6">
       <div className="space-y-2">
@@ -121,70 +128,6 @@ export default function SemestersPage() {
         <p className="text-sm text-muted-foreground">
           Define term start and end dates. Names and month ranges must stay unique.
         </p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border bg-card p-4 shadow-sm">
-          <h3 className="text-lg font-semibold">Edit semester</h3>
-          {semesters.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No semesters yet.</p>
-          ) : (
-            <editFetcher.Form method="post" className="mt-3 space-y-3">
-              <input type="hidden" name="intent" value="update" />
-              <div className="space-y-1">
-                <Label htmlFor="edit-select">Select semester</Label>
-                <select
-                  id="edit-select"
-                  name="id"
-                  className="w-full rounded-md border px-3 py-2 text-sm"
-                  value={editId}
-                  onChange={(e) => setEditId(e.target.value)}
-                >
-                  {semesters.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="edit-name">Name</Label>
-                <Input id="edit-name" name="name" required defaultValue={current?.name ?? ''} key={current?.id ?? 'name'} />
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="edit-starts">Starts at</Label>
-                  <Input
-                    id="edit-starts"
-                    type="datetime-local"
-                    name="starts_at"
-                    required
-                    defaultValue={current ? toLocalInput(current.starts_at) : ''}
-                    key={`${current?.id ?? 'start'}-starts`}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="edit-ends">Ends at</Label>
-                  <Input
-                    id="edit-ends"
-                    type="datetime-local"
-                    name="ends_at"
-                    required
-                    defaultValue={current ? toLocalInput(current.ends_at) : ''}
-                    key={`${current?.id ?? 'end'}-ends`}
-                  />
-                </div>
-              </div>
-              <Button type="submit" disabled={editFetcher.state === 'submitting'}>
-                {editFetcher.state === 'submitting' ? 'Saving…' : 'Save changes'}
-              </Button>
-              {editFetcher.data?.ok ? <p className="text-sm text-emerald-600">Semester updated.</p> : null}
-              {editFetcher.data?.error ? (
-                <p className="text-sm text-destructive">{editFetcher.data.error}</p>
-              ) : null}
-            </editFetcher.Form>
-          )}
-        </div>
       </div>
 
       <div className="rounded-lg border bg-card p-4 shadow-sm">
@@ -253,7 +196,10 @@ export default function SemestersPage() {
                       <Button
                         size="sm"
                         variant={editId === s.id ? 'secondary' : 'ghost'}
-                        onClick={() => setEditId(s.id)}
+                        onClick={() => {
+                          setEditId(s.id)
+                          setShowEdit(true)
+                        }}
                       >
                         Edit
                       </Button>
@@ -265,6 +211,65 @@ export default function SemestersPage() {
           </div>
         )}
       </div>
+
+      {showEdit && current ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg border bg-card p-6 shadow-xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm uppercase tracking-wide text-muted-foreground">Edit semester</p>
+                <h3 className="text-lg font-semibold">{current.name}</h3>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowEdit(false)} aria-label="Close">
+                ×
+              </Button>
+            </div>
+
+            <editFetcher.Form method="post" className="mt-4 space-y-3">
+              <input type="hidden" name="intent" value="update" />
+              <input type="hidden" name="id" value={current.id} />
+              <div className="space-y-1">
+                <Label htmlFor="edit-name">Name</Label>
+                <Input id="edit-name" name="name" required defaultValue={current.name} />
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="edit-starts">Starts at</Label>
+                  <Input
+                    id="edit-starts"
+                    type="datetime-local"
+                    name="starts_at"
+                    required
+                    defaultValue={toLocalInput(current.starts_at)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-ends">Ends at</Label>
+                  <Input
+                    id="edit-ends"
+                    type="datetime-local"
+                    name="ends_at"
+                    required
+                    defaultValue={toLocalInput(current.ends_at)}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setShowEdit(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={editFetcher.state === 'submitting'}>
+                  {editFetcher.state === 'submitting' ? 'Saving…' : 'Save changes'}
+                </Button>
+              </div>
+              {editFetcher.data?.ok ? <p className="text-sm text-emerald-600">Semester updated.</p> : null}
+              {editFetcher.data?.error ? (
+                <p className="text-sm text-destructive">{editFetcher.data.error}</p>
+              ) : null}
+            </editFetcher.Form>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

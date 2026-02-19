@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Form, useLoaderData, useNavigation } from 'react-router'
+import { useEffect, useMemo, useState } from 'react'
+import { Form, useFetcher, useLoaderData, useNavigation } from 'react-router'
 
 import type { Route } from './+types/team.class-management.cohorts'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,8 @@ type LoaderData = {
   semesters: Semester[]
   cohorts: Cohort[]
 }
+
+type ActionResult = { ok: boolean; error?: string }
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
@@ -90,9 +92,25 @@ export default function CohortsPage() {
   const navigation = useNavigation()
   const isSubmitting = navigation.state === 'submitting'
 
+  const createFetcher = useFetcher<ActionResult>()
+  const editFetcher = useFetcher<ActionResult>()
+
   const [editId, setEditId] = useState<string>(cohorts[0]?.id ?? '')
   const [showCreate, setShowCreate] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
   const current = useMemo(() => cohorts.find((c) => c.id === editId), [cohorts, editId])
+
+  useEffect(() => {
+    if (createFetcher.data?.ok) {
+      setShowCreate(false)
+    }
+  }, [createFetcher.data])
+
+  useEffect(() => {
+    if (editFetcher.data?.ok) {
+      setShowEdit(false)
+    }
+  }, [editFetcher.data])
 
   return (
     <div className="space-y-6">
@@ -101,59 +119,6 @@ export default function CohortsPage() {
         <p className="text-sm text-muted-foreground">
           Group students within semesters and handle approvals.
         </p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border bg-card p-4 shadow-sm">
-          <h3 className="text-lg font-semibold">Edit cohort</h3>
-          {cohorts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No cohorts yet.</p>
-          ) : (
-            <Form method="post" className="mt-3 space-y-3">
-              <input type="hidden" name="intent" value="update" />
-              <div className="space-y-1">
-                <Label htmlFor="edit-select">Select cohort</Label>
-                <select
-                  id="edit-select"
-                  name="id"
-                  className="w-full rounded-md border px-3 py-2 text-sm"
-                  value={editId}
-                  onChange={(e) => setEditId(e.target.value)}
-                >
-                  {cohorts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="edit-name">Name</Label>
-                <Input id="edit-name" name="name" required defaultValue={current?.name ?? ''} key={current?.id ?? 'name'} />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="edit-semester">Semester</Label>
-                <select
-                  id="edit-semester"
-                  name="semester_id"
-                  className="w-full rounded-md border px-3 py-2 text-sm"
-                  defaultValue={current?.semester_id ?? ''}
-                  key={`${current?.id ?? 'sem'}-select`}
-                >
-                  <option value="">Unassigned</option>
-                  {semesters.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Saving…' : 'Save changes'}
-              </Button>
-            </Form>
-          )}
-        </div>
       </div>
 
       <div className="rounded-lg border bg-card p-4 shadow-sm">
@@ -169,7 +134,7 @@ export default function CohortsPage() {
         {showCreate && (
           <div className="mb-4 rounded-md border bg-muted/40 p-4">
             <h4 className="text-sm font-semibold">Create cohort</h4>
-            <Form method="post" className="mt-3 space-y-3">
+            <createFetcher.Form method="post" className="mt-3 space-y-3">
               <input type="hidden" name="intent" value="create" />
               <div className="space-y-1">
                 <Label htmlFor="create-name">Name</Label>
@@ -186,10 +151,14 @@ export default function CohortsPage() {
                   ))}
                 </select>
               </div>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Saving…' : 'Create cohort'}
+              <Button type="submit" disabled={createFetcher.state === 'submitting'}>
+                {createFetcher.state === 'submitting' ? 'Saving…' : 'Create cohort'}
               </Button>
-            </Form>
+              {createFetcher.data?.ok ? <p className="text-sm text-emerald-600">Cohort created.</p> : null}
+              {createFetcher.data?.error ? (
+                <p className="text-sm text-destructive">{createFetcher.data.error}</p>
+              ) : null}
+            </createFetcher.Form>
           </div>
         )}
         {cohorts.length === 0 ? (
@@ -213,7 +182,10 @@ export default function CohortsPage() {
                       <Button
                         size="sm"
                         variant={editId === c.id ? 'secondary' : 'ghost'}
-                        onClick={() => setEditId(c.id)}
+                        onClick={() => {
+                          setEditId(c.id)
+                          setShowEdit(true)
+                        }}
                       >
                         Edit
                       </Button>
@@ -225,6 +197,59 @@ export default function CohortsPage() {
           </div>
         )}
       </div>
+
+      {showEdit && current ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg border bg-card p-6 shadow-xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm uppercase tracking-wide text-muted-foreground">Edit cohort</p>
+                <h3 className="text-lg font-semibold">{current.name}</h3>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowEdit(false)} aria-label="Close">
+                ×
+              </Button>
+            </div>
+
+            <editFetcher.Form method="post" className="mt-4 space-y-3">
+              <input type="hidden" name="intent" value="update" />
+              <input type="hidden" name="id" value={current.id} />
+              <div className="space-y-1">
+                <Label htmlFor="edit-name">Name</Label>
+                <Input id="edit-name" name="name" required defaultValue={current.name} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-semester">Semester</Label>
+                <select
+                  id="edit-semester"
+                  name="semester_id"
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  defaultValue={current.semester_id ?? ''}
+                >
+                  <option value="">Unassigned</option>
+                  {semesters.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setShowEdit(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={editFetcher.state === 'submitting'}>
+                  {editFetcher.state === 'submitting' ? 'Saving…' : 'Save changes'}
+                </Button>
+              </div>
+              {editFetcher.data?.ok ? <p className="text-sm text-emerald-600">Cohort updated.</p> : null}
+              {editFetcher.data?.error ? (
+                <p className="text-sm text-destructive">{editFetcher.data.error}</p>
+              ) : null}
+            </editFetcher.Form>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

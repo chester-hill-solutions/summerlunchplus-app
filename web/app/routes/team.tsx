@@ -24,6 +24,7 @@ type NavItem = {
 const teamNav: NavItem[] = [
   { to: '/team', label: 'Overview' },
   { to: '/team/users', label: 'Users' },
+  { to: '/team/forms', label: 'Forms' },
   { to: '/team/class-management', label: 'Class Management' },
 ]
 

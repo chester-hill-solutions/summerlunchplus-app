@@ -366,6 +366,7 @@ create policy form_select_authorized
   for select
   using (public.authorize('form.read'));
 
+
 create policy form_insert_authorized
   on public.form
   for insert
