@@ -2,7 +2,7 @@ import { redirect, useLoaderData } from "react-router";
 
 import type { Route } from "./+types/home";
 import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/server";
+import { enforceOnboardingGuard } from "@/lib/auth.server";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -12,33 +12,8 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { supabase, headers } = createClient(request);
-  const { data } = await supabase.auth.getSession();
-
-  const session = data.session;
-
-  if (!session?.user) {
-    throw redirect("/login", { headers });
-  }
-
-  const appMetadataRole = (session.user.app_metadata as { user_role?: string } | null)?.user_role ?? null;
-
-  const tokenRole = (() => {
-    const token = session.access_token;
-    if (!token) return null;
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    try {
-      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-      return typeof payload.user_role === "string" ? payload.user_role : null;
-    } catch {
-      return null;
-    }
-  })();
-
-  const role = tokenRole ?? appMetadataRole;
-
-  return { user: session.user, role };
+  const auth = await enforceOnboardingGuard(request);
+  return { user: auth.user, role: auth.claims.role };
 }
 
 export default function Home() {

@@ -1,16 +1,12 @@
 
-import { createClient } from '@/lib/supabase/server'
-import { type LoaderFunctionArgs, redirect } from 'react-router'
+import type { Route } from './+types/protected'
+import { redirect } from 'react-router'
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { supabase, headers } = createClient(request)
-  const { data } = await supabase.auth.getUser()
+import { enforceOnboardingGuard } from '@/lib/auth.server'
 
-  if (!data?.user) {
-    throw redirect('/login', { headers })
-  }
-
-  throw redirect('/home', { headers })
+export const loader = async ({ request }: Route.LoaderArgs) => {
+  const auth = await enforceOnboardingGuard(request)
+  throw redirect('/home', { headers: auth.headers })
 }
 
 export default function ProtectedPage() {

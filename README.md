@@ -13,7 +13,7 @@
   - Tables: `form`, `form_question`, `form_assignment`, `form_submission`, `form_answer`. Required gating uses `form.is_required` plus per-user `form_assignment`/`form_submission` rows to track completion.
   - Auto-assign: `form.auto_assign` (array of `app_role`) drives `form_assignment` syncing on role changes and form updates; submissions flip assignments to `submitted`.
   - Claims: `custom_access_token_hook` injects `user_role`, `permissions` (from `role_permission`), and `onboarding_complete` (from `has_completed_required_forms`) into JWTs for app-side gating.
-  - RLS: admins/managers manage forms; `supabase_auth_admin` can read for hooks; assignees can read assigned forms/questions and only submit answers for their assignments. The app should deny protected areas when `onboarding_complete` is false or the role remains `unassigned` (in auto-promotion mode).
+  - RLS: admins/managers manage forms; `supabase_auth_admin` can read for hooks; assignees can read assigned forms/questions and only submit answers for their assignments. The app should deny protected areas when `onboarding_complete` is false or the role remains `unassigned` (in auto-promotion mode), redirecting them to `/my-forms` until required submissions are complete.
 
 ## Local database workflow
 - Edit schema under `supabase/schemas/*.sql` (source of truth). Generate a migration: `supabase db diff -f onboarding-forms`.

@@ -2,10 +2,31 @@ import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, 
 
 import type { Route } from "./+types/root";
 import { Navbar } from "./components/navbar";
+import { enforceOnboardingGuard } from "./lib/auth.server";
 import { getServerClient } from "./server";
 import "./app.css";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+  const allowlist = new Set([
+    "/login",
+    "/sign-up",
+    "/forgot-password",
+    "/auth.confirm",
+    "/auth.error",
+    "/my-forms",
+    "/",
+  ]);
+
+  if (!allowlist.has(pathname)) {
+    try {
+      await enforceOnboardingGuard(request, { allowMyForms: false });
+    } catch (err) {
+      throw err;
+    }
+  }
+
   const { client } = getServerClient(request);
   const { data } = await client.auth.getUser();
 

@@ -408,6 +408,21 @@ create policy form_assignment_assignee_read
   for select
   using (user_id = auth.uid());
 
+create policy form_assignment_self_insert
+  on public.form_assignment
+  for insert
+  with check (
+    user_id = auth.uid()
+    and exists (
+      select 1 from public.form f
+      where f.id = form_assignment.form_id
+        and (auth.jwt()->>'user_role')::app_role = any (f.auto_assign)
+    )
+  );
+
+grant execute on function public.sync_auto_assigned_forms_for_user(uuid) to authenticated;
+grant execute on function public.sync_auto_assigned_forms_for_form(uuid) to authenticated;
+
 create policy form_submission_assignee_insert
   on public.form_submission
   for insert
@@ -472,6 +487,8 @@ grant all on table public.form_answer to authenticated;
 
 grant usage on type form_question_type to authenticated, supabase_auth_admin;
 grant usage on type form_assignment_status to authenticated, supabase_auth_admin;
+grant execute on function public.sync_auto_assigned_forms_for_user(uuid) to authenticated;
+grant execute on function public.sync_auto_assigned_forms_for_form(uuid) to authenticated;
 
 grant execute on function public.custom_access_token_hook(jsonb) to supabase_auth_admin;
 revoke execute on function public.custom_access_token_hook(jsonb) from authenticated, anon, public;
