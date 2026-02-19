@@ -38,279 +38,51 @@ export async function loader({ request }: Route.LoaderArgs) {
   const auth = await enforceOnboardingGuard(request, { allowMyForms: true });
   const { supabase, headers } = createClient(request);
 
-  console.log(
-    "[my-forms] user",
-    auth.user.id,
-    "role",
-    auth.claims.role,
-    "supabase url",
-    process.env.VITE_SUPABASE_URL,
-  );
-
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) {
-    console.error("[my-forms] session error", sessionError);
-  } else {
-    console.log("[my-forms] session user", sessionData.session?.user?.id, "has token", Boolean(sessionData.session?.access_token));
-  }
-
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError) {
-    console.error("[my-forms] getUser error", userError);
-  } else {
-    console.log("[my-forms] getUser id", userData.user?.id);
-  }
-
-  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
-  if (claimsError) {
-    console.error("[my-forms] claims error", claimsError);
-  } else {
-    console.log("[my-forms] claims", claimsData.claims);
-  }
-
-  const { count: formCount, error: formCountError } = await supabase
-    .from("form")
-    .select("id", { count: "exact", head: true });
-  if (formCountError) {
-    console.error("[my-forms] form count error", formCountError);
-  } else {
-    console.log("[my-forms] form count (RLS filtered)", formCount);
-  }
-
-  const { data: sampleAssignments, error: sampleAssignmentsError } = await supabase
+  const { data: assignmentsData } = await supabase
     .from("form_assignment")
-    .select("id, form_id, user_id, status")
-    .limit(5);
-  if (sampleAssignmentsError) {
-    console.error("[my-forms] sample assignment error", sampleAssignmentsError);
-  } else {
-    console.log("[my-forms] sample assignments (no filter)", sampleAssignments);
-  }
-
-  const { data: sampleForms, error: sampleFormsError } = await supabase
-    .from("form")
-    .select("id, name, is_required, due_at")
-    .limit(5);
-  if (sampleFormsError) {
-    console.error("[my-forms] sample forms error", sampleFormsError);
-  } else {
-    console.log("[my-forms] sample forms", sampleForms);
-  }
-
-  const { data: rawAssignments, error: rawAssignmentError } = await supabase
-    .from("form_assignment")
-    .select("id, form_id, user_id, status, due_at, assigned_at")
-    .eq("user_id", auth.user.id);
-  if (rawAssignmentError) {
-    console.error("[my-forms] raw assignment error", rawAssignmentError);
-  } else {
-    console.log("[my-forms] raw assignments count", rawAssignments?.length ?? 0);
-  }
-
-  const { data: assignments, error: assignmentError } = await supabase
-    .from("form_assignment")
-    .select("id, status, due_at, form_id, user_id")
+    .select("id, status, due_at, form:form_id ( id, name, is_required, due_at )")
     .eq("user_id", auth.user.id)
     .order("assigned_at", { ascending: true });
-  if (assignmentError) {
-    console.error("[my-forms] assignment error", assignmentError);
-  }
-  const assignmentList = assignmentError ? [] : assignments ?? [];
 
-  const formIds = assignmentList.map((a: any) => a.form_id).filter(Boolean) as string[];
-  console.log("[my-forms] assignment rows", assignmentList);
-  console.log("[my-forms] supabase user id", auth.user.id);
-  console.log("[my-forms] form ids for lookup", formIds);
-  if (formIds.length > 0) {
-    const { data: canRead, error: canReadError } = await supabase.rpc("assignee_can_read_form", {
-      p_form_id: formIds[0],
-    });
-    if (canReadError) {
-      console.error("[my-forms] assignee_can_read_form error", canReadError);
-    } else {
-      console.log("[my-forms] assignee_can_read_form", canRead);
-    }
-  }
-  let formsById: Record<string, { id: string; name: string; is_required: boolean; due_at: string | null }> = {};
-  if (formIds.length > 0) {
-    const { data: formRows, error: formError } = await supabase
-      .from("form")
-      .select("id, name, is_required, due_at")
-    if (formError) {
-      console.error("[my-forms] form fetch error", formError);
-    } else {
-      formsById = Object.fromEntries(
-        (formRows ?? []).map((f) => [f.id, { id: f.id, name: f.name, is_required: f.is_required, due_at: f.due_at }]),
-      );
-      console.log("[my-forms] fetched forms", formsById);
-    }
+  const assignmentsRaw = assignmentsData ?? [];
 
-    const { data: firstForm, error: firstFormError } = await supabase
-      .from("form")
-      .select("id, name, is_required, due_at, created_at")
-      .eq("id", formIds[0])
-      .maybeSingle();
-    if (firstFormError) {
-      console.error("[my-forms] first form fetch error", firstFormError);
-    } else {
-      console.log("[my-forms] first form fetch", firstForm);
-    }
-  }
+  const { data: submissionsData } = await supabase
+    .from("form_submission")
+    .select("id, form_id, submitted_at")
+    .eq("user_id", auth.user.id);
+  const submissions = submissionsData ?? [];
 
-  console.log("[my-forms] initial assignments", assignmentList.length, assignmentList);
-  assignmentList.forEach((a: any) => {
-    if (a.user_id !== auth.user.id) {
-      console.error("[my-forms] assignment user mismatch", { assignmentUserId: a.user_id, authUserId: auth.user.id });
-    }
-  });
-
-  const normalizedAssignments: Assignment[] = (assignments ?? []).map((a: any) => {
-    const formRaw = formsById[a.form_id as string];
-    if (!formRaw) {
-      console.error("[my-forms] missing form for assignment", {
-        assignmentId: a.id,
-        formId: a.form_id,
-        formFromJoin: a.form,
-        formsByIdKeys: Object.keys(formsById),
-      });
-    }
-    const form: Assignment["form"] = {
-      id: String(formRaw?.id ?? ""),
-      name: String(formRaw?.name ?? ""),
-      is_required: Boolean(formRaw?.is_required),
-      due_at: formRaw?.due_at ?? null,
-    };
+  const assignments: Assignment[] = assignmentsRaw.map((a: any) => {
+    const formRaw = a.form;
+    const submission = submissions.find((s) => s.form_id === formRaw?.id) ?? null;
     return {
       id: String(a.id),
       status: String(a.status),
       due_at: a.due_at ?? null,
-      form,
-      submission: null,
+      form: {
+        id: String(formRaw?.id ?? ""),
+        name: String(formRaw?.name ?? ""),
+        is_required: Boolean(formRaw?.is_required),
+        due_at: formRaw?.due_at ?? null,
+      },
+      submission: submission
+        ? {
+            id: String(submission.id),
+            form_id: String(submission.form_id),
+            submitted_at: String(submission.submitted_at ?? ""),
+          }
+        : null,
     };
-  });
-
-  const { data: submissions, error: submissionError } = await supabase
-    .from("form_submission")
-    .select("id, form_id, submitted_at")
-    .eq("user_id", auth.user.id);
-  if (submissionError) {
-    console.error("[my-forms] submission error", submissionError);
-  }
-  const submissionList = submissionError ? [] : submissions ?? [];
-
-  const assignmentsWithSubmission: Assignment[] = normalizedAssignments.map((a) => {
-    const submission = submissionList.find((s) => s.form_id === a.form.id) ?? null;
-    return { ...a, submission };
   });
 
   const responseHeaders = new Headers(headers);
   responseHeaders.set("Content-Type", "application/json");
-  let resultAssignments = assignmentsWithSubmission;
-  // If no assignments, attempt to sync and refetch once.
-  if (resultAssignments.length === 0) {
-    // Try RPC sync (security definer) first.
-    console.log("[my-forms] no assignments, attempting rpc sync");
-    await supabase.rpc("sync_auto_assigned_forms_for_user", { p_user_id: auth.user.id });
-    const retryFromRpc = await supabase
-      .from("form_assignment")
-      .select("id, status, due_at, form_id, form:form_id ( id, name, is_required, due_at )")
-      .eq("user_id", auth.user.id)
-      .order("assigned_at", { ascending: true });
-    if (retryFromRpc.error) {
-      console.error("[my-forms] rpc retry error", retryFromRpc.error);
-    }
-    if (!retryFromRpc.error && (retryFromRpc.data?.length ?? 0) > 0) {
-      resultAssignments = (retryFromRpc.data ?? []).map((a: any) => {
-        const formRaw = a.form;
-        const form: Assignment["form"] = {
-          id: String(formRaw?.id ?? ""),
-          name: String(formRaw?.name ?? ""),
-          is_required: Boolean(formRaw?.is_required),
-          due_at: formRaw?.due_at ?? null,
-        };
-        const submission = submissionList.find((s) => s.form_id === form.id) ?? null;
-        return { id: String(a.id), status: String(a.status), due_at: a.due_at ?? null, form, submission };
-      });
-    }
-
-    if (resultAssignments.length === 0) {
-      // Attempt to self-create assignments based on auto_assign.
-      const role = auth.claims.role ?? "unassigned";
-      console.log("[my-forms] auto-assign pass role", role);
-      const { data: autoForms } = await supabase
-        .from("form")
-        .select("id, name, is_required, due_at, auto_assign");
-      const eligible = (autoForms ?? []).filter((f: any) => (f.auto_assign ?? []).includes(role));
-      console.log("[my-forms] eligible auto-assign forms", eligible.length);
-      if (eligible.length > 0) {
-        await Promise.all(
-          eligible.map((f: any) => supabase.from("form_assignment").upsert({ form_id: f.id, user_id: auth.user.id })),
-        );
-        const retryAssignments = await supabase
-          .from("form_assignment")
-          .select("id, status, due_at, form_id, form:form_id ( id, name, is_required, due_at )")
-          .eq("user_id", auth.user.id)
-          .order("assigned_at", { ascending: true });
-        if (retryAssignments.error) {
-          console.error("[my-forms] auto-assign retry error", retryAssignments.error);
-        }
-        if (!retryAssignments.error) {
-          const normalizedRetry: Assignment[] = (retryAssignments.data ?? []).map((a: any) => {
-            const formRaw = a.form;
-            const form: Assignment["form"] = {
-              id: String(formRaw?.id ?? ""),
-              name: String(formRaw?.name ?? ""),
-              is_required: Boolean(formRaw?.is_required),
-              due_at: formRaw?.due_at ?? null,
-            };
-            const submission = submissionList.find((s) => s.form_id === form.id) ?? null;
-            return {
-              id: String(a.id),
-              status: String(a.status),
-              due_at: a.due_at ?? null,
-              form,
-              submission,
-            };
-          });
-          resultAssignments = normalizedRetry;
-        }
-      }
-
-      if (resultAssignments.length === 0) {
-        const { data: onboardingForm } = await supabase
-          .from("form")
-          .select("id, name, is_required, due_at")
-          .eq("name", "Onboarding Survey")
-          .maybeSingle();
-        console.log("[my-forms] onboarding fallback found", Boolean(onboardingForm?.id));
-        if (onboardingForm?.id) {
-          await supabase
-            .from("form_assignment")
-            .upsert({ form_id: onboardingForm.id, user_id: auth.user.id, status: "pending" });
-          resultAssignments = [
-            {
-              id: onboardingForm.id,
-              status: "pending",
-              due_at: onboardingForm.due_at ?? null,
-              form: {
-                id: onboardingForm.id,
-                name: onboardingForm.name,
-                is_required: onboardingForm.is_required,
-                due_at: onboardingForm.due_at ?? null,
-              },
-              submission: null,
-            },
-          ];
-        }
-      }
-    }
-  }
 
   const payload: LoaderData = {
-    assignments: resultAssignments,
+    assignments,
     claims: auth.claims as Claims,
   };
-  console.log("[my-forms] final assignments", resultAssignments.length);
+
   return new Response(JSON.stringify(payload), { headers: responseHeaders });
 }
 
@@ -360,7 +132,16 @@ export default function MyFormsPage() {
                         <td className="py-3 pr-4 align-middle text-muted-foreground">{due}</td>
                         <td className="py-3 pr-0 align-middle text-right">
                           <Button asChild variant={submitted ? "secondary" : "default"} size="sm">
-                            <Link to={`/my-forms/${assignment.form.id}`}>
+                            <Link
+                              to={`/my-forms/${assignment.form.id}`}
+                              onClick={() =>
+                                console.log("[my-forms] click", {
+                                  assignmentId: assignment.id,
+                                  formId: assignment.form.id,
+                                  submitted,
+                                })
+                              }
+                            >
                               {submitted ? "View" : "Fill Out"}
                             </Link>
                           </Button>

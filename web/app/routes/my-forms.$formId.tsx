@@ -45,109 +45,43 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw redirect("/my-forms");
   }
 
+  console.log("[my-forms detail] loader start", { formId, url: request.url });
+
   const auth = await enforceOnboardingGuard(request, { allowMyForms: true });
   const { supabase, headers } = createClient(request);
 
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) {
-    console.error("[my-forms detail] session error", sessionError);
-  } else {
-    console.log(
-      "[my-forms detail] session user",
-      sessionData.session?.user?.id,
-      "has token",
-      Boolean(sessionData.session?.access_token),
-    );
-  }
-
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError) {
-    console.error("[my-forms detail] getUser error", userError);
-  } else {
-    console.log("[my-forms detail] getUser id", userData.user?.id);
-  }
-
-  const { data: authUidProbe, error: authUidProbeError } = await supabase
-    .from("form_assignment")
-    .select("auth_uid:auth.uid()")
-    .limit(1);
-  if (authUidProbeError) {
-    console.error("[my-forms detail] auth.uid probe error", authUidProbeError);
-  } else {
-    console.log("[my-forms detail] auth.uid probe", authUidProbe);
-  }
-
-  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
-  if (claimsError) {
-    console.error("[my-forms detail] claims error", claimsError);
-  } else {
-    console.log("[my-forms detail] claims", claimsData.claims);
-  }
-
-  const { data: sampleAssignments, error: sampleAssignmentsError } = await supabase
-    .from("form_assignment")
-    .select("id, form_id, user_id, status")
-    .limit(3);
-  if (sampleAssignmentsError) {
-    console.error("[my-forms detail] sample assignment error", sampleAssignmentsError);
-  } else {
-    console.log("[my-forms detail] sample assignments (no filter)", sampleAssignments);
-  }
-
-  const { data: sampleForms, error: sampleFormsError } = await supabase
-    .from("form")
-    .select("id, name")
-    .limit(3);
-  if (sampleFormsError) {
-    console.error("[my-forms detail] sample forms error", sampleFormsError);
-  } else {
-    console.log("[my-forms detail] sample forms", sampleForms);
-  }
-
   const { data: assignmentRow, error: assignmentError } = await supabase
     .from("form_assignment")
-    .select("id, status, due_at, form_id, user_id")
+    .select("id, status, due_at, form_id, user_id, form:form_id ( id, name, is_required, due_at )")
     .eq("user_id", auth.user.id)
     .eq("form_id", formId)
     .maybeSingle();
 
   if (assignmentError || !assignmentRow) {
+    console.error("[my-forms detail] redirect: missing assignment", {
+      formId,
+      authUserId: auth.user.id,
+      assignmentError,
+      assignmentRow,
+    });
     throw redirect("/my-forms", { headers });
   }
 
-  console.log("[my-forms detail] auth user", auth.user.id);
-  console.log("[my-forms detail] assignment row", assignmentRow);
-  if (assignmentRow?.user_id && assignmentRow.user_id !== auth.user.id) {
-    console.error("[my-forms detail] assignment user mismatch", {
-      assignmentUserId: assignmentRow.user_id,
-      authUserId: auth.user.id,
-    });
-  }
+  console.log("[my-forms detail] assignment found", {
+    assignmentId: assignmentRow.id,
+    formId: assignmentRow.form_id,
+    authUserId: auth.user.id,
+  });
 
-  let formRaw = null as
-    | { id: string; name: string; is_required: boolean; due_at: string | null }
-    | null;
-  if (assignmentRow.form_id) {
-    const { data: fallbackForm, error: fallbackFormError } = await supabase
-      .from("form")
-      .select("id, name, is_required, due_at")
-      .eq("id", assignmentRow.form_id)
-      .maybeSingle();
-    if (fallbackFormError) {
-      console.error("[my-forms detail] fallback form error", fallbackFormError);
-    }
-    formRaw = fallbackForm ?? null;
-    console.log("[my-forms detail] fallback form", formRaw);
-  }
   const assignment: Assignment = {
     id: String(assignmentRow.id),
     status: String(assignmentRow.status),
     due_at: assignmentRow.due_at ?? null,
     form: {
-      id: String(formRaw?.id ?? ""),
-      name: String(formRaw?.name ?? ""),
-      is_required: Boolean(formRaw?.is_required),
-      due_at: formRaw?.due_at ?? null,
+      id: String(assignmentRow.form?.id ?? ""),
+      name: String(assignmentRow.form?.name ?? ""),
+      is_required: Boolean(assignmentRow.form?.is_required),
+      due_at: assignmentRow.form?.due_at ?? null,
     },
     submission: null,
   };
@@ -179,14 +113,18 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       options: Array.isArray(q.options) ? (q.options as string[]) : [],
     })),
   };
+  console.log(payload)
   return new Response(JSON.stringify(payload), { headers: responseHeaders });
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
+  console.log('enter forms action')
   const formId = params.formId;
   if (!formId) {
     throw redirect("/my-forms");
   }
+
+  console.log("[my-forms detail] action start", { formId, url: request.url });
 
   const auth = await enforceOnboardingGuard(request, { allowMyForms: true });
   const formData = await request.formData();
@@ -209,11 +147,22 @@ export async function action({ request, params }: Route.ActionArgs) {
     .maybeSingle();
 
   if (!assignment) {
+    console.error("[my-forms detail] action reject: not assigned", {
+      formId,
+      authUserId: auth.user.id,
+      intent,
+    });
     return new Response(JSON.stringify({ error: "Not assigned" }), {
       status: 403,
       headers: { "Content-Type": "application/json" },
     });
   }
+
+  console.log("[my-forms detail] action submit", {
+    formId,
+    authUserId: auth.user.id,
+    intent,
+  });
 
   const { data: questions, error: questionsError } = await supabase
     .from("form_question")
@@ -266,6 +215,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 export default function MyFormDetail() {
   const { assignment, questions } = useLoaderData<LoaderData>();
   const submitted = Boolean(assignment.submission);
+  console.log('form detail')
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-10">

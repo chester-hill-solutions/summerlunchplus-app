@@ -45,6 +45,15 @@ export async function enforceOnboardingGuard(request: Request, opts?: { allowMyF
   const shouldRedirectToForms = needsOnboarding || permissionBlocked;
 
   if (shouldRedirectToForms && !opts?.allowMyForms) {
+    console.warn("[auth] onboarding redirect", {
+      mode,
+      allowMyForms: Boolean(opts?.allowMyForms),
+      role: auth.claims.role,
+      permissions: auth.claims.permissions,
+      onboardingComplete: auth.claims.onboardingComplete,
+      permissionBlocked,
+      needsOnboarding,
+    });
     throw redirect("/my-forms", { headers: auth.headers });
   }
 
