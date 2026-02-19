@@ -4,6 +4,22 @@
 - Docker desktop
 - NodeJS
 
+## Onboarding, roles, and permissions
+- New users start as `unassigned` and are auto-assigned the required "Onboarding Survey" form. Completing all required forms auto-promotes them to `student` by default.
+- Permissions are defined via `app_permissions`/`role_permission` and included in JWT claims (`permissions`, `onboarding_complete`). Default permission `site.read` is granted to non-`unassigned` roles.
+- To switch to permission-only mode (no auto-promotion), set `ONBOARDING_MODE=permission` in `web/.env.local` and set the database parameter: `alter database postgres set app.onboarding_mode = 'permission';` (restart connections for it to take effect).
+
+## Local database workflow
+- Edit schema under `supabase/schemas/*.sql` (source of truth). Generate a migration: `supabase db diff -f onboarding-forms`.
+- Apply migrations locally: `supabase migration up`.
+- Apply seeds (including onboarding form/questions/assignments): `supabase db reset` (drops and rebuilds local DB, reapplies migrations and seeds).
+- Regenerate types after schema changes: `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
+
+## Tests
+- Playwright API tests: `cd web && npx playwright test web/tests/api`.
+- Playwright E2E tests: `cd web && npx playwright test web/tests/e2e`.
+- Required envs for tests: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and optional `ONBOARDING_MODE` (default `role`).
+
 Open docker desktop
 
 ```bash

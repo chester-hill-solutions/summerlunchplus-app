@@ -11,6 +11,10 @@ create type app_role as enum (
   'parent'
 );
 
+create type app_permissions as enum (
+  'site.read'
+);
+
 create table if not exists public.user_roles (
   user_id uuid primary key references auth.users on delete cascade,
   role app_role not null default 'unassigned',
@@ -18,14 +22,27 @@ create table if not exists public.user_roles (
   created_at timestamptz not null default now()
 );
 
+create table public.role_permission (
+  role app_role not null,
+  permission app_permissions not null,
+  primary key (role, permission)
+);
+
 alter table public.user_roles enable row level security;
+alter table public.role_permission enable row level security;
 
 -- Admins/managers manage roles.
 create policy user_roles_write_admin
   on public.user_roles
   for all
-  using (auth.jwt()->>'role' in ('admin','manager'))
-  with check (auth.jwt()->>'role' in ('admin','manager'));
+  using (auth.jwt()->>'user_role' in ('admin','manager'))
+  with check (auth.jwt()->>'user_role' in ('admin','manager'));
+
+create policy role_permission_admin_manage
+  on public.role_permission
+  for all
+  using (auth.jwt()->>'user_role' in ('admin','manager'))
+  with check (auth.jwt()->>'user_role' in ('admin','manager'));
 
 -- Users can read their own role.
 create policy user_roles_read_self
@@ -40,43 +57,26 @@ create policy user_roles_read_auth_admin
   to supabase_auth_admin
   using (true);
 
--- Helper function used by auth access token hook (doc style).
-create or replace function public.custom_access_token_hook(event jsonb)
-returns jsonb
-language plpgsql
-stable
-security definer
-set search_path = public
-as $$
-  declare
-    claims jsonb;
-    user_role app_role;
-  begin
-    select role into user_role from public.user_roles where user_id = (event->>'user_id')::uuid;
-    claims := coalesce(event->'claims', '{}'::jsonb);
-    claims := jsonb_set(
-      claims,
-      '{user_role}',
-      to_jsonb(coalesce(user_role, 'unassigned'::app_role))
-    );
-    event := jsonb_set(event, '{claims}', claims);
-    return event;
-  end;
-$$;
+create policy role_permission_read_auth_admin
+  on public.role_permission
+  for select
+  to supabase_auth_admin
+  using (true);
 
--- Hook registration is handled via config (see supabase/config.toml [auth.hook.custom_access_token]).
-
--- Grants per docs: auth admin executes hook and reads table; others revoked.
+-- Grants per docs: auth admin reads tables; others revoked.
 grant usage on schema public to supabase_auth_admin;
-grant execute on function public.custom_access_token_hook(jsonb) to supabase_auth_admin;
-revoke execute on function public.custom_access_token_hook(jsonb) from authenticated, anon, public;
 
 grant all on table public.user_roles to supabase_auth_admin;
 revoke all on table public.user_roles from authenticated, anon, public;
 
+grant all on table public.role_permission to supabase_auth_admin;
+revoke all on table public.role_permission from authenticated, anon, public;
+
 -- Grants for application users (RLS still applies).
 grant all on table public.user_roles to authenticated;
 grant usage on type app_role to authenticated, supabase_auth_admin;
+grant all on table public.role_permission to authenticated;
+grant usage on type app_permissions to authenticated, supabase_auth_admin;
 
 -- Auto-provision a user role on signup.
 create or replace function public.handle_new_user_role()

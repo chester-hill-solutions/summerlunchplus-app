@@ -23,6 +23,7 @@ Repo Map (quick look)
 Environment and Secrets
 - Copy `web/.env.template` to `web/.env.local` before running anything.
 - Required envs: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_*`. Frontend uses VITE vars; `app/server.ts` uses non-VITE vars.
+- Onboarding env: `ONBOARDING_MODE` (`role` default; `permission` disables auto-promotion and relies on permissions/onboarding_complete claims).
 - Local Supabase: from repo root run `supabase start --debug`, then `supabase status -o json` to reprint creds.
 - Never commit `.env.local` or real keys; `.gitignore` already excludes them.
 
@@ -33,7 +34,8 @@ Commands (run inside `web/`)
 - Build: `npm run build` (outputs to `web/build/client` and `web/build/server`).
 - Serve built app: `npm run start` (uses `react-router-serve ./build/server/index.js`).
 - Lint: none configured; rely on TypeScript errors and file-local patterns.
-- Tests: none configured (no Jest/Vitest). Single-test execution not available; if you add a runner, document `npm test -- --runInBand path/to/file.test.ts`.
+- Tests: Playwright lives in `web/tests` (api + e2e). Run `cd web && npx playwright test`; set `SUPABASE_SERVICE_ROLE_KEY` for API cleanup.
+- Supabase schema workflow: edit `supabase/schemas/*.sql`, then `supabase db diff -f <change-name>` and `supabase migration up` locally; regenerate types with `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
 
 Routing and Data
 - File-based routes under `app/routes`; use hyphenated names and `.tsx` suffix (`forgot-password.tsx`). Index routes use `index.tsx`.
@@ -140,6 +142,7 @@ Docs and PRs
 - Update this file when adding commands or conventions agents should know.
 - In PR descriptions, call out auth flow changes and any new env vars.
 - If you add a test runner, include single-test invocation and example filenames.
+- When `supabase/config.toml` changes, open a GitHub issue via `gh` to mirror the change in the remote database.
 
 Agent Checklist Before PRs
 - `cd web && npm run typecheck`.
