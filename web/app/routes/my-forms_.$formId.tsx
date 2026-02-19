@@ -1,6 +1,6 @@
-import { Form, Link, redirect, useLoaderData } from "react-router";
+import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
 
-import type { Route } from "./+types/my-forms.$formId";
+import type { Route } from "./+types/my-forms_.$formId";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,10 @@ type Question = {
 type LoaderData = {
   assignment: Assignment;
   questions: Question[];
+};
+
+type ActionData = {
+  error?: string;
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -118,7 +122,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  console.log('enter forms action')
+  console.log('entering /home/[formID] action')
   const formId = params.formId;
   if (!formId) {
     throw redirect("/my-forms");
@@ -190,9 +194,13 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   const answers = (questions ?? []).map((q) => {
-    const value = formData.get(`q-${q.id}`);
-    const raw = typeof value === "string" ? value.trim() : "";
-    const payload = q.kind === "single_choice" ? { value: raw } : { text: raw };
+    const key = `q-${q.id}`;
+    const rawValue =
+      q.kind === "multi_choice"
+        ? formData.getAll(key).map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean).join(", ")
+        : formData.get(key);
+    const normalized = typeof rawValue === "string" ? rawValue.trim() : "";
+    const payload = q.kind === "single_choice" ? { value: normalized } : { text: normalized };
     return { submission_id: submissionRows.id, question_id: q.id, value: payload };
   });
 
@@ -214,8 +222,11 @@ export async function action({ request, params }: Route.ActionArgs) {
 
 export default function MyFormDetail() {
   const { assignment, questions } = useLoaderData<LoaderData>();
+  const actionData = useActionData<ActionData>();
+  const navigation = useNavigation();
   const submitted = Boolean(assignment.submission);
-  console.log('form detail')
+  const isSubmitting =
+    navigation.state === "submitting" && navigation.formAction?.includes(assignment.form.id);
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-10">
@@ -228,6 +239,9 @@ export default function MyFormDetail() {
               ? `Due ${new Date(assignment.form.due_at).toLocaleDateString()}`
               : "No due date"}
           </p>
+          <p className="text-sm font-medium text-foreground">
+            Status: {submitted ? "Submitted" : "Not submitted"}
+          </p>
         </div>
         <Button asChild variant="ghost" size="sm">
           <Link to="/my-forms">Back to list</Link>
@@ -236,47 +250,100 @@ export default function MyFormDetail() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{submitted ? "Submitted" : "Fill out form"}</CardTitle>
+          <CardTitle>{submitted ? "Update your answers" : "Fill out form"}</CardTitle>
           <CardDescription>
             {submitted
-              ? "You have already submitted this form. You can resubmit to update your answers."
+              ? "You already submitted this form. You can resubmit to update your responses."
               : "Provide your responses and submit when ready."}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Form method="post" className="space-y-4">
+          <Form method="post" className="space-y-6">
             <input type="hidden" name="intent" value="submit_form" />
+
+            {actionData?.error ? (
+              <p className="text-sm text-destructive">{actionData.error}</p>
+            ) : null}
+
             {questions.length === 0 ? (
               <p className="text-muted-foreground text-sm">This form has no questions yet.</p>
             ) : (
-              questions.map((q) => (
-                <div key={q.id} className="space-y-2">
-                  <Label htmlFor={`q-${q.id}`}>{q.prompt}</Label>
-                  {q.kind === "single_choice" ? (
-                    <select
-                      id={`q-${q.id}`}
-                      name={`q-${q.id}`}
-                      className="h-10 w-full rounded-md border px-3 text-sm shadow-sm"
-                      required
-                      defaultValue=""
-                    >
-                      <option value="" disabled>
-                        Select an option
-                      </option>
-                      {(q.options ?? []).map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <Input id={`q-${q.id}`} name={`q-${q.id}`} required />
-                  )}
-                </div>
-              ))
+              <div className="space-y-5">
+                {questions.map((q) => {
+                  const inputId = `q-${q.id}`;
+                  if (q.kind === "single_choice") {
+                    return (
+                      <div key={q.id} className="space-y-2">
+                        <Label htmlFor={inputId}>{q.prompt}</Label>
+                        <select
+                          id={inputId}
+                          name={inputId}
+                          className="h-10 w-full rounded-md border px-3 text-sm shadow-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                          required
+                          defaultValue=""
+                          aria-required
+                        >
+                          <option value="" disabled>
+                            Select an option
+                          </option>
+                          {(q.options ?? []).map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  }
+
+                  if (q.kind === "multi_choice") {
+                    return (
+                      <div key={q.id} className="space-y-2">
+                        <Label>{q.prompt}</Label>
+                        <div className="space-y-2 rounded-md border p-3">
+                          {(q.options ?? []).map((opt) => {
+                            const checkboxId = `${inputId}-${opt}`;
+                            return (
+                              <label key={opt} className="flex items-center gap-2 text-sm">
+                                <input
+                                  id={checkboxId}
+                                  name={inputId}
+                                  type="checkbox"
+                                  value={opt}
+                                  className="h-4 w-4 rounded border"
+                                />
+                                <span>{opt}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (q.kind === "date") {
+                    return (
+                      <div key={q.id} className="space-y-2">
+                        <Label htmlFor={inputId}>{q.prompt}</Label>
+                        <Input id={inputId} name={inputId} type="date" required />
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={q.id} className="space-y-2">
+                      <Label htmlFor={inputId}>{q.prompt}</Label>
+                      <Input id={inputId} name={inputId} required />
+                    </div>
+                  );
+                })}
+              </div>
             )}
+
             <div className="flex justify-end">
-              <Button type="submit">{submitted ? "Resubmit" : "Submit"}</Button>
+              <Button type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>
+                {isSubmitting ? "Submitting..." : submitted ? "Resubmit" : "Submit"}
+              </Button>
             </div>
           </Form>
         </CardContent>

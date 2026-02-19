@@ -2,7 +2,7 @@ import { Link, useLoaderData } from "react-router";
 
 import type { Route } from "./+types/my-forms";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { enforceOnboardingGuard } from "@/lib/auth.server";
 import { createClient } from "@/lib/supabase/server";
 
@@ -100,61 +100,58 @@ export default function MyFormsPage() {
         </p>
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3">
-          <div>
-            <CardTitle>Assigned forms</CardTitle>
-            <CardDescription>Forms currently assigned to you.</CardDescription>
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-lg font-semibold">Assigned forms</h2>
+          <p className="text-muted-foreground text-sm">Forms currently assigned to you.</p>
+        </div>
+
+        {assignments.length === 0 ? (
+          <p className="text-muted-foreground text-sm">No forms assigned.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-1/2">Title</TableHead>
+                  <TableHead>Due date</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {assignments.map((assignment) => {
+                  const submitted = Boolean(assignment.submission);
+                  const due = assignment.form.due_at
+                    ? new Date(assignment.form.due_at).toLocaleDateString()
+                    : "No due date";
+                  return (
+                    <TableRow key={assignment.id}>
+                      <TableCell className="pr-4 font-medium">{assignment.form.name}</TableCell>
+                      <TableCell className="text-muted-foreground">{due}</TableCell>
+                      <TableCell className="text-right">
+                        <Button asChild variant={submitted ? "secondary" : "default"} size="sm">
+                          <Link
+                            to={`/my-forms/${assignment.form.id}`}
+                            onClick={() =>
+                              console.log("[my-forms] click", {
+                                assignmentId: assignment.id,
+                                formId: assignment.form.id,
+                                submitted,
+                              })
+                            }
+                          >
+                            {submitted ? "View" : "Fill Out"}
+                          </Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
-        </CardHeader>
-        <CardContent>
-          {assignments.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No forms assigned.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="border-b text-left text-muted-foreground">
-                  <tr>
-                    <th className="py-2 pr-4 font-medium">Title</th>
-                    <th className="py-2 pr-4 font-medium">Due date</th>
-                    <th className="py-2 pr-4 font-medium text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {assignments.map((assignment) => {
-                    const submitted = Boolean(assignment.submission);
-                    const due = assignment.form.due_at
-                      ? new Date(assignment.form.due_at).toLocaleDateString()
-                      : "No due date";
-                    return (
-                      <tr key={assignment.id} className="border-b last:border-b-0">
-                        <td className="py-3 pr-4 align-middle">{assignment.form.name}</td>
-                        <td className="py-3 pr-4 align-middle text-muted-foreground">{due}</td>
-                        <td className="py-3 pr-0 align-middle text-right">
-                          <Button asChild variant={submitted ? "secondary" : "default"} size="sm">
-                            <Link
-                              to={`/my-forms/${assignment.form.id}`}
-                              onClick={() =>
-                                console.log("[my-forms] click", {
-                                  assignmentId: assignment.id,
-                                  formId: assignment.form.id,
-                                  submitted,
-                                })
-                              }
-                            >
-                              {submitted ? "View" : "Fill Out"}
-                            </Link>
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        )}
+      </section>
     </main>
   );
 }
