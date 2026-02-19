@@ -1,0 +1,58 @@
+name: E2E Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+
+      - name: Start Supabase
+        run: supabase start --debug
+
+      - name: Capture Supabase status
+        run: supabase status -o json > supabase_status.json
+
+      - name: Write env for app
+        run: |
+          SUPABASE_URL=$(jq -r '.services.api.url' supabase_status.json)
+          SUPABASE_ANON_KEY=$(jq -r '.services.api.anon_key' supabase_status.json)
+          SUPABASE_SERVICE_ROLE_KEY=$(jq -r '.services.api.service_role_key' supabase_status.json)
+          printf "VITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\nSUPABASE_URL=%s\nSUPABASE_ANON_KEY=%s\nSUPABASE_SERVICE_ROLE_KEY=%s\n" \
+            "$SUPABASE_URL" "$SUPABASE_ANON_KEY" "$SUPABASE_URL" "$SUPABASE_ANON_KEY" "$SUPABASE_SERVICE_ROLE_KEY" \
+            > web/.env.local
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: web
+        run: npx playwright install --with-deps
+
+      - name: Run E2E tests
+        working-directory: web
+        run: npx playwright test tests/e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-e2e
+          path: web/playwright-report
+          if-no-files-found: ignore

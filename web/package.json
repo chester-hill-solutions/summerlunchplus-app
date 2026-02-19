@@ -6,7 +6,10 @@
     "build": "react-router build",
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
-    "typecheck": "react-router typegen && tsc"
+    "typecheck": "react-router typegen && tsc",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:stack": "supabase stop --no-backup && supabase start --debug && npm run test:e2e"
   },
   "dependencies": {
     "@react-router/fs-routes": "^7.13.0",
@@ -28,6 +31,8 @@
   "devDependencies": {
     "@react-router/dev": "^7.13.0",
     "@tailwindcss/vite": "^4.1.13",
+    "@playwright/test": "^1.48.2",
+    "dotenv": "^16.4.5",
     "@types/node": "^22",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

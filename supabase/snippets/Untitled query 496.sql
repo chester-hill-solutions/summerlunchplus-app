@@ -1,1 +1,1 @@
-select user_id, role from public.user_roles where user_id = auth.uid();
+select auth.register_access_token_hook('custom_access_token_hook');

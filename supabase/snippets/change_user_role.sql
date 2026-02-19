@@ -6,7 +6,7 @@
 
 -- Set role (upsert):
 insert into public.user_roles (user_id, role, assigned_by)
-values ('bb2e6524-c5e9-4875-8d21-d834c00ecfb6', 'admin', 'bb2e6524-c5e9-4875-8d21-d834c00ecfb6')
+values ('49530db5-fb3c-4614-b027-a67d72d44952', 'admin', '49530db5-fb3c-4614-b027-a67d72d44952')
 on conflict (user_id) do update
   set role = excluded.role,
       assigned_by = excluded.assigned_by,

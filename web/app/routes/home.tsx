@@ -13,15 +13,32 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase, headers } = createClient(request);
-  const { data } = await supabase.auth.getUser();
+  const { data } = await supabase.auth.getSession();
 
-  if (!data.user) {
+  const session = data.session;
+
+  if (!session?.user) {
     throw redirect("/login", { headers });
   }
 
-  const role = (data.user.app_metadata as { user_role?: string } | null)?.user_role ?? null;
+  const appMetadataRole = (session.user.app_metadata as { user_role?: string } | null)?.user_role ?? null;
 
-  return { user: data.user, role };
+  const tokenRole = (() => {
+    const token = session.access_token;
+    if (!token) return null;
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    try {
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+      return typeof payload.user_role === "string" ? payload.user_role : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const role = tokenRole ?? appMetadataRole;
+
+  return { user: session.user, role };
 }
 
 export default function Home() {
