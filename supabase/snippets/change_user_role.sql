@@ -1,12 +1,18 @@
 -- Update or set a user's app role. Run with service_role or as an admin/manager.
 -- Replace placeholders before executing.
 
--- Look up auth user id by email (optional helper):
--- select id, email from auth.users where email = 'user@example.com';
-
--- Set role (upsert):
+-- Look up auth user id by email, then upsert the role using that id.
+with target_user as (
+  select id
+  from auth.users
+  where email = 'sai@chsolutions.ca'
+)
 insert into public.user_roles (user_id, role, assigned_by)
-values ('49530db5-fb3c-4614-b027-a67d72d44952', 'admin', '49530db5-fb3c-4614-b027-a67d72d44952')
+select
+  tu.id,
+  'admin',
+  tu.id
+from target_user tu
 on conflict (user_id) do update
   set role = excluded.role,
       assigned_by = excluded.assigned_by,
