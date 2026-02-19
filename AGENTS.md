@@ -115,6 +115,7 @@ Security
 - Sanitize and validate form input server-side; keep error messages generic.
 - Prefer `redirect` for auth enforcement instead of client navigation.
 - When adding tables/features, define `app_permissions` for their CRUD/actions and map them in `role_permission`; use the `authorize(<permission>)` helper for role-based RLS, keeping `auth.uid()` only where per-user ownership is required.
+- In PL/pgSQL, avoid local variable names that shadow built-in settings (e.g., `current_role`); use explicit names like `user_role_current` to prevent subtle promotion/auth bugs.
 
 Observability
 - Logging is minimal; add targeted `console.error` while debugging, but remove noisy logs before commit.
