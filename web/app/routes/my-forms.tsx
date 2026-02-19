@@ -1,4 +1,4 @@
-import { Link, useLoaderData } from "react-router";
+import { Link, redirect, useFetcher, useLoaderData } from "react-router";
 
 import type { Route } from "./+types/my-forms";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,10 @@ type Claims = {
 type LoaderData = {
   assignments: Assignment[];
   claims: Claims;
+  hasIncompleteRequired: boolean;
 };
+
+type ActionData = { error?: string };
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await enforceOnboardingGuard(request, { allowMyForms: true });
@@ -75,19 +78,89 @@ export async function loader({ request }: Route.LoaderArgs) {
     };
   });
 
+  const hasIncompleteRequired = assignments.some((a) => a.form.is_required && !a.submission);
+
   const responseHeaders = new Headers(headers);
   responseHeaders.set("Content-Type", "application/json");
 
   const payload: LoaderData = {
     assignments,
     claims: auth.claims as Claims,
+    hasIncompleteRequired,
   };
 
   return new Response(JSON.stringify(payload), { headers: responseHeaders });
 }
 
+export async function action({ request }: Route.ActionArgs) {
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+  if (intent !== "promote") {
+    return new Response(JSON.stringify({ error: "Unknown intent" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const { supabase, headers } = createClient(request);
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData?.user) {
+    return new Response(JSON.stringify({ error: "Not authenticated" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const userId = userData.user.id;
+
+  console.log("[my-forms promote] start", { userId });
+
+  const { data: hasCompleted, error: requiredError } = await supabase.rpc(
+    "has_completed_required_forms",
+    { p_user_id: userId }
+  );
+
+  console.log("[my-forms promote] has_completed_required_forms", {
+    hasCompleted,
+    requiredError,
+  });
+
+  if (requiredError) {
+    console.log("[my-forms promote] completion check failed", { requiredError });
+    return new Response(JSON.stringify({ error: "Failed to check completion" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (hasCompleted) {
+    console.log("[my-forms promote] refreshing session only (promotion handled by DB triggers)", {
+      userId,
+    });
+
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+    console.log("[my-forms promote] refreshSession", {
+      hasSession: Boolean(refreshed?.session),
+      refreshError,
+    });
+
+    throw redirect("/", { headers });
+  }
+
+  console.log("[my-forms promote] incomplete required forms", {
+    userId,
+    hasCompleted,
+    message: "Please finish all required forms first.",
+  });
+  return new Response(JSON.stringify({ error: "Please finish all required forms first." }), {
+    status: 400,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export default function MyFormsPage() {
-  const { assignments, claims } = useLoaderData<LoaderData>();
+  const { assignments, claims, hasIncompleteRequired } = useLoaderData<LoaderData>();
+  const fetcher = useFetcher<ActionData>();
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-10">
@@ -96,8 +169,19 @@ export default function MyFormsPage() {
           Your forms
         </h1>
         <p className="text-muted-foreground text-sm">
-          Complete required forms to gain full site access. Status: {claims.onboardingComplete ? "Complete" : "Pending"}
+          Complete required forms to gain full site access. Status: {hasIncompleteRequired ? "Pending" : "Complete"}
         </p>
+        {claims.role === "unassigned" ? (
+          <fetcher.Form method="post" className="flex items-center gap-3">
+            <input type="hidden" name="intent" value="promote" />
+            <Button type="submit" variant="default">
+              Access Home Page
+            </Button>
+            {fetcher.data?.error ? (
+              <p className="text-sm text-destructive">{fetcher.data.error}</p>
+            ) : null}
+          </fetcher.Form>
+        ) : null}
       </div>
 
       <section className="flex flex-col gap-3">

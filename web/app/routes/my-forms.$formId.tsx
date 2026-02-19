@@ -1,4 +1,5 @@
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
+import { useEffect } from "react";
 
 import type { Route } from "./+types/my-forms.$formId";
 import { Button } from "@/components/ui/button";
@@ -217,6 +218,15 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
   }
 
+  // Attempt to refresh the session so updated claims (e.g., role) are available on next requests.
+  console.log('[my-forms detail] refreshSession:start');
+  const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+  console.log('[my-forms detail] refreshSession:result', {
+    hasSession: Boolean(refreshed?.session),
+    data: refreshed,
+    refreshError,
+  });
+
   throw redirect("/my-forms", { headers });
 }
 
@@ -227,6 +237,22 @@ export default function MyFormDetail() {
   const submitted = Boolean(assignment.submission);
   const isSubmitting =
     navigation.state === "submitting" && navigation.formAction?.includes(assignment.form.id);
+
+  // Client-side session refresh after a successful submit/resubmit so JWT claims update.
+  useEffect(() => {
+    const didSubmitSuccessfully = navigation.state === "idle" && !actionData?.error && submitted;
+    if (!didSubmitSuccessfully) return;
+
+    import("@/lib/supabase/client").then(async ({ createClient }) => {
+      const supabaseClient = createClient();
+      const { data, error } = await supabaseClient.auth.refreshSession();
+      console.log("[my-forms detail] client refreshSession", {
+        hasSession: Boolean(data?.session),
+        data: data,
+        error,
+      });
+    });
+  }, [actionData?.error, navigation.state, submitted]);
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-10">

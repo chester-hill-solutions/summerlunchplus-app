@@ -191,42 +191,60 @@ security definer
 set search_path = public
 as $$
 begin
+  raise log '[mark_assignment_submitted] enter form % user %', new.form_id, new.user_id;
   update public.form_assignment
   set status = 'submitted'
   where form_id = new.form_id
     and user_id = new.user_id;
+  raise log '[mark_assignment_submitted] updated assignment to submitted';
   return new;
 end;
 $$;
 
 drop trigger if exists on_form_submission_mark_assignment on public.form_submission;
 create trigger on_form_submission_mark_assignment
-after insert on public.form_submission
+after insert or update on public.form_submission
 for each row execute function public.mark_assignment_submitted();
 
 -- Onboarding completion helper used by role/permission claims and auto-promotion.
 create or replace function public.has_completed_required_forms(p_user_id uuid)
 returns boolean
-language sql
+language plpgsql
 security definer
 set search_path = public
 as $$
-  with required_assignments as (
-    select fa.form_id
+declare
+  required_count int := 0;
+  incomplete_count int := 0;
+  result boolean := false;
+begin
+  select count(*)
+    into required_count
+    from public.form_assignment fa
+    join public.form f on f.id = fa.form_id
+    where fa.user_id = p_user_id
+      and f.is_required = true;
+
+  if required_count = 0 then
+    result := false;
+    raise log '[has_completed_required_forms] no required assignments for user %', p_user_id;
+    return result;
+  end if;
+
+  select count(*)
+    into incomplete_count
     from public.form_assignment fa
     join public.form f on f.id = fa.form_id
     where fa.user_id = p_user_id
       and f.is_required = true
-  )
-  select case
-    when not exists (select 1 from required_assignments) then false
-    when exists (
-      select 1 from required_assignments ra
-      left join public.form_submission fs on fs.form_id = ra.form_id and fs.user_id = p_user_id
-      where fs.id is null
-    ) then false
-    else true
-  end;
+      and coalesce(fa.status, 'pending') is distinct from 'submitted';
+
+  result := (incomplete_count = 0);
+  raise log '[has_completed_required_forms] user % required_count %, incomplete_count %, result %',
+    p_user_id, required_count, incomplete_count, result;
+
+  return result;
+end;
 $$;
 
 create or replace function public.should_auto_promote_onboarding()
@@ -247,30 +265,48 @@ security definer
 set search_path = public
 as $$
 declare
-  current_role app_role;
+  user_role_current app_role;
+  has_completed boolean;
 begin
+  raise log '[promote_user_after_submission] enter user % form %', new.user_id, new.form_id;
+
   if not public.should_auto_promote_onboarding() then
+    raise log '[promote_user_after_submission] skip: onboarding_mode=permission for user %', new.user_id;
     return new;
   end if;
 
-  select role into current_role from public.user_roles where user_id = new.user_id;
-  if current_role is distinct from 'unassigned' then
+  -- Mark assignment submitted first so completion check sees latest status.
+  update public.form_assignment
+  set status = 'submitted'
+  where form_id = new.form_id
+    and user_id = new.user_id;
+
+  select coalesce(role, 'unassigned'::app_role)
+    into user_role_current
+    from public.user_roles
+    where user_id = new.user_id;
+
+  if user_role_current is distinct from 'unassigned' then
+    raise log '[promote_user_after_submission] skip: role is % for user %', user_role_current, new.user_id;
     return new;
   end if;
 
-  if public.has_completed_required_forms(new.user_id) then
+  select coalesce(public.has_completed_required_forms(new.user_id), false) into has_completed;
+  raise log '[promote_user_after_submission] eval user %, current_role %, has_completed %', new.user_id, user_role_current, has_completed;
+
+  if has_completed then
     update public.user_roles
     set role = 'student'
     where user_id = new.user_id;
+    raise log '[promote_user_after_submission] promoted user % to student', new.user_id;
   end if;
 
   return new;
 end;
 $$;
-
 drop trigger if exists on_form_submission_auto_promote on public.form_submission;
 create trigger on_form_submission_auto_promote
-after insert on public.form_submission
+after insert or update on public.form_submission
 for each row execute function public.promote_user_after_submission();
 
 -- Access token hook (adds user_role, permissions, onboarding_complete claims).
