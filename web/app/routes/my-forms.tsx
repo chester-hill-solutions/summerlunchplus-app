@@ -113,20 +113,12 @@ export async function action({ request }: Route.ActionArgs) {
 
   const userId = userData.user.id;
 
-  console.log("[my-forms promote] start", { userId });
-
   const { data: hasCompleted, error: requiredError } = await supabase.rpc(
     "has_completed_required_forms",
     { p_user_id: userId }
   );
 
-  console.log("[my-forms promote] has_completed_required_forms", {
-    hasCompleted,
-    requiredError,
-  });
-
   if (requiredError) {
-    console.log("[my-forms promote] completion check failed", { requiredError });
     return new Response(JSON.stringify({ error: "Failed to check completion" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
@@ -134,24 +126,11 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (hasCompleted) {
-    console.log("[my-forms promote] refreshing session only (promotion handled by DB triggers)", {
-      userId,
-    });
-
     const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
-    console.log("[my-forms promote] refreshSession", {
-      hasSession: Boolean(refreshed?.session),
-      refreshError,
-    });
 
     throw redirect("/", { headers });
   }
 
-  console.log("[my-forms promote] incomplete required forms", {
-    userId,
-    hasCompleted,
-    message: "Please finish all required forms first.",
-  });
   return new Response(JSON.stringify({ error: "Please finish all required forms first." }), {
     status: 400,
     headers: { "Content-Type": "application/json" },
@@ -216,13 +195,6 @@ export default function MyFormsPage() {
                         <Button asChild variant={submitted ? "secondary" : "default"} size="sm">
                           <Link
                             to={`/my-forms/${assignment.form.id}`}
-                            onClick={() =>
-                              console.log("[my-forms] click", {
-                                assignmentId: assignment.id,
-                                formId: assignment.form.id,
-                                submitted,
-                              })
-                            }
                           >
                             {submitted ? "View" : "Fill Out"}
                           </Link>

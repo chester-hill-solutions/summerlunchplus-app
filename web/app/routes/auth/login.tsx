@@ -43,8 +43,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   })
 
   if (error) {
-    console.log('/login error', error
-    )
     return {
       error: error instanceof Error ? error.message : 'An error occurred',
     }

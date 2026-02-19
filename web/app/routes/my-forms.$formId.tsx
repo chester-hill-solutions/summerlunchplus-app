@@ -50,8 +50,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw redirect("/my-forms");
   }
 
-  console.log("[my-forms detail] loader start", { formId, url: request.url });
-
   const auth = await enforceOnboardingGuard(request, { allowMyForms: true });
   const { supabase, headers } = createClient(request);
 
@@ -71,12 +69,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     });
     throw redirect("/my-forms", { headers });
   }
-
-  console.log("[my-forms detail] assignment found", {
-    assignmentId: assignmentRow.id,
-    formId: assignmentRow.form_id,
-    authUserId: auth.user.id,
-  });
 
   const assignment: Assignment = {
     id: String(assignmentRow.id),
@@ -118,18 +110,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       options: Array.isArray(q.options) ? (q.options as string[]) : [],
     })),
   };
-  console.log(payload)
   return new Response(JSON.stringify(payload), { headers: responseHeaders });
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  console.log('entering /home/[formID] action')
   const formId = params.formId;
   if (!formId) {
     throw redirect("/my-forms");
   }
-
-  console.log("[my-forms detail] action start", { formId, url: request.url });
 
   const auth = await enforceOnboardingGuard(request, { allowMyForms: true });
   const formData = await request.formData();
@@ -162,12 +150,6 @@ export async function action({ request, params }: Route.ActionArgs) {
       headers: { "Content-Type": "application/json" },
     });
   }
-
-  console.log("[my-forms detail] action submit", {
-    formId,
-    authUserId: auth.user.id,
-    intent,
-  });
 
   const { data: questions, error: questionsError } = await supabase
     .from("form_question")
@@ -218,14 +200,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
   }
 
-  // Attempt to refresh the session so updated claims (e.g., role) are available on next requests.
-  console.log('[my-forms detail] refreshSession:start');
   const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
-  console.log('[my-forms detail] refreshSession:result', {
-    hasSession: Boolean(refreshed?.session),
-    data: refreshed,
-    refreshError,
-  });
 
   throw redirect("/my-forms", { headers });
 }
@@ -245,12 +220,7 @@ export default function MyFormDetail() {
 
     import("@/lib/supabase/client").then(async ({ createClient }) => {
       const supabaseClient = createClient();
-      const { data, error } = await supabaseClient.auth.refreshSession();
-      console.log("[my-forms detail] client refreshSession", {
-        hasSession: Boolean(data?.session),
-        data: data,
-        error,
-      });
+      await supabaseClient.auth.refreshSession();
     });
   }, [actionData?.error, navigation.state, submitted]);
 
