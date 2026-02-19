@@ -114,6 +114,7 @@ Security
 - Never expose service-role keys to the browser. Only publishable/anon keys go in VITE_ vars.
 - Sanitize and validate form input server-side; keep error messages generic.
 - Prefer `redirect` for auth enforcement instead of client navigation.
+- When adding tables/features, define `app_permissions` for their CRUD/actions and map them in `role_permission`; use the `authorize(<permission>)` helper for role-based RLS, keeping `auth.uid()` only where per-user ownership is required.
 
 Observability
 - Logging is minimal; add targeted `console.error` while debugging, but remove noisy logs before commit.

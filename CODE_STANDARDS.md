@@ -7,6 +7,7 @@ SCHEMA & MIGRATIONS
 - Apply generated migrations locally with `supabase migration up` (also from repo root) to keep your local database aligned.
 - Do not hand-edit generated migration files unless correcting generation errors; fix the declarative SQL instead and regenerate.
 - Commit both the updated schema SQL and any generated migrations together so reviews see intent and applied changes.
+- When adding a new table or feature, also add granular `app_permissions` for its CRUD/actions (e.g., `resource.create/read/update/delete`) and map them in `role_permission`; update RLS to use the `authorize(<permission>)` helper for role-based checks and reserve `auth.uid()` for per-user ownership where required.
 
 TYPES
 - Database schema types live at `web/app/lib/database.types.ts`. Regenerate with `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts` from repo root when the schema changes.

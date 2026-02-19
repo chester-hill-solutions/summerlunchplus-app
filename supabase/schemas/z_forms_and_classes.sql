@@ -325,35 +325,110 @@ alter table public.form_submission enable row level security;
 alter table public.form_answer enable row level security;
 
 -- Admin/manager manage forms and related objects.
-create policy form_admin_manage
+create policy form_select_authorized
   on public.form
-  for all
-  using (auth.jwt()->>'user_role' in ('admin','manager'))
-  with check (auth.jwt()->>'user_role' in ('admin','manager'));
+  for select
+  using (public.authorize('form.read'));
 
-create policy form_question_admin_manage
+create policy form_insert_authorized
+  on public.form
+  for insert
+  with check (public.authorize('form.create'));
+
+create policy form_update_authorized
+  on public.form
+  for update
+  using (public.authorize('form.update'))
+  with check (public.authorize('form.update'));
+
+create policy form_delete_authorized
+  on public.form
+  for delete
+  using (public.authorize('form.delete'));
+
+create policy form_question_select_authorized
   on public.form_question
-  for all
-  using (auth.jwt()->>'user_role' in ('admin','manager'))
-  with check (auth.jwt()->>'user_role' in ('admin','manager'));
+  for select
+  using (public.authorize('form_question.read'));
 
-create policy form_assignment_admin_manage
+create policy form_question_insert_authorized
+  on public.form_question
+  for insert
+  with check (public.authorize('form_question.create'));
+
+create policy form_question_update_authorized
+  on public.form_question
+  for update
+  using (public.authorize('form_question.update'))
+  with check (public.authorize('form_question.update'));
+
+create policy form_question_delete_authorized
+  on public.form_question
+  for delete
+  using (public.authorize('form_question.delete'));
+
+create policy form_assignment_select_authorized
   on public.form_assignment
-  for all
-  using (auth.jwt()->>'user_role' in ('admin','manager'))
-  with check (auth.jwt()->>'user_role' in ('admin','manager'));
+  for select
+  using (public.authorize('form_assignment.read'));
 
-create policy form_submission_admin_manage
+create policy form_assignment_insert_authorized
+  on public.form_assignment
+  for insert
+  with check (public.authorize('form_assignment.create'));
+
+create policy form_assignment_update_authorized
+  on public.form_assignment
+  for update
+  using (public.authorize('form_assignment.update'))
+  with check (public.authorize('form_assignment.update'));
+
+create policy form_assignment_delete_authorized
+  on public.form_assignment
+  for delete
+  using (public.authorize('form_assignment.delete'));
+
+create policy form_submission_select_authorized
   on public.form_submission
-  for all
-  using (auth.jwt()->>'user_role' in ('admin','manager'))
-  with check (auth.jwt()->>'user_role' in ('admin','manager'));
+  for select
+  using (public.authorize('form_submission.read'));
 
-create policy form_answer_admin_manage
+create policy form_submission_insert_authorized
+  on public.form_submission
+  for insert
+  with check (public.authorize('form_submission.create'));
+
+create policy form_submission_update_authorized
+  on public.form_submission
+  for update
+  using (public.authorize('form_submission.update'))
+  with check (public.authorize('form_submission.update'));
+
+create policy form_submission_delete_authorized
+  on public.form_submission
+  for delete
+  using (public.authorize('form_submission.delete'));
+
+create policy form_answer_select_authorized
   on public.form_answer
-  for all
-  using (auth.jwt()->>'user_role' in ('admin','manager'))
-  with check (auth.jwt()->>'user_role' in ('admin','manager'));
+  for select
+  using (public.authorize('form_answer.read'));
+
+create policy form_answer_insert_authorized
+  on public.form_answer
+  for insert
+  with check (public.authorize('form_answer.create'));
+
+create policy form_answer_update_authorized
+  on public.form_answer
+  for update
+  using (public.authorize('form_answer.update'))
+  with check (public.authorize('form_answer.update'));
+
+create policy form_answer_delete_authorized
+  on public.form_answer
+  for delete
+  using (public.authorize('form_answer.delete'));
 
 -- Supabase auth hook read access.
 create policy form_read_auth_admin
@@ -428,7 +503,7 @@ create policy form_assignment_self_insert
     and exists (
       select 1 from public.form f
       where f.id = form_assignment.form_id
-        and (auth.jwt()->>'user_role')::app_role = any (f.auto_assign)
+        and public.current_user_role() = any (f.auto_assign)
     )
   );
 

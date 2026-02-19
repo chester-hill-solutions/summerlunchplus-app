@@ -12,7 +12,14 @@ create type app_role as enum (
 );
 
 create type app_permissions as enum (
-  'site.read'
+  'site.read',
+  'form.create', 'form.read', 'form.update', 'form.delete',
+  'form_question.create', 'form_question.read', 'form_question.update', 'form_question.delete',
+  'form_assignment.create', 'form_assignment.read', 'form_assignment.update', 'form_assignment.delete',
+  'form_submission.create', 'form_submission.read', 'form_submission.update', 'form_submission.delete',
+  'form_answer.create', 'form_answer.read', 'form_answer.update', 'form_answer.delete',
+  'user_roles.manage', 'role_permission.manage',
+  'profiles.read', 'profiles.update'
 );
 
 create table if not exists public.user_roles (
@@ -32,17 +39,56 @@ alter table public.user_roles enable row level security;
 alter table public.role_permission enable row level security;
 
 -- Admins/managers manage roles.
+create or replace function public.current_user_role()
+returns app_role
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select coalesce(
+    nullif((current_setting('request.jwt.claims', true)::jsonb ->> 'user_role'), '')::app_role,
+    'unassigned'::app_role
+  );
+$$;
+
+create or replace function public.authorize(requested_permission app_permissions)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  bind_permissions int;
+  user_role public.app_role;
+begin
+  select coalesce(
+    nullif((current_setting('request.jwt.claims', true)::jsonb ->> 'user_role'), '')::public.app_role,
+    'unassigned'::public.app_role
+  ) into user_role;
+
+  select count(*)
+    into bind_permissions
+    from public.role_permission
+    where role_permission.permission = requested_permission
+      and role_permission.role = user_role;
+
+  return bind_permissions > 0;
+end;
+$$;
+
 create policy user_roles_write_admin
   on public.user_roles
   for all
-  using (auth.jwt()->>'user_role' in ('admin','manager'))
-  with check (auth.jwt()->>'user_role' in ('admin','manager'));
+  using (public.authorize('user_roles.manage'))
+  with check (public.authorize('user_roles.manage'));
 
 create policy role_permission_admin_manage
   on public.role_permission
   for all
-  using (auth.jwt()->>'user_role' in ('admin','manager'))
-  with check (auth.jwt()->>'user_role' in ('admin','manager'));
+  using (public.authorize('role_permission.manage'))
+  with check (public.authorize('role_permission.manage'));
 
 -- Users can read their own role.
 create policy user_roles_read_self
@@ -77,6 +123,15 @@ grant all on table public.user_roles to authenticated;
 grant usage on type app_role to authenticated, supabase_auth_admin;
 grant all on table public.role_permission to authenticated;
 grant usage on type app_permissions to authenticated, supabase_auth_admin;
+grant execute on function public.current_user_role() to authenticated, supabase_auth_admin;
+grant execute on function public.authorize(app_permissions) to authenticated, supabase_auth_admin;
+
+insert into public.role_permission (role, permission)
+select r.role, p.permission
+from (values ('admin'::app_role), ('manager'::app_role)) as r(role)
+cross join (select unnest(enum_range(null::app_permissions)) as permission) p
+on conflict do nothing;
+grant execute on function public.current_user_role() to authenticated, supabase_auth_admin;
 
 -- Auto-provision a user role on signup.
 create or replace function public.handle_new_user_role()
