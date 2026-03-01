@@ -7,6 +7,7 @@ Workspace and Git Hygiene
 - Run commands from `web/` unless noted; `package-lock.json` means use `npm`.
 - Keep edits ASCII unless the file already uses Unicode. Add comments only for non-obvious logic.
 - Favor repo tools (Read/Glob/Grep) over ad-hoc shell exploration. Preserve existing formatting; avoid mass rewraps.
+- Treat `supabase/migrations/` as generated output; make schema updates inside `supabase/schemas/` and seed data under `supabase/seeds/`. Do not edit files under `supabase/migrations/` manually.
 
 Project Shape
 - Stack: React Router v7 (SSR on), TypeScript strict, Vite, Tailwind CSS v4 (new @import syntax), Supabase for auth.
@@ -34,11 +35,15 @@ Commands (run inside `web/`)
 - Build: `npm run build` (outputs to `web/build/client` and `web/build/server`).
 - Serve built app: `npm run start` (uses `react-router-serve ./build/server/index.js`).
 - Lint: none configured; rely on TypeScript errors and file-local patterns.
-- Tests: Playwright lives in `web/tests` (api + e2e). Run `cd web && npx playwright test`; set `SUPABASE_SERVICE_ROLE_KEY` for API cleanup.
+ - Run all Playwright tests: `cd web && npx playwright test` (set `SUPABASE_SERVICE_ROLE_KEY` for API cleanup).
+ - Run a single Playwright test: `cd web && npx playwright test <path/to/test.spec.ts>` or use `--grep "pattern"` to filter by name.
 - Supabase schema workflow: edit `supabase/schemas/*.sql`, then `supabase db diff -f <change-name>` and `supabase migration up` locally; regenerate types with `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
 
 Routing and Data
 - File-based routes under `app/routes`; use hyphenated names and `.tsx` suffix (`forgot-password.tsx`). Index routes use `index.tsx`.
+- After creating a route file under `app/routes`, register it in `web/app/routes.ts` and run `npm run typecheck` to avoid missing-route 404s.
+- When calling `supabase.auth.updateUser({ data })`, always merge new and existing metadata keys (e.g. `role`, `profile_id`) to avoid dropping previously set fields.
+- On initial signup, insert the user’s app role into `public.user_roles` (user_id, role, assigned_by) to align with RLS and permission checks.
 - Loader/action types come from generated `Route` types (`import type { Route } from "./+types/..."`); prefer these over manual typing.
 - Redirects: throw `redirect()` from `react-router`; include Supabase headers when present.
 - Mutations that keep the page mounted should use `useFetcher` / `fetcher.Form` (see login/sign-up patterns).
@@ -105,7 +110,7 @@ When Adding or Refactoring Code
 - For new commands or scripts, update this file with how to run single items (tests, generators).
 
 Testing and QA
-- Currently rely on `npm run typecheck` and manual QA via dev server. If you add a test runner, document single-test syntax.
+ - All tests live under `web/tests`; run full suite or a single test as documented in Commands above.
 - Manual flows to click through when touched: auth login, sign-up, password reset/redirects, protected route gating.
 
 Deployment Notes

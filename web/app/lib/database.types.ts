@@ -11,7 +11,7 @@ export type Database = {
     Tables: {
       class: {
         Row: {
-          cohort_id: string | null
+          class_section_id: string | null
           created_at: string
           ends_at: string
           id: string
@@ -20,7 +20,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          cohort_id?: string | null
+          class_section_id?: string | null
           created_at?: string
           ends_at: string
           id?: string
@@ -29,7 +29,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          cohort_id?: string | null
+          class_section_id?: string | null
           created_at?: string
           ends_at?: string
           id?: string
@@ -39,86 +39,87 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "class_cohort_id_fkey"
-            columns: ["cohort_id"]
+            foreignKeyName: "class_class_section_id_fkey"
+            columns: ["class_section_id"]
             isOneToOne: false
-            referencedRelation: "cohort"
+            referencedRelation: "class_section"
             referencedColumns: ["id"]
           },
         ]
       }
-      cohort: {
+      class_section: {
         Row: {
+          capacity: number
           created_at: string
+          description: string | null
+          enrollment_close_at: string | null
+          enrollment_open_at: string | null
           id: string
-          name: string
-          semester_id: string | null
           updated_at: string
+          wait_list_capacity: number
         }
         Insert: {
+          capacity?: number
           created_at?: string
+          description?: string | null
+          enrollment_close_at?: string | null
+          enrollment_open_at?: string | null
           id?: string
-          name: string
-          semester_id?: string | null
           updated_at?: string
+          wait_list_capacity?: number
         }
         Update: {
+          capacity?: number
           created_at?: string
+          description?: string | null
+          enrollment_close_at?: string | null
+          enrollment_open_at?: string | null
           id?: string
-          name?: string
-          semester_id?: string | null
           updated_at?: string
+          wait_list_capacity?: number
         }
-        Relationships: [
-          {
-            foreignKeyName: "cohort_semester_id_fkey"
-            columns: ["semester_id"]
-            isOneToOne: false
-            referencedRelation: "semester"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
-      cohort_enrollment: {
+      class_section_enrollment: {
         Row: {
-          cohort_id: string | null
+          class_section_id: string | null
           created_at: string
           decided_at: string | null
           decided_by: string | null
           id: string
           requested_at: string
-          status: Database["public"]["Enums"]["cohort_enrollment_status"]
+          status: Database["public"]["Enums"]["class_section_enrollment_status"]
           updated_at: string
           user_id: string | null
         }
         Insert: {
-          cohort_id?: string | null
+          class_section_id?: string | null
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null
           id?: string
           requested_at?: string
-          status?: Database["public"]["Enums"]["cohort_enrollment_status"]
+          status?: Database["public"]["Enums"]["class_section_enrollment_status"]
           updated_at?: string
           user_id?: string | null
         }
         Update: {
-          cohort_id?: string | null
+          class_section_id?: string | null
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null
           id?: string
           requested_at?: string
-          status?: Database["public"]["Enums"]["cohort_enrollment_status"]
+          status?: Database["public"]["Enums"]["class_section_enrollment_status"]
           updated_at?: string
           user_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "cohort_enrollment_cohort_id_fkey"
-            columns: ["cohort_id"]
+            foreignKeyName: "class_section_enrollment_class_section_id_fkey"
+            columns: ["class_section_id"]
             isOneToOne: false
-            referencedRelation: "cohort"
+            referencedRelation: "class_section"
             referencedColumns: ["id"]
           },
         ]
@@ -291,6 +292,69 @@ export type Database = {
           },
         ]
       }
+      person: {
+        Row: {
+          firstname: string | null
+          id: string
+          phone: string | null
+          postcode: string | null
+          role: string
+          surname: string | null
+          user_id: string
+        }
+        Insert: {
+          firstname?: string | null
+          id?: string
+          phone?: string | null
+          postcode?: string | null
+          role: string
+          surname?: string | null
+          user_id: string
+        }
+        Update: {
+          firstname?: string | null
+          id?: string
+          phone?: string | null
+          postcode?: string | null
+          role?: string
+          surname?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      person_parent: {
+        Row: {
+          id: string
+          parent_id: string
+          person_id: string
+        }
+        Insert: {
+          id?: string
+          parent_id: string
+          person_id: string
+        }
+        Update: {
+          id?: string
+          parent_id?: string
+          person_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_parent_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "person"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_parent_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "person"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -333,39 +397,6 @@ export type Database = {
         Update: {
           permission?: Database["public"]["Enums"]["app_permissions"]
           role?: Database["public"]["Enums"]["app_role"]
-        }
-        Relationships: []
-      }
-      semester: {
-        Row: {
-          created_at: string
-          ends_at: string
-          ends_month: string
-          id: string
-          name: string
-          starts_at: string
-          starts_month: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          ends_at: string
-          ends_month: string
-          id?: string
-          name: string
-          starts_at: string
-          starts_month: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          ends_at?: string
-          ends_month?: string
-          id?: string
-          name?: string
-          starts_at?: string
-          starts_month?: string
-          updated_at?: string
         }
         Relationships: []
       }
@@ -464,6 +495,14 @@ export type Database = {
         | "cohort_enrollment.read"
         | "cohort_enrollment.update"
         | "cohort_enrollment.update_status"
+        | "class_section.create"
+        | "class_section.read"
+        | "class_section.update"
+        | "class_section.delete"
+        | "class_section_enrollment.create"
+        | "class_section_enrollment.read"
+        | "class_section_enrollment.update"
+        | "class_section_enrollment.update_status"
       app_role:
         | "unassigned"
         | "admin"
@@ -472,7 +511,7 @@ export type Database = {
         | "instructor"
         | "student"
         | "parent"
-      cohort_enrollment_status: "pending" | "approved" | "rejected"
+      class_section_enrollment_status: "pending" | "approved" | "rejected"
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
@@ -649,6 +688,14 @@ export const Constants = {
         "cohort_enrollment.read",
         "cohort_enrollment.update",
         "cohort_enrollment.update_status",
+        "class_section.create",
+        "class_section.read",
+        "class_section.update",
+        "class_section.delete",
+        "class_section_enrollment.create",
+        "class_section_enrollment.read",
+        "class_section_enrollment.update",
+        "class_section_enrollment.update_status",
       ],
       app_role: [
         "unassigned",
@@ -659,7 +706,7 @@ export const Constants = {
         "student",
         "parent",
       ],
-      cohort_enrollment_status: ["pending", "approved", "rejected"],
+      class_section_enrollment_status: ["pending", "approved", "rejected"],
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
