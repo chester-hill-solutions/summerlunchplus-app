@@ -72,8 +72,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Preserve existing role metadata when updating user profile_id
   await supabase.auth.updateUser({ data: { role, profile_id: personId } })
 
-  // Assign application role in user_roles table
-  await supabase.from('user_roles').insert({ user_id: userId, role, assigned_by: userId })
   return redirect(`/auth/sign-up-details?role=${role}&pid=${personId}`, { headers })
 }
 
