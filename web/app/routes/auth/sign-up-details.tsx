@@ -36,7 +36,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!pid) throw redirect('/auth/sign-up', { headers })
   const resolvedPid = pid
 
-  const step = (url.searchParams.get('step') as 'details' | 'invite') || 'details'
+  const requestedStep = (url.searchParams.get('step') as 'details' | 'invite') || 'details'
   const inviterPid = url.searchParams.get('inviter_pid')
   const inviterRole = (url.searchParams.get('inviter_role') as 'parent' | 'student') ?? null
 
@@ -45,7 +45,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     phone: string | null = null,
     postcode: string | null = null
 
-  if (step === 'invite') {
+  const showInviteStep = requestedStep === 'invite'
+  if (showInviteStep) {
     const { data: personData } = await supabase
       .from('person')
       .select('firstname, surname, phone, postcode')
@@ -57,7 +58,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     postcode = personData?.postcode ?? null
   }
 
-  return { role, pid: resolvedPid, step, firstname, surname, phone, postcode, inviterPid, inviterRole }
+  const { data: relationship } = await supabase
+    .from('person_parent')
+    .select('id')
+    .or(`person_id.eq.${resolvedPid},parent_id.eq.${resolvedPid}`)
+    .limit(1)
+    .maybeSingle()
+  const hasRelationship = Boolean(relationship?.id)
+
+  const effectiveStep = hasRelationship ? 'details' : requestedStep
+  return {
+    role,
+    pid: resolvedPid,
+    step: effectiveStep,
+    firstname,
+    surname,
+    phone,
+    postcode,
+    inviterPid,
+    inviterRole,
+    hasRelationship,
+  }
 }
 
 // Action updates person profile and sends invite to counterpart
@@ -88,16 +109,54 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { error: 'Postal code must match A1A 1A1 format' }
     }
 
+    const userId = currentUser?.user?.id
+    console.log('sign-up-details action start', { pid, userId })
+    if (!userId) {
+      return { error: 'Unable to identify user' }
+    }
+
+    const personPayload = {
+      id: pid,
+      user_id: userId,
+      firstname,
+      surname,
+      phone,
+      postcode,
+      email: inviterEmail,
+    }
+
     const { data: updatedPerson, error: updateError } = await supabase
       .from('person')
-      .upsert(
-        { id: pid, firstname, surname, phone, postcode, email: inviterEmail },
-        { onConflict: 'id' }
-      )
+      .update(personPayload)
+      .eq('id', pid)
       .select('id')
       .single()
-    if (updateError || !updatedPerson?.id) {
-      return { error: updateError?.message ?? 'Unable to save profile' }
+    if (updateError) {
+      console.error('person update failed', updateError.message, { pid, personPayload })
+    }
+
+    if (!updatedPerson?.id) {
+      const { data: insertedPerson, error: insertError } = await supabase
+        .from('person')
+        .insert(personPayload)
+        .select('id')
+        .single()
+      if (insertError) {
+        console.error('person insert fallback failed', insertError.message, { pid, personPayload })
+      }
+      if (insertError || !insertedPerson?.id) {
+        return { error: insertError?.message ?? 'Unable to save profile' }
+      }
+    }
+    const { data: relationship } = await supabase
+      .from('person_parent')
+      .select('id')
+      .or(`person_id.eq.${pid},parent_id.eq.${pid}`)
+      .limit(1)
+      .maybeSingle()
+    const hasRelationship = Boolean(relationship?.id)
+    if (hasRelationship) {
+      return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}`, { headers })
     }
     return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=invite`, { headers })
   }
@@ -111,7 +170,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const redirectTo = `${origin}/auth/sign-up-details?role=${targetRole}`
     const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(inviteEmail, {
       redirectTo,
-      data: { inviter_pid: pid, inviter_role: role, inviter_email: inviterEmail },
+      data: {
+        inviter_pid: pid,
+        inviter_role: role,
+        inviter_email: inviterEmail,
+        role: targetRole,
+      },
     })
     if (inviteError || !inviteData?.user?.id) {
       return { error: inviteError?.message ?? 'Unable to send invite' }
@@ -144,6 +208,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         { onConflict: 'person_id,parent_id' }
       )
 
+    const inviterId = currentUser?.user?.id ?? null
+    if (inviterId) {
+      await supabase
+        .from('invites')
+        .upsert(
+          {
+            inviter_user_id: inviterId,
+            invitee_email: inviteEmail,
+            role: targetRole,
+            status: 'pending',
+          },
+          { onConflict: 'invitee_email' }
+        )
+    }
+
     return redirect('/home', { headers })
   }
 }
@@ -153,7 +232,7 @@ export default function SignUpDetails() {
   const {
     role,
     pid,
-    step: initialStep,
+    step,
     firstname,
     surname,
     phone,
@@ -167,7 +246,6 @@ export default function SignUpDetails() {
     phone: string | null
     postcode: string | null
   }
-  const [step, setStep] = useState<'details' | 'invite'>(initialStep as any)
   const [postcode, setPostcode] = useState(loaderPostcode ?? '')
   const error = fetcher.data?.error
   const loading = fetcher.state === 'submitting'
@@ -223,12 +301,7 @@ export default function SignUpDetails() {
                   />
                 </div>
                 {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={loading}
-                  onClick={() => setStep('invite')}
-                >
+                <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? 'Saving...' : 'Next'}
                 </Button>
               </fetcher.Form>

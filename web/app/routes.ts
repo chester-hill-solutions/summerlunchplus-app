@@ -9,7 +9,14 @@ export default [
   route("my-forms", "routes/my-forms.tsx"),
   route("my-forms/:formId", "routes/my-forms.$formId.tsx"),
   route("login", "routes/auth/login.tsx"),
-  route("sign-up", "routes/auth/sign-up.tsx"),
+  route(
+    "sign-up",
+    "routes/sign-up/layout.tsx",
+    [
+      index("routes/sign-up/index.tsx"),
+      route("invite", "routes/sign-up/invite.tsx"),
+    ]
+  ),
   // Two-stage signup details step (must register to avoid 404)
   route("auth/sign-up-details", "routes/auth/sign-up-details.tsx"),
   route("logout", "routes/auth/logout.tsx"),
