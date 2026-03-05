@@ -5,7 +5,9 @@ create type form_question_type as enum (
   'single_choice',
   'multi_choice',
   'date',
-  'address'
+  'address',
+  'agreement',
+  'checkbox'
 );
 
 create type form_assignment_status as enum (
@@ -28,7 +30,7 @@ create table public.form_question (
   question_code text primary key,
   form_id uuid not null references public.form (id) on delete cascade,
   prompt text not null,
-  kind form_question_type not null,
+  "type" form_question_type not null,
   position integer not null,
   options jsonb not null default '[]'::jsonb,
   unique (form_id, position)

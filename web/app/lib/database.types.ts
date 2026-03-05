@@ -218,27 +218,27 @@ export type Database = {
       form_question: {
         Row: {
           form_id: string
-          kind: Database["public"]["Enums"]["form_question_type"]
           options: Json
           position: number
           prompt: string
           question_code: string
+          type: Database["public"]["Enums"]["form_question_type"]
         }
         Insert: {
           form_id: string
-          kind: Database["public"]["Enums"]["form_question_type"]
           options?: Json
           position: number
           prompt: string
           question_code: string
+          type: Database["public"]["Enums"]["form_question_type"]
         }
         Update: {
           form_id?: string
-          kind?: Database["public"]["Enums"]["form_question_type"]
           options?: Json
           position?: number
           prompt?: string
           question_code?: string
+          type?: Database["public"]["Enums"]["form_question_type"]
         }
         Relationships: [
           {
@@ -623,6 +623,8 @@ export type Database = {
         | "multi_choice"
         | "date"
         | "address"
+        | "agreement"
+        | "checkbox"
       invite_status: "pending" | "confirmed" | "revoked"
     }
     CompositeTypes: {
@@ -818,6 +820,8 @@ export const Constants = {
         "multi_choice",
         "date",
         "address",
+        "agreement",
+        "checkbox",
       ],
       invite_status: ["pending", "confirmed", "revoked"],
     },

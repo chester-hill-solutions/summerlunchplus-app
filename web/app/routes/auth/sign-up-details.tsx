@@ -10,18 +10,11 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import type { Database, Json } from '@/lib/database.types'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { redirect, useFetcher, useLoaderData } from 'react-router'
 import { useState } from 'react'
-
-type FormQuestion = {
-  question_code: string
-  prompt: string
-  kind: Database['public']['Enums']['form_question_type']
-  position: number
-  options: Json
-}
 
 type FormStep = {
   formId: string
@@ -46,7 +39,7 @@ type LoaderData = {
   hasRelationship: boolean
   formSteps: FormStep[]
   currentForm: FormStep | null
-  currentFormQuestions: FormQuestion[]
+  currentFormQuestions: FormQuestionData[]
   currentFormAnswers: Record<string, Json>
   currentFormIndex: number | null
   totalFormSteps: number
@@ -134,19 +127,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? formSteps.findIndex(step => step.formId === currentForm.formId) + 1
     : null
 
-  let currentFormQuestions: FormQuestion[] = []
+  let currentFormQuestions: FormQuestionData[] = []
   const currentFormAnswers: Record<string, Json> = {}
   if (currentForm) {
     const { data: questions } = await supabase
       .from('form_question')
-      .select('question_code, prompt, kind, position, options')
+      .select('question_code, prompt, type, position, options')
       .eq('form_id', currentForm.formId)
       .order('position')
     currentFormQuestions = (questions ?? []).map(q => ({
       question_code: q.question_code ?? '',
       prompt: q.prompt,
-      kind: q.kind as Database['public']['Enums']['form_question_type'],
-      position: q.position,
+      type: q.type as Database['public']['Enums']['form_question_type'],
       options: q.options,
     }))
     const { data: submission } = await supabase
@@ -244,7 +236,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const { data: form } = await supabase
       .from('form')
-      .select('id, form_question (question_code, prompt, kind, options)')
+      .select('id, form_question (question_code, prompt, type, options)')
       .eq('id', formId)
       .single()
     if (!form) {
@@ -264,7 +256,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const answers: { questionCode: string; value: Json }[] = []
     for (const question of questions) {
       const fieldName = `question_${question.question_code}`
-      if (question.kind === 'multi_choice') {
+      if (question.type === 'multi_choice') {
         const choices = formData
           .getAll(fieldName)
           .filter((value): value is string => typeof value === 'string')
@@ -272,6 +264,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return { error: `Please answer "${question.prompt}"` }
         }
         answers.push({ questionCode: question.question_code, value: choices })
+        continue
+      }
+
+      if (question.type === 'checkbox') {
+        const checked = formData.has(fieldName)
+        answers.push({ questionCode: question.question_code, value: checked })
         continue
       }
 
@@ -435,13 +433,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 }
 
-const questionOptions = (options: Json) => {
-  if (Array.isArray(options)) {
-    return options.filter((value): value is string => typeof value === 'string')
-  }
-  return []
-}
-
 export default function SignUpDetails() {
   const fetcher = useFetcher<typeof action>()
   const data = useLoaderData() as LoaderData
@@ -560,69 +551,14 @@ export default function SignUpDetails() {
                 <p className="text-sm text-slate-500">
                   Form {currentFormIndex ?? 1} of {totalFormSteps}
                 </p>
-                {currentFormQuestions.map(question => {
-                  const fieldName = `question_${question.question_code}`
-                  const savedValue = currentFormAnswers[question.question_code]
-                  if (question.kind === 'single_choice') {
-                    const options = questionOptions(question.options)
-                    return (
-                      <fieldset key={fieldName} className="space-y-2">
-                        <Label className="text-base">{question.prompt}</Label>
-                        <div className="grid gap-3">
-                          {options.map(option => (
-                            <label key={option} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="radio"
-                                name={fieldName}
-                                value={option}
-                                defaultChecked={typeof savedValue === 'string' && savedValue === option}
-                                required
-                              />
-                              <span className="text-slate-900">{option}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </fieldset>
-                    )
-                  }
-
-                  if (question.kind === 'multi_choice') {
-                    const options = questionOptions(question.options)
-                    const selected = Array.isArray(savedValue) ? savedValue : []
-                    return (
-                      <fieldset key={fieldName} className="space-y-2">
-                        <Label className="text-base">{question.prompt}</Label>
-                        <div className="grid gap-2">
-                          {options.map(option => (
-                            <label key={option} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                name={fieldName}
-                                value={option}
-                                defaultChecked={selected.includes(option)}
-                              />
-                              <span className="text-slate-900">{option}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </fieldset>
-                    )
-                  }
-
-                  const inputType = question.kind === 'date' ? 'date' : 'text'
-                  return (
-                    <div key={fieldName} className="grid gap-2">
-                      <Label htmlFor={fieldName}>{question.prompt}</Label>
-                      <Input
-                        id={fieldName}
-                        name={fieldName}
-                        type={inputType}
-                        defaultValue={typeof savedValue === 'string' ? savedValue : ''}
-                        required
-                      />
-                    </div>
-                  )
-                })}
+                {currentFormQuestions.map(question => (
+                  <FormQuestion
+                    key={question.question_code}
+                    question={question}
+                    value={currentFormAnswers[question.question_code]}
+                    required={question.type !== 'checkbox'}
+                  />
+                ))}
                 {error && <p className="text-sm text-red-500">{error}</p>}
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? 'Saving...' : 'Save and continue'}

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import type { Route } from "./+types/my-forms.$formId";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import FormQuestion, { type FormQuestionData } from "@/components/forms/form-question";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { enforceOnboardingGuard } from "@/lib/auth.server";
@@ -26,13 +27,8 @@ type Assignment = {
   } | null;
 };
 
-type Question = {
-  question_code: string;
+type Question = FormQuestionData & {
   form_id: string;
-  prompt: string;
-  kind: "text" | "single_choice" | "multi_choice" | "date" | "address";
-  position: number;
-  options: string[];
 };
 
 type LoaderData = {
@@ -70,15 +66,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw redirect("/my-forms", { headers });
   }
 
+  const formMeta = Array.isArray(assignmentRow.form) ? assignmentRow.form[0] ?? null : assignmentRow.form;
   const assignment: Assignment = {
     id: String(assignmentRow.id),
     status: String(assignmentRow.status),
     due_at: assignmentRow.due_at ?? null,
     form: {
-      id: String(assignmentRow.form?.id ?? ""),
-      name: String(assignmentRow.form?.name ?? ""),
-      is_required: Boolean(assignmentRow.form?.is_required),
-      due_at: assignmentRow.form?.due_at ?? null,
+      id: String(formMeta?.id ?? ""),
+      name: String(formMeta?.name ?? ""),
+      is_required: Boolean(formMeta?.is_required),
+      due_at: formMeta?.due_at ?? null,
     },
     submission: null,
   };
@@ -93,7 +90,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const { data: questions, error: questionsError } = await supabase
     .from("form_question")
-    .select("question_code, form_id, prompt, kind, position, options")
+    .select("question_code, form_id, prompt, type, position, options")
     .eq("form_id", formId)
     .order("position", { ascending: true });
 
@@ -153,7 +150,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   const { data: questions, error: questionsError } = await supabase
     .from("form_question")
-    .select("question_code, kind")
+    .select("question_code, type")
     .eq("form_id", formId);
 
   if (questionsError) {
@@ -179,11 +176,11 @@ export async function action({ request, params }: Route.ActionArgs) {
   const answers = (questions ?? []).map((q) => {
     const key = `q-${q.question_code}`;
     const rawValue =
-      q.kind === "multi_choice"
+      q.type === "multi_choice"
         ? formData.getAll(key).map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean).join(", ")
         : formData.get(key);
     const normalized = typeof rawValue === "string" ? rawValue.trim() : "";
-    const payload = q.kind === "single_choice" ? { value: normalized } : { text: normalized };
+    const payload = q.type === "single_choice" ? { value: normalized } : { text: normalized };
     return { submission_id: submissionRows.id, question_code: q.question_code, value: payload };
   });
 
@@ -265,74 +262,9 @@ export default function MyFormDetail() {
               <p className="text-muted-foreground text-sm">This form has no questions yet.</p>
             ) : (
               <div className="space-y-5">
-                {questions.map((q) => {
-                  const inputId = `q-${q.question_code}`;
-                  if (q.kind === "single_choice") {
-                    return (
-                      <div key={q.question_code} className="space-y-2">
-                        <Label htmlFor={inputId}>{q.prompt}</Label>
-                        <select
-                          id={inputId}
-                          name={inputId}
-                          className="h-10 w-full rounded-md border px-3 text-sm shadow-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-                          required
-                          defaultValue=""
-                          aria-required
-                        >
-                          <option value="" disabled>
-                            Select an option
-                          </option>
-                          {(q.options ?? []).map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    );
-                  }
-
-                  if (q.kind === "multi_choice") {
-                    return (
-                      <div key={q.question_code} className="space-y-2">
-                        <Label>{q.prompt}</Label>
-                        <div className="space-y-2 rounded-md border p-3">
-                          {(q.options ?? []).map((opt) => {
-                            const checkboxId = `${inputId}-${opt}`;
-                            return (
-                              <label key={opt} className="flex items-center gap-2 text-sm">
-                                <input
-                                  id={checkboxId}
-                                  name={inputId}
-                                  type="checkbox"
-                                  value={opt}
-                                  className="h-4 w-4 rounded border"
-                                />
-                                <span>{opt}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  if (q.kind === "date") {
-                    return (
-                      <div key={q.question_code} className="space-y-2">
-                        <Label htmlFor={inputId}>{q.prompt}</Label>
-                        <Input id={inputId} name={inputId} type="date" required />
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div key={q.question_code} className="space-y-2">
-                      <Label htmlFor={inputId}>{q.prompt}</Label>
-                      <Input id={inputId} name={inputId} required />
-                    </div>
-                  );
-                })}
+                {questions.map((q) => (
+                  <FormQuestion key={q.question_code} question={q} required />
+                ))}
               </div>
             )}
 

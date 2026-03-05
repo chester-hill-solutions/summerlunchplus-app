@@ -66,8 +66,8 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'form-question': {
     label: 'Form Questions',
     table: 'form_question',
-    select: 'question_code, form_id, prompt, kind, position',
-    columns: ['question_code', 'form_id', 'prompt', 'kind', 'position'],
+    select: 'question_code, form_id, prompt, type, position',
+    columns: ['question_code', 'form_id', 'prompt', 'type', 'position'],
     order: 'form_id',
   },
   'form-assignment': {
