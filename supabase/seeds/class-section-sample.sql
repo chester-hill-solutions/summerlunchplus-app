@@ -1,6 +1,6 @@
 -- Seed a sample class section and scheduled classes for local dev.
 with section as (
-  insert into public.class_section (
+  insert into public.class (
     id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity
   )
   values (
@@ -19,7 +19,7 @@ with section as (
         wait_list_capacity = excluded.wait_list_capacity
   returning id
 )
-insert into public.class (id, class_section_id, starts_at, ends_at, location)
+insert into public.session (id, class_id, starts_at, ends_at, location)
 values
   (
     '22222222-2222-2222-2222-222222222222'::uuid,
@@ -37,7 +37,7 @@ values
   )
 on conflict (id) do update
   set
-    class_section_id = excluded.class_section_id,
+    class_id = excluded.class_id,
     starts_at = excluded.starts_at,
     ends_at = excluded.ends_at,
     location = excluded.location;

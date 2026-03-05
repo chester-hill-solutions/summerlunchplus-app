@@ -21,6 +21,7 @@ create type app_permissions as enum (
   'semester.create', 'semester.read', 'semester.update', 'semester.delete',
   'cohort.create', 'cohort.read', 'cohort.update', 'cohort.delete',
   'class.create', 'class.read', 'class.update', 'class.delete',
+  'class_enrollment.create', 'class_enrollment.read', 'class_enrollment.update', 'class_enrollment.update_status',
   'cohort_enrollment.create', 'cohort_enrollment.read', 'cohort_enrollment.update', 'cohort_enrollment.update_status',
   'user_roles.manage', 'role_permission.manage',
   'profiles.read', 'profiles.update'
@@ -71,6 +72,10 @@ begin
     nullif((current_setting('request.jwt.claims', true)::jsonb ->> 'user_role'), '')::public.app_role,
     'unassigned'::public.app_role
   ) into user_role;
+
+  if (user_role = 'admin') then
+    return true;
+  end if;
 
   select count(*)
     into bind_permissions
@@ -129,15 +134,6 @@ grant all on table public.role_permission to authenticated;
 grant usage on type app_permissions to authenticated, supabase_auth_admin;
 grant execute on function public.current_user_role() to authenticated, supabase_auth_admin;
 grant execute on function public.authorize(app_permissions) to authenticated, supabase_auth_admin;
-
-alter type public.app_permissions add value 'class_section.create';
-alter type public.app_permissions add value 'class_section.read';
-alter type public.app_permissions add value 'class_section.update';
-alter type public.app_permissions add value 'class_section.delete';
-alter type public.app_permissions add value 'class_section_enrollment.create';
-alter type public.app_permissions add value 'class_section_enrollment.read';
-alter type public.app_permissions add value 'class_section_enrollment.update';
-alter type public.app_permissions add value 'class_section_enrollment.update_status';
 
 insert into public.role_permission (role, permission)
 select r.role, p.permission

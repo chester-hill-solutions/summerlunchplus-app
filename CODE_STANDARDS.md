@@ -26,6 +26,7 @@ SCHEMA & MIGRATIONS
 - On initial signup, pass the `role` field in `signUp(options.data)` so that the `on_auth_user_created_set_role` trigger
   reads `raw_user_meta_data->>'role'` and populates `public.user_roles` accordingly.
 - On initial signup, insert the user’s app role into `public.user_roles` (user_id, role, assigned_by) to ensure RLS and permission mappings apply correctly.
+- Use `SUPABASE_SECRET_KEY` for service-role admin operations in server-only code (e.g. `inviteUserByEmail`).
 
 - UI
 - Prefer `supabase/ui` components and existing ShadCN primitives before introducing new UI primitives.

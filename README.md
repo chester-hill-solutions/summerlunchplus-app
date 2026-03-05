@@ -20,6 +20,8 @@
 - Apply migrations locally: `supabase migration up`.
 - Apply seeds (including onboarding form/questions/assignments): `supabase db reset` (drops and rebuilds local DB, reapplies migrations and seeds).
 - Regenerate types after schema changes: `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
+supabase gen types typescript --local > web/app/lib/database.types.ts
+
 
 ## Tests
 - Playwright API tests: `cd web && npx playwright test web/tests/api`.

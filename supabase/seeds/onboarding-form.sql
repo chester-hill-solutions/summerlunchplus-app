@@ -27,7 +27,6 @@ on conflict (form_id, user_id) do nothing;
 
 insert into public.role_permission (role, permission)
 values
-  ('admin', 'site.read'),
   ('manager', 'site.read'),
   ('staff', 'site.read'),
   ('instructor', 'site.read'),

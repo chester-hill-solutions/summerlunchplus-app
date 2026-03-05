@@ -7,47 +7,34 @@ export type Json =
   | Json[]
 
 export type Database = {
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       class: {
-        Row: {
-          class_section_id: string | null
-          created_at: string
-          ends_at: string
-          id: string
-          location: string | null
-          starts_at: string
-          updated_at: string
-        }
-        Insert: {
-          class_section_id?: string | null
-          created_at?: string
-          ends_at: string
-          id?: string
-          location?: string | null
-          starts_at: string
-          updated_at?: string
-        }
-        Update: {
-          class_section_id?: string | null
-          created_at?: string
-          ends_at?: string
-          id?: string
-          location?: string | null
-          starts_at?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "class_class_section_id_fkey"
-            columns: ["class_section_id"]
-            isOneToOne: false
-            referencedRelation: "class_section"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      class_section: {
         Row: {
           capacity: number
           created_at: string
@@ -80,46 +67,46 @@ export type Database = {
         }
         Relationships: []
       }
-      class_section_enrollment: {
+      class_enrollment: {
         Row: {
-          class_section_id: string | null
+          class_id: string | null
           created_at: string
           decided_at: string | null
           decided_by: string | null
           id: string
           requested_at: string
-          status: Database["public"]["Enums"]["class_section_enrollment_status"]
+          status: Database["public"]["Enums"]["class_enrollment_status"]
           updated_at: string
           user_id: string | null
         }
         Insert: {
-          class_section_id?: string | null
+          class_id?: string | null
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null
           id?: string
           requested_at?: string
-          status?: Database["public"]["Enums"]["class_section_enrollment_status"]
+          status?: Database["public"]["Enums"]["class_enrollment_status"]
           updated_at?: string
           user_id?: string | null
         }
         Update: {
-          class_section_id?: string | null
+          class_id?: string | null
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null
           id?: string
           requested_at?: string
-          status?: Database["public"]["Enums"]["class_section_enrollment_status"]
+          status?: Database["public"]["Enums"]["class_enrollment_status"]
           updated_at?: string
           user_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "class_section_enrollment_class_section_id_fkey"
-            columns: ["class_section_id"]
+            foreignKeyName: "class_enrollment_class_id_fkey"
+            columns: ["class_id"]
             isOneToOne: false
-            referencedRelation: "class_section"
+            referencedRelation: "class"
             referencedColumns: ["id"]
           },
         ]
@@ -294,6 +281,7 @@ export type Database = {
       }
       person: {
         Row: {
+          email: string | null
           firstname: string | null
           id: string
           phone: string | null
@@ -303,6 +291,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          email?: string | null
           firstname?: string | null
           id?: string
           phone?: string | null
@@ -312,6 +301,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          email?: string | null
           firstname?: string | null
           id?: string
           phone?: string | null
@@ -400,6 +390,44 @@ export type Database = {
         }
         Relationships: []
       }
+      session: {
+        Row: {
+          class_id: string | null
+          created_at: string
+          ends_at: string
+          id: string
+          location: string | null
+          starts_at: string
+          updated_at: string
+        }
+        Insert: {
+          class_id?: string | null
+          created_at?: string
+          ends_at: string
+          id?: string
+          location?: string | null
+          starts_at: string
+          updated_at?: string
+        }
+        Update: {
+          class_id?: string | null
+          created_at?: string
+          ends_at?: string
+          id?: string
+          location?: string | null
+          starts_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           assigned_by: string | null
@@ -475,10 +503,6 @@ export type Database = {
         | "form_answer.read"
         | "form_answer.update"
         | "form_answer.delete"
-        | "user_roles.manage"
-        | "role_permission.manage"
-        | "profiles.read"
-        | "profiles.update"
         | "semester.create"
         | "semester.read"
         | "semester.update"
@@ -491,18 +515,18 @@ export type Database = {
         | "class.read"
         | "class.update"
         | "class.delete"
+        | "class_enrollment.create"
+        | "class_enrollment.read"
+        | "class_enrollment.update"
+        | "class_enrollment.update_status"
         | "cohort_enrollment.create"
         | "cohort_enrollment.read"
         | "cohort_enrollment.update"
         | "cohort_enrollment.update_status"
-        | "class_section.create"
-        | "class_section.read"
-        | "class_section.update"
-        | "class_section.delete"
-        | "class_section_enrollment.create"
-        | "class_section_enrollment.read"
-        | "class_section_enrollment.update"
-        | "class_section_enrollment.update_status"
+        | "user_roles.manage"
+        | "role_permission.manage"
+        | "profiles.read"
+        | "profiles.update"
       app_role:
         | "unassigned"
         | "admin"
@@ -511,7 +535,7 @@ export type Database = {
         | "instructor"
         | "student"
         | "parent"
-      class_section_enrollment_status: "pending" | "approved" | "rejected"
+      class_enrollment_status: "pending" | "approved" | "rejected"
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
@@ -644,6 +668,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       app_permissions: [
@@ -668,10 +695,6 @@ export const Constants = {
         "form_answer.read",
         "form_answer.update",
         "form_answer.delete",
-        "user_roles.manage",
-        "role_permission.manage",
-        "profiles.read",
-        "profiles.update",
         "semester.create",
         "semester.read",
         "semester.update",
@@ -684,18 +707,18 @@ export const Constants = {
         "class.read",
         "class.update",
         "class.delete",
+        "class_enrollment.create",
+        "class_enrollment.read",
+        "class_enrollment.update",
+        "class_enrollment.update_status",
         "cohort_enrollment.create",
         "cohort_enrollment.read",
         "cohort_enrollment.update",
         "cohort_enrollment.update_status",
-        "class_section.create",
-        "class_section.read",
-        "class_section.update",
-        "class_section.delete",
-        "class_section_enrollment.create",
-        "class_section_enrollment.read",
-        "class_section_enrollment.update",
-        "class_section_enrollment.update_status",
+        "user_roles.manage",
+        "role_permission.manage",
+        "profiles.read",
+        "profiles.update",
       ],
       app_role: [
         "unassigned",
@@ -706,7 +729,7 @@ export const Constants = {
         "student",
         "parent",
       ],
-      class_section_enrollment_status: ["pending", "approved", "rejected"],
+      class_enrollment_status: ["pending", "approved", "rejected"],
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",

@@ -59,17 +59,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { error: signUpError?.message ?? 'Signup failed' }
   }
 
-  // Create stub person and attach to user metadata
   const userId = signUpData.user.id
-  const { data: personRows, error: personError } = await supabase
+  const invitedEmail = signUpData.user.email ?? email
+  const { data: personRow, error: personError } = await supabase
     .from('person')
-    .insert({ user_id: userId, role })
+    .upsert({ user_id: userId, role, email: invitedEmail }, { onConflict: 'email' })
     .select('id')
-  if (personError || !personRows?.length) {
+    .single()
+  if (personError || !personRow?.id) {
     return { error: personError?.message ?? 'Profile creation failed' }
   }
-  const personId = personRows[0].id
-  // Preserve existing role metadata when updating user profile_id
+  const personId = personRow.id
   await supabase.auth.updateUser({ data: { role, profile_id: personId } })
 
   return redirect(`/auth/sign-up-details?role=${role}&pid=${personId}`, { headers })
