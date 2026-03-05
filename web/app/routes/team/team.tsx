@@ -1,8 +1,7 @@
 import { NavLink, Outlet, redirect, useLoaderData } from 'react-router'
-
-import type { Route } from './+types/team'
 import { requireAuth } from '@/lib/auth.server'
 import { cn } from '@/lib/utils'
+import { teamPages } from './nav'
 
 const ADMIN_ROLES = new Set(['admin', 'manager'])
 
@@ -16,24 +15,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { role: auth.claims.role }
 }
 
-type NavItem = {
-  to: string
-  label: string
-}
-
-const teamNav: NavItem[] = [
-  { to: '/team', label: 'Overview' },
-  { to: '/team/users', label: 'Users' },
-  { to: '/team/forms', label: 'Forms' },
-  { to: '/team/class-management', label: 'Class Management' },
-]
+const teamNav = teamPages
 
 export default function TeamLayout() {
   useLoaderData<typeof loader>()
 
   return (
-    <main className="mx-auto flex max-w-6xl gap-8 px-6 py-8">
-      <aside className="w-56 shrink-0">
+    <main className="flex w-full flex-col gap-6 px-6 py-8 lg:flex-row">
+      <aside className="w-full lg:w-56">
         <div className="rounded-lg border bg-card p-4 shadow-sm">
           <h2 className="text-sm font-semibold text-muted-foreground">Team</h2>
           <nav className="mt-3 space-y-1">

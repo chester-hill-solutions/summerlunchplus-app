@@ -1,0 +1,17 @@
+export const teamPages = [
+  { to: '/team', label: 'Overview', description: 'Admin workspace and quick links.' },
+  { to: '/team/person', label: 'Person records', description: 'Person profiles tied to auth users.' },
+  { to: '/team/person-parent', label: 'Person parent links', description: 'Parent/child relationships.' },
+  { to: '/team/profiles', label: 'Profiles', description: 'Extended profile metadata.' },
+  { to: '/team/class', label: 'Classes', description: 'Current class sections and limits.' },
+  { to: '/team/session', label: 'Sessions', description: 'Individual session schedule entries.' },
+  { to: '/team/class-enrollment', label: 'Class enrollments', description: 'Pending and approved enrollments.' },
+  { to: '/team/form', label: 'Forms', description: 'Onboarding forms configuration.' },
+  { to: '/team/form-question', label: 'Form questions', description: 'Questions tied to forms.' },
+  { to: '/team/form-assignment', label: 'Form assignments', description: 'Assignments per user.' },
+  { to: '/team/form-submission', label: 'Form submissions', description: 'User response metadata.' },
+  { to: '/team/form-answer', label: 'Form answers', description: 'Individual answers with JSON value.' },
+  { to: '/team/role-permission', label: 'Role permissions', description: 'Permissions assigned to each role.' },
+  { to: '/team/user-roles', label: 'User roles', description: 'The role each user currently holds.' },
+  { to: '/team/invites', label: 'Invites', description: 'Pending/confirmed invitations.' },
+]
