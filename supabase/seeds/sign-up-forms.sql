@@ -5,7 +5,7 @@ with program_form as (
   values (
     'Program Background',
     true,
-    array['student','parent','unassigned']::app_role[]
+    array['student','unassigned']::app_role[]
   )
   on conflict (name) do update
     set is_required = excluded.is_required,
@@ -90,7 +90,7 @@ on conflict (question_code) do update
       options = excluded.options;
 
 insert into public.sign_up_flow (form_id, slug, step_order, roles)
-select id, 'program_background', 1, array['student','parent']::app_role[]
+select id, 'program_background', 1, array['student']::app_role[]
 from public.form
 where name = 'Program Background'
 union all
