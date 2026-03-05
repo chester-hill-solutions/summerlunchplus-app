@@ -1,87 +1,222 @@
 import { createClient } from '@/lib/supabase/server'
+import { adminClient } from '@/lib/supabase/adminClient'
 import { Button } from '@/components/ui/button'
 import {
   Card,
+  CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-  CardDescription,
-  CardContent,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { LoaderFunctionArgs, ActionFunctionArgs } from 'react-router'
+import type { Database, Json } from '@/lib/database.types'
+import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { redirect, useFetcher, useLoaderData } from 'react-router'
-import { adminClient } from '@/lib/supabase/adminClient'
 import { useState } from 'react'
 
-// Loader ensures authenticated user and required query params
+type FormQuestion = {
+  question_code: string
+  prompt: string
+  kind: Database['public']['Enums']['form_question_type']
+  position: number
+  options: Json
+}
+
+type FormStep = {
+  formId: string
+  name: string
+  slug: string
+  position: number
+  status: Database['public']['Enums']['form_assignment_status']
+}
+
+type LoaderStep = 'details' | 'forms' | 'invite'
+
+type LoaderData = {
+  role: 'parent' | 'student' | null
+  pid: string
+  step: LoaderStep
+  firstname: string | null
+  surname: string | null
+  phone: string | null
+  postcode: string | null
+  inviterPid: string | null
+  inviterRole: 'parent' | 'student' | null
+  hasRelationship: boolean
+  formSteps: FormStep[]
+  currentForm: FormStep | null
+  currentFormQuestions: FormQuestion[]
+  currentFormAnswers: Record<string, Json>
+  currentFormIndex: number | null
+  totalFormSteps: number
+  formsComplete: boolean
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { supabase, headers } = createClient(request)
-  const { data } = await supabase.auth.getUser()
-  if (!data.user) throw redirect('/auth/sign-up', { headers })
+  const { data: userData } = await supabase.auth.getUser()
+  if (!userData.user) throw redirect('/auth/sign-up', { headers })
 
   const url = new URL(request.url)
-  const role = url.searchParams.get('role')
+  const requestedStep = (url.searchParams.get('step') as LoaderStep) || 'details'
+  const requestedFormId = url.searchParams.get('form_id')
+  const roleParam = url.searchParams.get('role') as 'parent' | 'student' | null
   const pidParam = url.searchParams.get('pid')
+
   let pid = pidParam
-  if (!role || !pid) {
-    const { data: personRow } = await supabase
+  if (!pid) {
+    const { data: personCandidate } = await supabase
       .from('person')
       .select('id')
-      .eq('user_id', data.user.id)
+      .eq('user_id', userData.user.id)
       .single()
-    if (!personRow?.id) throw redirect('/auth/sign-up', { headers })
-    pid = personRow.id
+    if (!personCandidate?.id) throw redirect('/auth/sign-up', { headers })
+    pid = personCandidate.id
   }
   if (!pid) throw redirect('/auth/sign-up', { headers })
-  const resolvedPid = pid
 
-  const requestedStep = (url.searchParams.get('step') as 'details' | 'invite') || 'details'
-  const inviterPid = url.searchParams.get('inviter_pid')
-  const inviterRole = (url.searchParams.get('inviter_role') as 'parent' | 'student') ?? null
+  const { data: person } = await supabase
+    .from('person')
+    .select('firstname, surname, phone, postcode, role')
+    .eq('id', pid)
+    .single()
+  if (!person) throw redirect('/auth/sign-up', { headers })
 
-  let firstname: string | null = null,
-    surname: string | null = null,
-    phone: string | null = null,
-    postcode: string | null = null
-
-  const showInviteStep = requestedStep === 'invite'
-  if (showInviteStep) {
-    const { data: personData } = await supabase
-      .from('person')
-      .select('firstname, surname, phone, postcode')
-      .eq('id', pid)
-      .single()
-    firstname = personData?.firstname ?? null
-    surname = personData?.surname ?? null
-    phone = personData?.phone ?? null
-    postcode = personData?.postcode ?? null
-  }
+  const resolvedRole = (roleParam ?? (person.role as 'parent' | 'student') ?? 'student') as 'parent' | 'student'
+  const detailsComplete = Boolean(person.firstname && person.surname && person.phone && person.postcode)
 
   const { data: relationship } = await supabase
     .from('person_parent')
     .select('id')
-    .or(`person_id.eq.${resolvedPid},parent_id.eq.${resolvedPid}`)
+    .or(`person_id.eq.${pid},parent_id.eq.${pid}`)
     .limit(1)
     .maybeSingle()
   const hasRelationship = Boolean(relationship?.id)
+  const inviteEnabled = !hasRelationship
 
-  const effectiveStep = hasRelationship ? 'details' : requestedStep
+  const { data: flowEntries } = await supabase
+    .from('sign_up_flow')
+    .select('slug, step_order, roles, form_id, form ( id, name )')
+    .order('step_order')
+  const normalizedFlowEntries = (flowEntries ?? []).map(entry => ({
+    ...entry,
+    form: Array.isArray(entry.form) ? entry.form[0] ?? null : entry.form,
+  }))
+  const relevantForms = normalizedFlowEntries.filter(entry => entry.roles?.includes(resolvedRole))
+  const formIds = relevantForms.map(entry => entry.form_id)
+
+  const { data: assignments } = formIds.length
+    ? await supabase
+        .from('form_assignment')
+        .select('form_id, status')
+        .eq('user_id', userData.user.id)
+        .in('form_id', formIds)
+    : { data: [] }
+  const assignmentMap = new Map(
+    (assignments ?? []).map(assignment => [assignment.form_id, assignment.status ?? 'pending'])
+  )
+
+  const formSteps: FormStep[] = relevantForms.map(entry => ({
+    formId: entry.form_id,
+    name: entry.form?.name ?? 'Required information',
+    slug: entry.slug,
+    position: entry.step_order,
+    status: (assignmentMap.get(entry.form_id) ?? 'pending') as Database['public']['Enums']['form_assignment_status'],
+  }))
+
+  const firstPending = formSteps.find(step => step.status !== 'submitted') ?? null
+  const requestedForm = requestedFormId
+    ? formSteps.find(step => step.formId === requestedFormId && step.status !== 'submitted') ?? null
+    : null
+  const currentForm = requestedForm ?? firstPending
+  const currentFormIndex = currentForm
+    ? formSteps.findIndex(step => step.formId === currentForm.formId) + 1
+    : null
+
+  let currentFormQuestions: FormQuestion[] = []
+  const currentFormAnswers: Record<string, Json> = {}
+  if (currentForm) {
+    const { data: questions } = await supabase
+      .from('form_question')
+      .select('question_code, prompt, kind, position, options')
+      .eq('form_id', currentForm.formId)
+      .order('position')
+    currentFormQuestions = (questions ?? []).map(q => ({
+      question_code: q.question_code ?? '',
+      prompt: q.prompt,
+      kind: q.kind as Database['public']['Enums']['form_question_type'],
+      position: q.position,
+      options: q.options,
+    }))
+    const { data: submission } = await supabase
+      .from('form_submission')
+      .select('id')
+      .eq('form_id', currentForm.formId)
+      .eq('user_id', userData.user.id)
+      .maybeSingle()
+    if (submission?.id) {
+      const { data: answers } = await supabase
+        .from('form_answer')
+        .select('question_code, value')
+        .eq('submission_id', submission.id)
+      for (const answer of answers ?? []) {
+        currentFormAnswers[answer.question_code] = answer.value
+      }
+    }
+  }
+
+  const formsComplete = formSteps.length === 0 || formSteps.every(step => step.status === 'submitted')
+
+  if (formsComplete && detailsComplete && inviteEnabled && requestedStep !== 'invite') {
+    const nextUrl = new URL(request.url)
+    nextUrl.searchParams.set('step', 'invite')
+    nextUrl.searchParams.delete('form_id')
+    return redirect(nextUrl.toString(), { headers })
+  }
+
+  if (formsComplete && detailsComplete && !inviteEnabled) {
+    return redirect('/home', { headers })
+  }
+
+  let effectiveStep: LoaderStep = requestedStep
+  if (effectiveStep === 'forms' && !detailsComplete) {
+    effectiveStep = 'details'
+  }
+  if (effectiveStep === 'forms' && (!formSteps.length || formsComplete)) {
+    effectiveStep = inviteEnabled ? 'invite' : 'details'
+  }
+  if (effectiveStep === 'invite' && !detailsComplete) {
+    effectiveStep = 'details'
+  }
+  if (effectiveStep === 'invite' && !inviteEnabled) {
+    effectiveStep = 'details'
+  }
+  if (effectiveStep === 'forms' && currentForm == null && formSteps.length > 0) {
+    effectiveStep = detailsComplete ? (inviteEnabled ? 'invite' : 'details') : 'details'
+  }
+
   return {
-    role,
-    pid: resolvedPid,
+    role: resolvedRole,
+    pid,
     step: effectiveStep,
-    firstname,
-    surname,
-    phone,
-    postcode,
-    inviterPid,
-    inviterRole,
+    firstname: person.firstname,
+    surname: person.surname,
+    phone: person.phone,
+    postcode: person.postcode,
+    inviterPid: url.searchParams.get('inviter_pid'),
+    inviterRole: (url.searchParams.get('inviter_role') as 'parent' | 'student') ?? null,
     hasRelationship,
+    formSteps,
+    currentForm,
+    currentFormQuestions,
+    currentFormAnswers,
+    currentFormIndex,
+    totalFormSteps: formSteps.length,
+    formsComplete,
   }
 }
 
-// Action updates person profile and sends invite to counterpart
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { supabase, headers } = createClient(request)
   const url = new URL(request.url)
@@ -90,16 +225,94 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData()
   const role = formData.get('role') as 'parent' | 'student'
   const pid = formData.get('pid') as string
-
-  const step = formData.get('step') as string
+  const step = (formData.get('step') as LoaderStep) ?? 'details'
   const firstname = (formData.get('firstname') as string)?.trim()
   const surname = (formData.get('surname') as string)?.trim()
   const phone = (formData.get('phone') as string)?.trim()
   const postcode = (formData.get('postcode') as string)?.trim()
+  const dateOfBirth = (formData.get('date_of_birth') as string)?.trim()
   const inviteEmail = (formData.get('invite-email') as string)?.trim()
   const postalRe = /^[A-Z]\d[A-Z] \d[A-Z]\d$/
   const { data: currentUser } = await supabase.auth.getUser()
   const inviterEmail = currentUser?.user?.email ?? ''
+
+  if (step === 'forms') {
+    const formId = formData.get('form_id') as string
+    if (!formId) {
+      return { error: 'Form is missing' }
+    }
+
+    const { data: form } = await supabase
+      .from('form')
+      .select('id, form_question (question_code, prompt, kind, options)')
+      .eq('id', formId)
+      .single()
+    if (!form) {
+      return { error: 'Form not found' }
+    }
+
+    const questions = form.form_question ?? []
+    if (!questions.length) {
+      return { error: 'Form is not configured' }
+    }
+
+    const userId = currentUser?.user?.id
+    if (!userId) {
+      return { error: 'Unable to identify user' }
+    }
+
+    const answers: { questionCode: string; value: Json }[] = []
+    for (const question of questions) {
+      const fieldName = `question_${question.question_code}`
+      if (question.kind === 'multi_choice') {
+        const choices = formData
+          .getAll(fieldName)
+          .filter((value): value is string => typeof value === 'string')
+        if (!choices.length) {
+          return { error: `Please answer "${question.prompt}"` }
+        }
+        answers.push({ questionCode: question.question_code, value: choices })
+        continue
+      }
+
+      const rawValue = (formData.get(fieldName) as string | null)?.trim() ?? ''
+      if (!rawValue) {
+        return { error: `Please answer "${question.prompt}"` }
+      }
+      answers.push({ questionCode: question.question_code, value: rawValue })
+    }
+
+    const { data: submission, error: submissionError } = await supabase
+      .from('form_submission')
+      .upsert(
+        {
+          form_id: formId,
+          user_id: userId,
+        },
+        { onConflict: 'form_id,user_id' }
+      )
+      .select('id')
+      .single()
+    if (submissionError || !submission?.id) {
+      console.error('form submission failed', submissionError?.message, { pid, formId })
+      return { error: submissionError?.message ?? 'Unable to save responses' }
+    }
+
+    const answerRows = answers.map(answer => ({
+      submission_id: submission.id,
+      question_code: answer.questionCode,
+      value: answer.value,
+    }))
+    const { error: answerError } = await supabase
+      .from('form_answer')
+      .upsert(answerRows, { onConflict: 'submission_id,question_code' })
+    if (answerError) {
+      console.error('form answers failed', answerError.message, { pid, formId })
+      return { error: answerError.message ?? 'Unable to save responses' }
+    }
+
+    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
+  }
 
   if (step === 'details') {
     if (!firstname || !surname || !phone || !postcode) {
@@ -115,7 +328,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { error: 'Unable to identify user' }
     }
 
-    const personPayload = {
+    const personPayload: Record<string, unknown> = {
       id: pid,
       user_id: userId,
       firstname,
@@ -123,6 +336,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       phone,
       postcode,
       email: inviterEmail,
+    }
+
+    if (role === 'student') {
+      personPayload.date_of_birth = dateOfBirth || null
     }
 
     const { data: updatedPerson, error: updateError } = await supabase
@@ -148,17 +365,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return { error: insertError?.message ?? 'Unable to save profile' }
       }
     }
-    const { data: relationship } = await supabase
-      .from('person_parent')
-      .select('id')
-      .or(`person_id.eq.${pid},parent_id.eq.${pid}`)
-      .limit(1)
-      .maybeSingle()
-    const hasRelationship = Boolean(relationship?.id)
-    if (hasRelationship) {
-      return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}`, { headers })
-    }
-    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=invite`, { headers })
+
+    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
   }
 
   if (step === 'invite') {
@@ -227,8 +435,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 }
 
+const questionOptions = (options: Json) => {
+  if (Array.isArray(options)) {
+    return options.filter((value): value is string => typeof value === 'string')
+  }
+  return []
+}
+
 export default function SignUpDetails() {
   const fetcher = useFetcher<typeof action>()
+  const data = useLoaderData() as LoaderData
   const {
     role,
     pid,
@@ -237,15 +453,13 @@ export default function SignUpDetails() {
     surname,
     phone,
     postcode: loaderPostcode,
-  } = useLoaderData() as {
-    role: string
-    pid: string
-    step: 'details' | 'invite'
-    firstname: string | null
-    surname: string | null
-    phone: string | null
-    postcode: string | null
-  }
+    formSteps,
+    currentForm,
+    currentFormQuestions,
+    currentFormAnswers,
+    currentFormIndex,
+    totalFormSteps,
+  } = data
   const [postcode, setPostcode] = useState(loaderPostcode ?? '')
   const error = fetcher.data?.error
   const loading = fetcher.state === 'submitting'
@@ -257,38 +471,70 @@ export default function SignUpDetails() {
     return raw.slice(0, 3) + ' ' + raw.slice(3, 6)
   }
 
+  const stageTitles: Record<LoaderStep, string> = {
+    details: 'Complete your profile',
+    forms: currentForm?.name ?? 'Required form',
+    invite: 'Invite a Parent/Student',
+  }
+
+  const stageDescriptions: Record<LoaderStep, string> = {
+    details: 'One more step before you can continue',
+    forms: 'Share the requested information to finish your sign-up',
+    invite: 'Send an invite to your counterpart',
+  }
+
+  const formSummary = formSteps.length
+
   return (
     <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
       <div className="w-full max-w-sm">
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl">
-              {step === 'details' ? 'Complete your profile' : 'Invite a Parent/Student'}
-            </CardTitle>
-            <CardDescription>
-              {step === 'details'
-                ? 'One more step before you can continue'
-                : 'Send an invite to your counterpart'}
-            </CardDescription>
+            <CardTitle className="text-2xl">{stageTitles[step]}</CardTitle>
+            <CardDescription>{stageDescriptions[step]}</CardDescription>
           </CardHeader>
           <CardContent>
+            {formSummary > 0 && (
+              <div className="mb-4 space-y-2 text-sm text-slate-500">
+                {formSteps.map((form, index) => (
+                  <div key={form.formId} className="flex items-center justify-between">
+                    <span className="font-medium text-slate-900">
+                      {index + 1}. {form.name}
+                    </span>
+                    <span
+                      className={`text-xs uppercase tracking-wide ${
+                        form.status === 'submitted' ? 'text-emerald-600' : 'text-slate-400'
+                      }`}
+                    >
+                      {form.status === 'submitted' ? 'Complete' : 'Pending'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             {step === 'details' ? (
               <fetcher.Form method="post" className="flex flex-col gap-6">
-                <input type="hidden" name="role" value={role} />
+                <input type="hidden" name="role" value={role ?? 'student'} />
                 <input type="hidden" name="pid" value={pid} />
                 <input type="hidden" name="step" value="details" />
                 <div className="grid gap-2">
                   <Label htmlFor="firstname">First name</Label>
-                  <Input id="firstname" name="firstname" required />
+                  <Input id="firstname" name="firstname" defaultValue={firstname ?? ''} required />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="surname">Surname</Label>
-                  <Input id="surname" name="surname" required />
+                  <Input id="surname" name="surname" defaultValue={surname ?? ''} required />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="phone">Phone</Label>
-                  <Input id="phone" name="phone" type="tel" required />
+                  <Input id="phone" name="phone" type="tel" defaultValue={phone ?? ''} required />
                 </div>
+                {role === 'student' && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="date_of_birth">Date of birth</Label>
+                    <Input id="date_of_birth" name="date_of_birth" type="date" required />
+                  </div>
+                )}
                 <div className="grid gap-2">
                   <Label htmlFor="postcode">Postal Code</Label>
                   <Input
@@ -305,9 +551,86 @@ export default function SignUpDetails() {
                   {loading ? 'Saving...' : 'Next'}
                 </Button>
               </fetcher.Form>
-              ) : (
+            ) : step === 'forms' && currentForm ? (
               <fetcher.Form method="post" className="flex flex-col gap-6">
-                <input type="hidden" name="role" value={role} />
+                <input type="hidden" name="role" value={role ?? 'student'} />
+                <input type="hidden" name="pid" value={pid} />
+                <input type="hidden" name="step" value="forms" />
+                <input type="hidden" name="form_id" value={currentForm.formId} />
+                <p className="text-sm text-slate-500">
+                  Form {currentFormIndex ?? 1} of {totalFormSteps}
+                </p>
+                {currentFormQuestions.map(question => {
+                  const fieldName = `question_${question.question_code}`
+                  const savedValue = currentFormAnswers[question.question_code]
+                  if (question.kind === 'single_choice') {
+                    const options = questionOptions(question.options)
+                    return (
+                      <fieldset key={fieldName} className="space-y-2">
+                        <Label className="text-base">{question.prompt}</Label>
+                        <div className="grid gap-3">
+                          {options.map(option => (
+                            <label key={option} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="radio"
+                                name={fieldName}
+                                value={option}
+                                defaultChecked={typeof savedValue === 'string' && savedValue === option}
+                                required
+                              />
+                              <span className="text-slate-900">{option}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </fieldset>
+                    )
+                  }
+
+                  if (question.kind === 'multi_choice') {
+                    const options = questionOptions(question.options)
+                    const selected = Array.isArray(savedValue) ? savedValue : []
+                    return (
+                      <fieldset key={fieldName} className="space-y-2">
+                        <Label className="text-base">{question.prompt}</Label>
+                        <div className="grid gap-2">
+                          {options.map(option => (
+                            <label key={option} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                name={fieldName}
+                                value={option}
+                                defaultChecked={selected.includes(option)}
+                              />
+                              <span className="text-slate-900">{option}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </fieldset>
+                    )
+                  }
+
+                  const inputType = question.kind === 'date' ? 'date' : 'text'
+                  return (
+                    <div key={fieldName} className="grid gap-2">
+                      <Label htmlFor={fieldName}>{question.prompt}</Label>
+                      <Input
+                        id={fieldName}
+                        name={fieldName}
+                        type={inputType}
+                        defaultValue={typeof savedValue === 'string' ? savedValue : ''}
+                        required
+                      />
+                    </div>
+                  )
+                })}
+                {error && <p className="text-sm text-red-500">{error}</p>}
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? 'Saving...' : 'Save and continue'}
+                </Button>
+              </fetcher.Form>
+            ) : (
+              <fetcher.Form method="post" className="flex flex-col gap-6">
+                <input type="hidden" name="role" value={role ?? 'student'} />
                 <input type="hidden" name="pid" value={pid} />
                 <input type="hidden" name="step" value="invite" />
                 <input type="hidden" name="firstname" value={firstname ?? ''} />

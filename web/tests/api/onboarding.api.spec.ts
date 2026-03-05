@@ -32,7 +32,7 @@ test("onboarding form assigns unassigned users and promotes after submission", a
 
   const { data: questions, error: questionsError } = await supabase
     .from("form_question")
-    .select("id, kind, position")
+    .select("question_code, kind, position")
     .eq("form_id", assignment!.form_id)
     .order("position", { ascending: true });
   expect(questionsError).toBeNull();
@@ -48,7 +48,7 @@ test("onboarding form assigns unassigned users and promotes after submission", a
 
   const answers = (questions ?? []).map((question, index) => ({
     submission_id: submission!.id,
-    question_id: question.id,
+    question_code: question.question_code,
     value:
       question.kind === "single_choice"
         ? { value: "yes" }

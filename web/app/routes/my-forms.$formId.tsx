@@ -27,7 +27,7 @@ type Assignment = {
 };
 
 type Question = {
-  id: string;
+  question_code: string;
   form_id: string;
   prompt: string;
   kind: "text" | "single_choice" | "multi_choice" | "date" | "address";
@@ -93,7 +93,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const { data: questions, error: questionsError } = await supabase
     .from("form_question")
-    .select("id, form_id, prompt, kind, position, options")
+    .select("question_code, form_id, prompt, kind, position, options")
     .eq("form_id", formId)
     .order("position", { ascending: true });
 
@@ -153,7 +153,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   const { data: questions, error: questionsError } = await supabase
     .from("form_question")
-    .select("id, kind")
+    .select("question_code, kind")
     .eq("form_id", formId);
 
   if (questionsError) {
@@ -177,20 +177,20 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   const answers = (questions ?? []).map((q) => {
-    const key = `q-${q.id}`;
+    const key = `q-${q.question_code}`;
     const rawValue =
       q.kind === "multi_choice"
         ? formData.getAll(key).map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean).join(", ")
         : formData.get(key);
     const normalized = typeof rawValue === "string" ? rawValue.trim() : "";
     const payload = q.kind === "single_choice" ? { value: normalized } : { text: normalized };
-    return { submission_id: submissionRows.id, question_id: q.id, value: payload };
+    return { submission_id: submissionRows.id, question_code: q.question_code, value: payload };
   });
 
   if (answers.length > 0) {
     const { error: answersError } = await supabase
       .from("form_answer")
-      .upsert(answers, { onConflict: "submission_id,question_id" });
+      .upsert(answers, { onConflict: "submission_id,question_code" });
 
     if (answersError) {
       return new Response(JSON.stringify({ error: "Failed to save answers" }), {
@@ -266,10 +266,10 @@ export default function MyFormDetail() {
             ) : (
               <div className="space-y-5">
                 {questions.map((q) => {
-                  const inputId = `q-${q.id}`;
+                  const inputId = `q-${q.question_code}`;
                   if (q.kind === "single_choice") {
                     return (
-                      <div key={q.id} className="space-y-2">
+                      <div key={q.question_code} className="space-y-2">
                         <Label htmlFor={inputId}>{q.prompt}</Label>
                         <select
                           id={inputId}
@@ -294,7 +294,7 @@ export default function MyFormDetail() {
 
                   if (q.kind === "multi_choice") {
                     return (
-                      <div key={q.id} className="space-y-2">
+                      <div key={q.question_code} className="space-y-2">
                         <Label>{q.prompt}</Label>
                         <div className="space-y-2 rounded-md border p-3">
                           {(q.options ?? []).map((opt) => {
@@ -319,7 +319,7 @@ export default function MyFormDetail() {
 
                   if (q.kind === "date") {
                     return (
-                      <div key={q.id} className="space-y-2">
+                      <div key={q.question_code} className="space-y-2">
                         <Label htmlFor={inputId}>{q.prompt}</Label>
                         <Input id={inputId} name={inputId} type="date" required />
                       </div>
@@ -327,7 +327,7 @@ export default function MyFormDetail() {
                   }
 
                   return (
-                    <div key={q.id} className="space-y-2">
+                    <div key={q.question_code} className="space-y-2">
                       <Label htmlFor={inputId}>{q.prompt}</Label>
                       <Input id={inputId} name={inputId} required />
                     </div>

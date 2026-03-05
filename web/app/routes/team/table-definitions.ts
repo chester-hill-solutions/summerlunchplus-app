@@ -66,8 +66,8 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'form-question': {
     label: 'Form Questions',
     table: 'form_question',
-    select: 'id, form_id, prompt, kind, position',
-    columns: ['id', 'form_id', 'prompt', 'kind', 'position'],
+    select: 'question_code, form_id, prompt, kind, position',
+    columns: ['question_code', 'form_id', 'prompt', 'kind', 'position'],
     order: 'form_id',
   },
   'form-assignment': {
@@ -87,8 +87,8 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'form-answer': {
     label: 'Form Answers',
     table: 'form_answer',
-    select: 'id, submission_id, question_id, value',
-    columns: ['id', 'submission_id', 'question_id', 'value'],
+    select: 'id, submission_id, question_code, value',
+    columns: ['id', 'submission_id', 'question_code', 'value'],
     order: 'id',
   },
   'role-permission': {

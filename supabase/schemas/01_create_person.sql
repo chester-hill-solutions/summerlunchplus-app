@@ -6,6 +6,7 @@ create table public.person (
   email text unique,
   firstname text,
   surname text,
+  date_of_birth date,
   phone text,
   postcode text
 );

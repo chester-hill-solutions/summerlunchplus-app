@@ -25,7 +25,7 @@ create table public.form (
 );
 
 create table public.form_question (
-  id uuid primary key default gen_random_uuid(),
+  question_code text primary key,
   form_id uuid not null references public.form (id) on delete cascade,
   prompt text not null,
   kind form_question_type not null,
@@ -56,9 +56,21 @@ create table public.form_submission (
 create table public.form_answer (
   id uuid primary key default gen_random_uuid(),
   submission_id uuid not null references public.form_submission (id) on delete cascade,
-  question_id uuid not null references public.form_question (id) on delete cascade,
+  question_code text not null references public.form_question (question_code) on delete cascade,
   value jsonb not null,
-  unique (submission_id, question_id)
+  unique (submission_id, question_code)
+);
+
+create table public.sign_up_flow (
+  id uuid primary key default gen_random_uuid(),
+  form_id uuid not null references public.form (id) on delete cascade,
+  slug text not null,
+  step_order integer not null,
+  roles app_role[] not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (form_id),
+  unique (step_order)
 );
 
 -- Timestamps.
@@ -78,6 +90,22 @@ drop trigger if exists on_form_updated_set_timestamp on public.form;
 create trigger on_form_updated_set_timestamp
 before update on public.form
 for each row execute function public.touch_form_updated_at();
+
+create or replace function public.touch_sign_up_flow_updated_at()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+create trigger on_sign_up_flow_updated_set_timestamp
+before update on public.sign_up_flow
+for each row execute function public.touch_sign_up_flow_updated_at();
 
 -- Auto-assign sync helpers.
 create or replace function public.sync_auto_assigned_forms_for_user(p_user_id uuid)
@@ -467,6 +495,19 @@ create policy form_answer_delete_authorized
   for delete
   using (public.authorize('form_answer.delete'));
 
+alter table public.sign_up_flow enable row level security;
+
+create policy sign_up_flow_select_site_read
+  on public.sign_up_flow
+  for select
+  using (public.authorize('site.read'));
+
+create policy sign_up_flow_select_auth_admin
+  on public.sign_up_flow
+  for select
+  to supabase_auth_admin
+  using (true);
+
 -- Supabase auth hook read access.
 create policy form_read_auth_admin
   on public.form
@@ -596,18 +637,21 @@ grant all on table public.form_question to supabase_auth_admin;
 grant all on table public.form_assignment to supabase_auth_admin;
 grant all on table public.form_submission to supabase_auth_admin;
 grant all on table public.form_answer to supabase_auth_admin;
+grant all on table public.sign_up_flow to supabase_auth_admin;
 
 revoke all on table public.form from authenticated, anon, public;
 revoke all on table public.form_question from authenticated, anon, public;
 revoke all on table public.form_assignment from authenticated, anon, public;
 revoke all on table public.form_submission from authenticated, anon, public;
 revoke all on table public.form_answer from authenticated, anon, public;
+revoke all on table public.sign_up_flow from authenticated, anon, public;
 
 grant all on table public.form to authenticated;
 grant all on table public.form_question to authenticated;
 grant all on table public.form_assignment to authenticated;
 grant all on table public.form_submission to authenticated;
 grant all on table public.form_answer to authenticated;
+grant select on table public.sign_up_flow to authenticated;
 
 grant usage on type form_question_type to authenticated, supabase_auth_admin;
 grant usage on type form_assignment_status to authenticated, supabase_auth_admin;

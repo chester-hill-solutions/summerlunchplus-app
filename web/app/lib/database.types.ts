@@ -144,29 +144,29 @@ export type Database = {
       form_answer: {
         Row: {
           id: string
-          question_id: string
+          question_code: string
           submission_id: string
           value: Json
         }
         Insert: {
           id?: string
-          question_id: string
+          question_code: string
           submission_id: string
           value: Json
         }
         Update: {
           id?: string
-          question_id?: string
+          question_code?: string
           submission_id?: string
           value?: Json
         }
         Relationships: [
           {
-            foreignKeyName: "form_answer_question_id_fkey"
-            columns: ["question_id"]
+            foreignKeyName: "form_answer_question_code_fkey"
+            columns: ["question_code"]
             isOneToOne: false
             referencedRelation: "form_question"
-            referencedColumns: ["id"]
+            referencedColumns: ["question_code"]
           },
           {
             foreignKeyName: "form_answer_submission_id_fkey"
@@ -218,27 +218,27 @@ export type Database = {
       form_question: {
         Row: {
           form_id: string
-          id: string
           kind: Database["public"]["Enums"]["form_question_type"]
           options: Json
           position: number
           prompt: string
+          question_code: string
         }
         Insert: {
           form_id: string
-          id?: string
           kind: Database["public"]["Enums"]["form_question_type"]
           options?: Json
           position: number
           prompt: string
+          question_code: string
         }
         Update: {
           form_id?: string
-          id?: string
           kind?: Database["public"]["Enums"]["form_question_type"]
           options?: Json
           position?: number
           prompt?: string
+          question_code?: string
         }
         Relationships: [
           {
@@ -279,11 +279,49 @@ export type Database = {
           },
         ]
       }
+      invites: {
+        Row: {
+          confirmed_at: string | null
+          created_at: string
+          id: string
+          invitee_email: string
+          invitee_user_id: string | null
+          inviter_user_id: string
+          role: Database["public"]["Enums"]["app_role"]
+          status: Database["public"]["Enums"]["invite_status"]
+          updated_at: string
+        }
+        Insert: {
+          confirmed_at?: string | null
+          created_at?: string
+          id?: string
+          invitee_email: string
+          invitee_user_id?: string | null
+          inviter_user_id: string
+          role: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["invite_status"]
+          updated_at?: string
+        }
+        Update: {
+          confirmed_at?: string | null
+          created_at?: string
+          id?: string
+          invitee_email?: string
+          invitee_user_id?: string | null
+          inviter_user_id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["invite_status"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       person: {
         Row: {
+          date_of_birth: string | null
           email: string | null
           firstname: string | null
           id: string
+          password_set: boolean
           phone: string | null
           postcode: string | null
           role: string
@@ -291,9 +329,11 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          date_of_birth?: string | null
           email?: string | null
           firstname?: string | null
           id?: string
+          password_set?: boolean
           phone?: string | null
           postcode?: string | null
           role: string
@@ -301,9 +341,11 @@ export type Database = {
           user_id: string
         }
         Update: {
+          date_of_birth?: string | null
           email?: string | null
           firstname?: string | null
           id?: string
+          password_set?: boolean
           phone?: string | null
           postcode?: string | null
           role?: string
@@ -428,6 +470,44 @@ export type Database = {
           },
         ]
       }
+      sign_up_flow: {
+        Row: {
+          created_at: string
+          form_id: string
+          id: string
+          roles: Database["public"]["Enums"]["app_role"][]
+          slug: string
+          step_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          form_id: string
+          id?: string
+          roles: Database["public"]["Enums"]["app_role"][]
+          slug: string
+          step_order: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          form_id?: string
+          id?: string
+          roles?: Database["public"]["Enums"]["app_role"][]
+          slug?: string
+          step_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sign_up_flow_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: true
+            referencedRelation: "form"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           assigned_by: string | null
@@ -543,6 +623,7 @@ export type Database = {
         | "multi_choice"
         | "date"
         | "address"
+      invite_status: "pending" | "confirmed" | "revoked"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -738,6 +819,7 @@ export const Constants = {
         "date",
         "address",
       ],
+      invite_status: ["pending", "confirmed", "revoked"],
     },
   },
 } as const

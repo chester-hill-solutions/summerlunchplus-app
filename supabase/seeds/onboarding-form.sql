@@ -8,13 +8,13 @@ with form_row as (
         auto_assign = excluded.auto_assign
   returning id
 )
-insert into public.form_question (form_id, prompt, kind, position, options)
-select id, 'Where do you live?', 'text'::form_question_type, 1, '[]'::jsonb from form_row
+insert into public.form_question (question_code, form_id, prompt, kind, position, options)
+select 'onboarding_where_you_live', id, 'Where do you live?', 'text'::form_question_type, 1, '[]'::jsonb from form_row
 union all
-select id, 'Have you been apart of summerlunch+ before?', 'single_choice'::form_question_type, 2, '["yes","no"]'::jsonb from form_row
+select 'onboarding_prior_participation', id, 'Have you been apart of summerlunch+ before?', 'single_choice'::form_question_type, 2, '["yes","no"]'::jsonb from form_row
 union all
-select id, 'Partner-Program', 'text'::form_question_type, 3, '[]'::jsonb from form_row
-on conflict (form_id, position) do update
+select 'onboarding_partner_program', id, 'Partner-Program', 'text'::form_question_type, 3, '[]'::jsonb from form_row
+on conflict (question_code) do update
   set prompt = excluded.prompt,
       kind = excluded.kind,
       options = excluded.options;
