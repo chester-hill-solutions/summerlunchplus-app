@@ -9,7 +9,7 @@ const getCellValue = (column: string, row: Record<string, unknown>) => {
   return (value ?? '').toString()
 }
 
-const getDirectionIndicator = (direction: 'asc' | 'desc') => (direction === 'asc' ? '↑' : '↓')
+const getDirectionIndicator = (direction: 'asc' | 'desc') => (direction === 'asc' ? 'Asc' : 'Desc')
 
 export default function TableDisplay() {
   const { columns, rows, label } = useLoaderData()

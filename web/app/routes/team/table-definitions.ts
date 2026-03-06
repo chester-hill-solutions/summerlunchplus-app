@@ -3,6 +3,7 @@ export type LookupMapping = {
   table: string
   valueColumn: string
   resultColumn: string
+  lookupSelect?: string
   keyColumnInTable?: string
 }
 
@@ -42,8 +43,26 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     label: 'Person Parent Connections',
     table: 'person_parent',
     select: 'person_id, parent_id',
-    columns: ['person_id', 'parent_id'],
+    columns: ['person_name', 'parent_name'],
     order: 'person_id',
+    lookupMappings: [
+      {
+        keyColumn: 'person_id',
+        table: 'person',
+        valueColumn: 'display_name',
+        resultColumn: 'person_name',
+        lookupSelect: "id, concat(firstname, ' ', surname) as display_name",
+        keyColumnInTable: 'id',
+      },
+      {
+        keyColumn: 'parent_id',
+        table: 'person',
+        valueColumn: 'display_name',
+        resultColumn: 'parent_name',
+        lookupSelect: "id, concat(firstname, ' ', surname) as display_name",
+        keyColumnInTable: 'id',
+      },
+    ],
   },
   profiles: {
     label: 'Profiles',

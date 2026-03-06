@@ -32,9 +32,11 @@ export function createTableLoader(tableName: string) {
         }
         if (!ids.size) continue
 
+        const selectExpression =
+          mapping.lookupSelect ?? `${mapping.keyColumnInTable ?? 'id'}, ${mapping.valueColumn}`
         const { data: lookupRowsRaw } = await supabase
           .from(mapping.table)
-          .select(`${mapping.keyColumnInTable ?? 'id'}, ${mapping.valueColumn}`)
+          .select(selectExpression)
           .in(mapping.keyColumnInTable ?? 'id', Array.from(ids))
         const valueById = new Map<string, string>()
         const tableKey = mapping.keyColumnInTable ?? 'id'
