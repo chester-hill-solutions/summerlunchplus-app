@@ -1,9 +1,15 @@
+export type UserEmailMapping = {
+  column: string
+  key: string
+}
+
 export type TableDefinition = {
   label: string
   table: string
   select: string
   columns: string[]
   order: string
+  userEmailMappings?: UserEmailMapping[]
 }
 
 export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
@@ -17,8 +23,9 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   person: {
     label: 'Person',
     table: 'person',
-    select: 'id, user_id, user:auth.users(email), partner_program, role, email, firstname, surname, phone, postcode, password_set',
+    select: 'id, user_id, partner_program, role, email, firstname, surname, phone, postcode, password_set',
     columns: ['partner_program', 'user_email', 'role', 'email', 'firstname', 'surname', 'phone', 'postcode', 'password_set'],
+    userEmailMappings: [{ column: 'user_email', key: 'user_id' }],
     order: 'id',
   },
   'person-parent': {
@@ -52,9 +59,13 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'class-enrollment': {
     label: 'Workshop Enrollments',
     table: 'workshop_enrollment',
-    select: 'id, workshop_id, user_id, user:auth.users(email), decided_by, decided_by:auth.users(email), status, requested_at',
+    select: 'id, workshop_id, user_id, decided_by, status, requested_at',
     columns: ['workshop_id', 'user_email', 'status', 'requested_at', 'decided_by_email'],
     order: 'requested_at',
+    userEmailMappings: [
+      { column: 'user_email', key: 'user_id' },
+      { column: 'decided_by_email', key: 'decided_by' },
+    ],
   },
   form: {
     label: 'Forms',
@@ -73,16 +84,21 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'form-assignment': {
     label: 'Form Assignments',
     table: 'form_assignment',
-    select: 'id, form_id, user_id, user:auth.users(email), status, assigned_at, assigned_by, assigned_by:auth.users(email)',
+    select: 'id, form_id, user_id, status, assigned_at, assigned_by',
     columns: ['form_id', 'user_email', 'status', 'assigned_at', 'assigned_by_email'],
     order: 'assigned_at',
+    userEmailMappings: [
+      { column: 'user_email', key: 'user_id' },
+      { column: 'assigned_by_email', key: 'assigned_by' },
+    ],
   },
   'form-submission': {
     label: 'Form Submissions',
     table: 'form_submission',
-    select: 'id, form_id, user_id, user:auth.users(email), submitted_at',
+    select: 'id, form_id, user_id, submitted_at',
     columns: ['form_id', 'user_email', 'submitted_at'],
     order: 'submitted_at',
+    userEmailMappings: [{ column: 'user_email', key: 'user_id' }],
   },
   'form-answer': {
     label: 'Form Answers',
@@ -101,15 +117,23 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'user-roles': {
     label: 'User Roles',
     table: 'user_roles',
-    select: 'user_id, user:auth.users(email), role, assigned_by, assigned_by:auth.users(email), created_at',
+    select: 'user_id, role, assigned_by, created_at',
     columns: ['user_email', 'role', 'assigned_by_email', 'created_at'],
     order: 'created_at',
+    userEmailMappings: [
+      { column: 'user_email', key: 'user_id' },
+      { column: 'assigned_by_email', key: 'assigned_by' },
+    ],
   },
   invites: {
     label: 'Invites',
     table: 'invites',
-    select: 'id, inviter_user_id, inviter_user:auth.users(email), invitee_user_id, invitee_user:auth.users(email), invitee_email, role, status, created_at',
+    select: 'id, inviter_user_id, invitee_user_id, invitee_email, role, status, created_at',
     columns: ['inviter_user_email', 'invitee_user_email', 'invitee_email', 'role', 'status', 'created_at'],
     order: 'created_at',
+    userEmailMappings: [
+      { column: 'inviter_user_email', key: 'inviter_user_id' },
+      { column: 'invitee_user_email', key: 'invitee_user_id' },
+    ],
   },
 }

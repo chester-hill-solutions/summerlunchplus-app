@@ -33,7 +33,7 @@ export default [
     route("profiles", "routes/team/profiles.tsx"),
     route("workshop", "routes/team/workshop.tsx"),
     route("session", "routes/team/session.tsx"),
-    route("class-enrollment", "routes/team/class-enrollment.tsx"),
+    route("workshop-enrollment", "routes/team/workshop-enrollment.tsx"),
     route("form", "routes/team/form.tsx"),
     route("form-question", "routes/team/form-question.tsx"),
     route("form-assignment", "routes/team/form-assignment.tsx"),

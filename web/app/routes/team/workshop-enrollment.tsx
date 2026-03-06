@@ -3,6 +3,6 @@ import { createTableLoader } from './table-loader'
 
 export const loader = createTableLoader('class-enrollment')
 
-export default function ClassEnrollmentPage() {
+export default function WorkshopEnrollmentPage() {
   return <TableDisplay />
 }

@@ -5,7 +5,7 @@ export const teamPages = [
   { to: '/team/profiles', label: 'Profiles', description: 'Extended profile metadata.' },
   { to: '/team/workshop', label: 'Workshops', description: 'Current workshop sections and limits.' },
   { to: '/team/session', label: 'Sessions', description: 'Individual session schedule entries.' },
-  { to: '/team/class-enrollment', label: 'Workshop enrollments', description: 'Pending and approved workshop enrollments.' },
+  { to: '/team/workshop-enrollment', label: 'Workshop enrollments', description: 'Pending and approved workshop enrollments.' },
   { to: '/team/form', label: 'Forms', description: 'Onboarding forms configuration.' },
   { to: '/team/form-question', label: 'Form questions', description: 'Questions tied to forms.' },
   { to: '/team/form-assignment', label: 'Form assignments', description: 'Assignments per user.' },
