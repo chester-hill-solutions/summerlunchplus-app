@@ -9,12 +9,16 @@ const getCellValue = (column: string, row: Record<string, unknown>) => {
   return (value ?? '').toString()
 }
 
-const getDirectionIndicator = (direction: 'asc' | 'desc') => (direction === 'asc' ? 'Asc' : 'Desc')
+const getDirectionIndicator = (stage: 0 | 1 | 2) => {
+  if (stage === 1) return '↓'
+  if (stage === 2) return '↑'
+  return ''
+}
 
 export default function TableDisplay() {
   const { columns, rows, label } = useLoaderData()
   const [sortColumn, setSortColumn] = useState<string | null>(null)
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [sortStage, setSortStage] = useState<0 | 1 | 2>(0)
   const [filters, setFilters] = useState<Record<string, string>>({})
 
   const derivedRows = useMemo(() => {
@@ -26,25 +30,32 @@ export default function TableDisplay() {
         return getCellValue(column, row).toLowerCase().includes(filter.toLowerCase())
       })
     )
-    if (sortColumn) {
+    if (sortColumn && sortStage > 0) {
       adjustedRows.sort((a, b) => {
         const aValue = getCellValue(sortColumn, a)
         const bValue = getCellValue(sortColumn, b)
         if (aValue === bValue) return 0
-        const order = sortDirection === 'asc' ? 1 : -1
+        const order = sortStage === 2 ? 1 : -1
         return aValue.localeCompare(bValue) * order
       })
     }
     return adjustedRows
-  }, [rows, columns, filters, sortColumn, sortDirection])
+  }, [rows, columns, filters, sortColumn, sortStage])
 
   const updateSort = (column: string) => {
-    if (sortColumn === column) {
-      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'))
+    if (sortColumn !== column) {
+      setSortColumn(column)
+      setSortStage(1)
       return
     }
-    setSortColumn(column)
-    setSortDirection('asc')
+    setSortStage(prev => {
+      const next = prev + 1
+      if (next > 2) {
+        setSortColumn(null)
+        return 0
+      }
+      return next as 0 | 1 | 2
+    })
   }
 
   const updateFilter = (column: string, value: string) => {
@@ -69,7 +80,7 @@ export default function TableDisplay() {
                     className="flex items-center gap-1 font-semibold"
                   >
                     {column.replace(/_/g, ' ')}
-                    {sortColumn === column ? getDirectionIndicator(sortDirection) : '↕'}
+                    {getDirectionIndicator(sortColumn === column ? sortStage : 0)}
                   </button>
                 </th>
               ))}
