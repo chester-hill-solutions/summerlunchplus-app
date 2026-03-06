@@ -5,7 +5,7 @@
 with target_user as (
   select id
   from auth.users
-  where email = 'sai@chsolutions.ca'
+  where email = 'sai+admin@chsolutions.ca'
 )
 insert into public.user_roles (user_id, role, assigned_by)
 select
