@@ -142,7 +142,7 @@ export default function MyFormsPage() {
   const fetcher = useFetcher<ActionData>();
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-10">
+    <main className="flex w-full flex-col gap-6 px-6 py-10">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold" role="heading" aria-level={1}>
           Your forms

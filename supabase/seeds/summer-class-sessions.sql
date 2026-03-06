@@ -1,7 +1,7 @@
--- Summer class sections and sessions (June 1 – August 31, 2026)
+-- Summer workshop sections and sessions (June 1 – August 31, 2026)
 -- These seeds cover the two age groups and all-ages tracks requested for Tuesdays, Wednesdays, and Thursdays.
 
-insert into public.class (id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity) values
+insert into public.workshop (id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity) values
   ('214b9aff-3391-4685-9b09-c93e8ce4ba50', '12+ — Tuesday 4-5:30pm – Summer Sessions', '2026-08-01T00:00:00Z', '2026-09-01T23:59:59Z', 20, 8),
   ('c24ce9f0-29bb-467d-8ff4-b7ff1b608653', '12+ — Wednesday 5-6:30pm – Summer Sessions', '2026-07-20T00:00:00Z', '2026-08-20T23:59:59Z', 20, 8),
   ('202998a9-a086-466a-a378-f0771bd996d2', '12+ — Thursday 5-6:30pm – Summer Sessions', '2026-07-10T00:00:00Z', '2026-08-10T23:59:59Z', 20, 8),
@@ -12,7 +12,7 @@ insert into public.class (id, description, enrollment_open_at, enrollment_close_
   ('153fab85-d06b-4847-8808-38dffe158f94', 'All Ages Lunch — Thursday 11-12:30pm – Summer Sessions', '2026-05-10T00:00:00Z', '2026-06-10T23:59:59Z', 30, 8),
   ('caa00244-8af7-41bb-829c-27817d68f46c', 'All Ages Advanced Chef — Thursday 5-6:30pm – Summer Sessions', '2026-05-01T00:00:00Z', '2026-06-01T23:59:59Z', 30, 8);
 
-insert into public.session (id, class_id, starts_at, ends_at, location) values
+insert into public.session (id, workshop_id, starts_at, ends_at, location) values
   ('c7561f00-7db2-44d2-88c2-cbd9f0206b1d', '214b9aff-3391-4685-9b09-c93e8ce4ba50', '2026-06-02T16:00:00Z', '2026-06-02T17:30:00Z', 'Community Kitchen'),
   ('8d6787e7-554b-4645-8575-6ae54baeeb8f', 'bfe62a82-558f-4f9f-8f9d-423494baaf37', '2026-06-02T16:00:00Z', '2026-06-02T17:30:00Z', 'Community Kitchen'),
   ('a4c498ac-c86c-4d74-ac32-9f4e3bfc1fe6', 'c24ce9f0-29bb-467d-8ff4-b7ff1b608653', '2026-06-03T17:00:00Z', '2026-06-03T18:30:00Z', 'Community Kitchen'),

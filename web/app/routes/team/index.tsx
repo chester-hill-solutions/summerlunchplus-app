@@ -1,4 +1,4 @@
-import type { Route } from './+types/team._index'
+import type { Route } from './+types/index'
 import { teamPages } from './nav'
 
 export const loader = ({ context }: Route.LoaderArgs) => context

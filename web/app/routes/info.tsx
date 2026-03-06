@@ -12,7 +12,7 @@ export const meta = ({ }: Route.MetaArgs) => {
 
 export default function InfoPage() {
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-4xl flex-col items-center justify-center gap-6 px-6 text-center">
+    <main className="flex min-h-svh w-full flex-col items-center justify-center gap-6 px-6 text-center">
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">
           This is the public home page, you are not logged in

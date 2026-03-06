@@ -222,7 +222,7 @@ export default function MyFormDetail() {
   }, [actionData?.error, navigation.state, submitted]);
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-10">
+    <main className="flex w-full flex-col gap-6 px-6 py-10">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Form</p>

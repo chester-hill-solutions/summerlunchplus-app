@@ -14,8 +14,11 @@ type NavbarProps = {
 export function Navbar({ user, role }: NavbarProps) {
   return (
     <header className="border-b bg-background/80 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-4">
-        <Link to="/" className="text-lg font-semibold tracking-tight">
+      <div className="flex w-full items-center justify-between px-6 py-4">
+        <Link
+          to="/"
+          className="text-2xl font-black tracking-tight text-[var(--color-summer)]"
+        >
           summerlunch+
         </Link>
 

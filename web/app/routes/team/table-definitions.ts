@@ -36,8 +36,8 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     order: 'created_at',
   },
   class: {
-    label: 'Classes',
-    table: 'class',
+    label: 'Workshops',
+    table: 'workshop',
     select: 'id, description, enrollment_open_at, enrollment_close_at, capacity',
     columns: ['id', 'description', 'enrollment_open_at', 'enrollment_close_at', 'capacity'],
     order: 'enrollment_open_at',
@@ -45,15 +45,15 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   session: {
     label: 'Sessions',
     table: 'session',
-    select: 'id, class_id, starts_at, ends_at, location',
-    columns: ['id', 'class_id', 'starts_at', 'ends_at', 'location'],
+    select: 'id, workshop_id, starts_at, ends_at, location',
+    columns: ['id', 'workshop_id', 'starts_at', 'ends_at', 'location'],
     order: 'starts_at',
   },
   'class-enrollment': {
-    label: 'Class Enrollments',
-    table: 'class_enrollment',
-    select: 'id, class_id, user_id, status, requested_at',
-    columns: ['id', 'class_id', 'user_id', 'status', 'requested_at'],
+    label: 'Workshop Enrollments',
+    table: 'workshop_enrollment',
+    select: 'id, workshop_id, user_id, status, requested_at',
+    columns: ['id', 'workshop_id', 'user_id', 'status', 'requested_at'],
     order: 'requested_at',
   },
   form: {

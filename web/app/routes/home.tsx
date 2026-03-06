@@ -21,30 +21,30 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createClient(request)
   const now = new Date().toISOString()
 
-  const { data: classes, error: classError } = await supabase
-    .from('class')
+  const { data: workshops, error: workshopError } = await supabase
+    .from('workshop')
     .select('id, description, enrollment_open_at, enrollment_close_at')
     .gte('enrollment_close_at', now)
     .order('enrollment_open_at', { ascending: true })
-  if (classError) {
-    throw new Error(classError.message)
+  if (workshopError) {
+    throw new Error(workshopError.message)
   }
 
   const { data: sessions } = await supabase
     .from('session')
-    .select('class_id, starts_at, ends_at')
+    .select('workshop_id, starts_at, ends_at')
 
   const { data: enrollments } = await supabase
-    .from('class_enrollment')
-    .select('class_id, status')
+    .from('workshop_enrollment')
+    .select('workshop_id, status')
     .eq('user_id', auth.user.id)
 
   const bounds = (sessions || []).reduce<Record<string, { start: string; end: string }>>((acc, session) => {
-    if (!session?.class_id) return acc
-    const current = acc[session.class_id]
+    if (!session?.workshop_id) return acc
+    const current = acc[session.workshop_id]
     const start = current?.start ?? session.starts_at
     const end = current?.end ?? session.ends_at
-    acc[session.class_id] = {
+      acc[session.workshop_id] = {
       start: start && start < session.starts_at ? start : session.starts_at,
       end: end && end > session.ends_at ? end : session.ends_at,
     }
@@ -55,10 +55,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     user: auth.user,
     role: auth.claims.role,
     now,
-    classes: (classes || []).map(cls => ({
-      ...cls,
-      class_start: bounds[cls.id]?.start ?? '',
-      class_end: bounds[cls.id]?.end ?? '',
+    workshops: (workshops || []).map(workshop => ({
+      ...workshop,
+      workshop_start: bounds[workshop.id]?.start ?? '',
+      workshop_end: bounds[workshop.id]?.end ?? '',
     })),
     enrollments: enrollments ?? [],
   }
@@ -67,20 +67,20 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createClient(request)
   const formData = await request.formData()
-  const classId = formData.get('classId') as string
+  const workshopId = formData.get('workshopId') as string
   const { data: currentUser } = await supabase.auth.getUser()
 
   if (!currentUser?.user?.id) {
     return { error: 'Authentication required' }
   }
 
-  const { error } = await supabase.from('class_enrollment').upsert(
+  const { error } = await supabase.from('workshop_enrollment').upsert(
     {
-      class_id: classId,
+      workshop_id: workshopId,
       user_id: currentUser.user.id,
       status: 'pending',
     },
-    { onConflict: 'class_id,user_id' }
+    { onConflict: 'workshop_id,user_id' }
   )
 
   if (error) {
@@ -90,62 +90,62 @@ export async function action({ request }: Route.ActionArgs) {
   return { success: true }
 }
 
-type ClassRow = {
+type WorkshopRow = {
   id: string
   description: string
   enrollment_open_at: string
   enrollment_close_at: string
-  class_start: string
-  class_end: string
+  workshop_start: string
+  workshop_end: string
 }
 
 type LoaderData = {
   user: Awaited<ReturnType<typeof enforceOnboardingGuard>>['user']
   role: string | null
   now: string
-  classes: ClassRow[]
-  enrollments: { class_id: string; status: string }[]
+  workshops: WorkshopRow[]
+  enrollments: { workshop_id: string; status: string }[]
 }
 
 export default function Home() {
-  const { classes, enrollments, now } = useLoaderData<LoaderData>()
+  const { workshops, enrollments, now } = useLoaderData<LoaderData>()
   const fetcher = useFetcher<typeof action>()
-  const statusByClass = new Map(enrollments.map(enrollment => [enrollment.class_id, enrollment.status]))
+  const statusByWorkshop = new Map(enrollments.map(enrollment => [enrollment.workshop_id, enrollment.status]))
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-12">
+    <main className="w-full px-6 py-12">
       <header className="mb-4">
-        <h1 className="text-3xl font-semibold">Summer Classes</h1>
-        <p className="text-sm text-muted-foreground">Choose a class and complete enrollment while the window is open.</p>
+        <h1 className="text-3xl font-semibold">Summer Workshops</h1>
+        <p className="text-sm text-muted-foreground">Choose a workshop and complete enrollment while the window is open.</p>
       </header>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Class</TableHead>
+            <TableHead>Workshop</TableHead>
             <TableHead>Enrollment starts</TableHead>
             <TableHead>Enrollment ends</TableHead>
-            <TableHead>Class starts</TableHead>
-            <TableHead>Class ends</TableHead>
+            <TableHead>Workshop starts</TableHead>
+            <TableHead>Workshop ends</TableHead>
             <TableHead>Enroll</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {classes.map(cls => {
-            const enrollmentStatus = statusByClass.get(cls.id)
-            const isOpen = now >= cls.enrollment_open_at && now <= cls.enrollment_close_at
+          {workshops.map(workshop => {
+            const enrollmentStatus = statusByWorkshop.get(workshop.id)
+            const isOpen = now >= workshop.enrollment_open_at && now <= workshop.enrollment_close_at
             const disabled = !isOpen || enrollmentStatus === 'pending' || enrollmentStatus === 'approved'
             return (
-              <TableRow key={cls.id}>
+              <TableRow key={workshop.id}>
                 <TableCell>
-                  <p className="font-medium text-slate-900">{cls.description}</p>
+                  <p className="font-medium text-slate-900">{workshop.description}</p>
                 </TableCell>
-                <TableCell>{formatDate(cls.enrollment_open_at)}</TableCell>
-                <TableCell>{formatDate(cls.enrollment_close_at)}</TableCell>
-                <TableCell>{cls.class_start ? formatDate(cls.class_start) : 'TBD'}</TableCell>
-                <TableCell>{cls.class_end ? formatDate(cls.class_end) : 'TBD'}</TableCell>
+                <TableCell>{formatDate(workshop.enrollment_open_at)}</TableCell>
+                <TableCell>{formatDate(workshop.enrollment_close_at)}</TableCell>
+                <TableCell>{workshop.workshop_start ? formatDate(workshop.workshop_start) : 'TBD'}</TableCell>
+                <TableCell>{workshop.workshop_end ? formatDate(workshop.workshop_end) : 'TBD'}</TableCell>
                 <TableCell>
                   <fetcher.Form method="post" className="flex flex-col gap-1">
-                    <input type="hidden" name="classId" value={cls.id} />
+                    <input type="hidden" name="workshopId" value={workshop.id} />
                     <Button type="submit" variant={disabled ? 'ghost' : 'default'} size="sm" disabled={disabled}>
                       {enrollmentStatus === 'approved'
                         ? 'Enrolled'

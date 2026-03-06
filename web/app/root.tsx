@@ -40,7 +40,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const { data: claimsData } = await supabase.auth.getClaims();
-  const claims = claimsData.claims as { user_role?: string } | null | undefined;
+  const claims = claimsData?.claims as { user_role?: string } | null | undefined;
   const role = typeof claims?.user_role === "string" ? claims.user_role : null;
 
   return { user, role };
@@ -92,7 +92,7 @@ export default function App() {
     const refresh_token = params.get("refresh_token");
     const type = params.get("type");
 
-    if (!access_token && !refresh_token) return;
+    if (!access_token || !refresh_token) return;
     hashHandledRef.current = true;
 
     const supabase = createBrowserClient();

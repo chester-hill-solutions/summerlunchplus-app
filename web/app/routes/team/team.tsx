@@ -1,4 +1,5 @@
 import { NavLink, Outlet, redirect, useLoaderData } from 'react-router'
+import type { Route } from './+types/team'
 import { requireAuth } from '@/lib/auth.server'
 import { cn } from '@/lib/utils'
 import { teamPages } from './nav'

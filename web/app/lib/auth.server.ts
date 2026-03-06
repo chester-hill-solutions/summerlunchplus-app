@@ -17,7 +17,7 @@ export async function requireAuth(request: Request) {
   }
 
   const { data: claimsData } = await supabase.auth.getClaims();
-  const claims = claimsData.claims as
+  const claims = claimsData?.claims as
     | { user_role?: string; permissions?: string[]; onboarding_complete?: boolean }
     | null
     | undefined;

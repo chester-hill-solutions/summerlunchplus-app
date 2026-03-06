@@ -22,6 +22,8 @@ create type app_permissions as enum (
   'cohort.create', 'cohort.read', 'cohort.update', 'cohort.delete',
   'class.create', 'class.read', 'class.update', 'class.delete',
   'class_enrollment.create', 'class_enrollment.read', 'class_enrollment.update', 'class_enrollment.update_status',
+  'workshop.create', 'workshop.read', 'workshop.update', 'workshop.delete',
+  'workshop_enrollment.create', 'workshop_enrollment.read', 'workshop_enrollment.update', 'workshop_enrollment.update_status',
   'cohort_enrollment.create', 'cohort_enrollment.read', 'cohort_enrollment.update', 'cohort_enrollment.update_status',
   'user_roles.manage', 'role_permission.manage',
   'profiles.read', 'profiles.update'

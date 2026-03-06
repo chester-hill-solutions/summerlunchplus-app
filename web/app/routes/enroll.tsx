@@ -91,7 +91,7 @@ export default function EnrollPage() {
   const enrollmentByCohort = new Map(enrollments.map((e) => [e.cohort_id, e]))
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-10">
+    <main className="flex w-full flex-col gap-6 px-6 py-10">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold">Enroll in a cohort</h1>
         <p className="text-muted-foreground text-sm">Choose a cohort to request enrollment. Requests go to admins for approval.</p>
