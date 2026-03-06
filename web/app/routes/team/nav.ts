@@ -3,7 +3,7 @@ export const teamPages = [
   { to: '/team/person', label: 'Person records', description: 'Person profiles tied to auth users.' },
   { to: '/team/person-parent', label: 'Person parent links', description: 'Parent/child relationships.' },
   { to: '/team/profiles', label: 'Profiles', description: 'Extended profile metadata.' },
-  { to: '/team/class', label: 'Workshops', description: 'Current workshop sections and limits.' },
+  { to: '/team/workshop', label: 'Workshops', description: 'Current workshop sections and limits.' },
   { to: '/team/session', label: 'Sessions', description: 'Individual session schedule entries.' },
   { to: '/team/class-enrollment', label: 'Workshop enrollments', description: 'Pending and approved workshop enrollments.' },
   { to: '/team/form', label: 'Forms', description: 'Onboarding forms configuration.' },
