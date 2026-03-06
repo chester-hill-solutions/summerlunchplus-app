@@ -32,20 +32,22 @@ export function createTableLoader(tableName: string) {
         }
         if (!ids.size) continue
 
-        const { data: lookupRows } = await supabase
+        const { data: lookupRowsRaw } = await supabase
           .from(mapping.table)
           .select(`${mapping.keyColumnInTable ?? 'id'}, ${mapping.valueColumn}`)
           .in(mapping.keyColumnInTable ?? 'id', Array.from(ids))
         const valueById = new Map<string, string>()
-        for (const lookup of lookupRows ?? []) {
-          const idValue = lookup?.[mapping.keyColumnInTable ?? 'id']
-          const displayValue = lookup?.[mapping.valueColumn]
+        const tableKey = mapping.keyColumnInTable ?? 'id'
+        const lookupRows = (lookupRowsRaw ?? []) as unknown as Record<string, unknown>[]
+        for (const lookup of lookupRows) {
+          const idValue = lookup[tableKey] as string | undefined
+          const displayValue = lookup[mapping.valueColumn] as string | undefined
           if (typeof idValue === 'string' && typeof displayValue === 'string') {
             valueById.set(idValue, displayValue)
           }
         }
         for (const row of rows) {
-          const idValue = row[keyCol]
+          const idValue = row[keyCol] as string | undefined
           const lookupValue = typeof idValue === 'string' ? valueById.get(idValue) ?? '' : ''
           row[mapping.resultColumn] = lookupValue
         }
