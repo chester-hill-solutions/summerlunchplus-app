@@ -8,5 +8,6 @@ create table public.person (
   surname text,
   date_of_birth date,
   phone text,
-  postcode text
+  postcode text,
+  partner_program text
 );

@@ -34,6 +34,7 @@ type LoaderData = {
   surname: string | null
   phone: string | null
   postcode: string | null
+  partnerProgram: string | null
   inviterPid: string | null
   inviterRole: 'parent' | 'student' | null
   hasRelationship: boolean
@@ -45,6 +46,16 @@ type LoaderData = {
   totalFormSteps: number
   formsComplete: boolean
 }
+
+const PARTNER_SITE_OPTIONS = [
+  'Downtown Community Hub',
+  'Northside Family Centre',
+  'Eastside Beacon Hub',
+  'Virtual / Remote'
+]
+
+const formControlClasses =
+  'file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive'
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { supabase, headers } = createClient(request)
@@ -71,13 +82,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const { data: person } = await supabase
     .from('person')
-    .select('firstname, surname, phone, postcode, role')
+    .select('firstname, surname, phone, postcode, role, partner_program')
     .eq('id', pid)
     .single()
   if (!person) throw redirect('/auth/sign-up', { headers })
 
   const resolvedRole = (roleParam ?? (person.role as 'parent' | 'student') ?? 'student') as 'parent' | 'student'
-  const detailsComplete = Boolean(person.firstname && person.surname && person.phone && person.postcode)
+  const detailsComplete =
+    Boolean(person.firstname && person.surname && person.phone && person.postcode && person.partner_program)
 
   const { data: relationship } = await supabase
     .from('person_parent')
@@ -196,6 +208,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     surname: person.surname,
     phone: person.phone,
     postcode: person.postcode,
+    partnerProgram: person.partner_program ?? null,
     inviterPid: url.searchParams.get('inviter_pid'),
     inviterRole: (url.searchParams.get('inviter_role') as 'parent' | 'student') ?? null,
     hasRelationship,
@@ -222,6 +235,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const surname = (formData.get('surname') as string)?.trim()
   const phone = (formData.get('phone') as string)?.trim()
   const postcode = (formData.get('postcode') as string)?.trim()
+  const partnerProgramValue = (formData.get('partner-program') as string)?.trim() ?? ''
   const dateOfBirth = (formData.get('date_of_birth') as string)?.trim()
   const inviteEmail = (formData.get('invite-email') as string)?.trim()
   const postalRe = /^[A-Z]\d[A-Z] \d[A-Z]\d$/
@@ -319,6 +333,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!postalRe.test(postcode)) {
       return { error: 'Postal code must match A1A 1A1 format' }
     }
+    if (!partnerProgramValue) {
+      return { error: 'Please select which site you are attending from' }
+    }
 
     const userId = currentUser?.user?.id
     console.log('sign-up-details action start', { pid, userId })
@@ -334,6 +351,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       phone,
       postcode,
       email: inviterEmail,
+      partner_program: partnerProgramValue,
     }
 
     if (role === 'student') {
@@ -444,6 +462,7 @@ export default function SignUpDetails() {
     surname,
     phone,
     postcode: loaderPostcode,
+    partnerProgram: loaderPartnerProgram,
     formSteps,
     currentForm,
     currentFormQuestions,
@@ -452,6 +471,7 @@ export default function SignUpDetails() {
     totalFormSteps,
   } = data
   const [postcode, setPostcode] = useState(loaderPostcode ?? '')
+  const [partnerProgram, setPartnerProgram] = useState(loaderPartnerProgram ?? '')
   const error = fetcher.data?.error
   const loading = fetcher.state === 'submitting'
   const inviteLabel = role === 'student' ? "Parent's email" : "Student's email"
@@ -478,7 +498,7 @@ export default function SignUpDetails() {
 
   return (
     <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full">
+      <div className="w-full max-w-3xl">
         <Card>
           <CardHeader>
             <CardTitle className="text-2xl">{stageTitles[step]}</CardTitle>
@@ -519,6 +539,26 @@ export default function SignUpDetails() {
                 <div className="grid gap-2">
                   <Label htmlFor="phone">Phone</Label>
                   <Input id="phone" name="phone" type="tel" defaultValue={phone ?? ''} required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="partner-program">Please select which site you are attending from</Label>
+                  <select
+                    id="partner-program"
+                    name="partner-program"
+                    value={partnerProgram}
+                    onChange={e => setPartnerProgram(e.target.value)}
+                    className={formControlClasses}
+                    required
+                  >
+                    <option value="" disabled>
+                      Select a site
+                    </option>
+                    {PARTNER_SITE_OPTIONS.map(option => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 {role === 'student' && (
                   <div className="grid gap-2">
@@ -572,6 +612,7 @@ export default function SignUpDetails() {
                 <input type="hidden" name="firstname" value={firstname ?? ''} />
                 <input type="hidden" name="surname" value={surname ?? ''} />
                 <input type="hidden" name="phone" value={phone ?? ''} />
+                <input type="hidden" name="partner-program" value={partnerProgram ?? ''} />
                 <input type="hidden" name="postcode" value={postcode ?? ''} />
                 <div className="grid gap-2">
                   <Label htmlFor="invite-email">{inviteLabel}</Label>

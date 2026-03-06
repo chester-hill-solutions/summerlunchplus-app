@@ -35,7 +35,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     columns: ['id', 'email', 'full_name', 'created_at'],
     order: 'created_at',
   },
-  class: {
+  workshop: {
     label: 'Workshops',
     table: 'workshop',
     select: 'id, description, enrollment_open_at, enrollment_close_at, capacity',

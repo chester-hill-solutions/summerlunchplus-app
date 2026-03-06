@@ -1,43 +1,14 @@
-create type "public"."app_permissions" as enum ('site.read', 'form.create', 'form.read', 'form.update', 'form.delete', 'form_question.create', 'form_question.read', 'form_question.update', 'form_question.delete', 'form_assignment.create', 'form_assignment.read', 'form_assignment.update', 'form_assignment.delete', 'form_submission.create', 'form_submission.read', 'form_submission.update', 'form_submission.delete', 'form_answer.create', 'form_answer.read', 'form_answer.update', 'form_answer.delete', 'semester.create', 'semester.read', 'semester.update', 'semester.delete', 'cohort.create', 'cohort.read', 'cohort.update', 'cohort.delete', 'class.create', 'class.read', 'class.update', 'class.delete', 'class_enrollment.create', 'class_enrollment.read', 'class_enrollment.update', 'class_enrollment.update_status', 'cohort_enrollment.create', 'cohort_enrollment.read', 'cohort_enrollment.update', 'cohort_enrollment.update_status', 'user_roles.manage', 'role_permission.manage', 'profiles.read', 'profiles.update');
+create type "public"."app_permissions" as enum ('site.read', 'form.create', 'form.read', 'form.update', 'form.delete', 'form_question.create', 'form_question.read', 'form_question.update', 'form_question.delete', 'form_assignment.create', 'form_assignment.read', 'form_assignment.update', 'form_assignment.delete', 'form_submission.create', 'form_submission.read', 'form_submission.update', 'form_submission.delete', 'form_answer.create', 'form_answer.read', 'form_answer.update', 'form_answer.delete', 'workshop.create', 'workshop.read', 'workshop.update', 'workshop.delete', 'workshop_enrollment.create', 'workshop_enrollment.read', 'workshop_enrollment.update', 'workshop_enrollment.update_status', 'user_roles.manage', 'role_permission.manage', 'profiles.read', 'profiles.update');
 
 create type "public"."app_role" as enum ('unassigned', 'admin', 'manager', 'staff', 'instructor', 'student', 'parent');
 
-create type "public"."class_enrollment_status" as enum ('pending', 'approved', 'rejected');
-
 create type "public"."form_assignment_status" as enum ('pending', 'submitted');
 
-create type "public"."form_question_type" as enum ('text', 'single_choice', 'multi_choice', 'date', 'address');
+create type "public"."form_question_type" as enum ('text', 'single_choice', 'multi_choice', 'date', 'address', 'agreement', 'checkbox');
 
+create type "public"."invite_status" as enum ('pending', 'confirmed', 'revoked');
 
-  create table "public"."class" (
-    "id" uuid not null default gen_random_uuid(),
-    "description" text,
-    "enrollment_open_at" timestamp with time zone,
-    "enrollment_close_at" timestamp with time zone,
-    "capacity" integer not null default 0,
-    "wait_list_capacity" integer not null default 0,
-    "created_at" timestamp with time zone not null default now(),
-    "updated_at" timestamp with time zone not null default now()
-      );
-
-
-alter table "public"."class" enable row level security;
-
-
-  create table "public"."class_enrollment" (
-    "id" uuid not null default gen_random_uuid(),
-    "class_id" uuid,
-    "user_id" uuid,
-    "status" public.class_enrollment_status not null default 'pending'::public.class_enrollment_status,
-    "requested_at" timestamp with time zone not null default now(),
-    "decided_at" timestamp with time zone,
-    "decided_by" uuid,
-    "created_at" timestamp with time zone not null default now(),
-    "updated_at" timestamp with time zone not null default now()
-      );
-
-
-alter table "public"."class_enrollment" enable row level security;
+create type "public"."workshop_enrollment_status" as enum ('pending', 'approved', 'rejected');
 
 
   create table "public"."form" (
@@ -57,7 +28,7 @@ alter table "public"."form" enable row level security;
   create table "public"."form_answer" (
     "id" uuid not null default gen_random_uuid(),
     "submission_id" uuid not null,
-    "question_id" uuid not null,
+    "question_code" text not null,
     "value" jsonb not null
       );
 
@@ -80,10 +51,10 @@ alter table "public"."form_assignment" enable row level security;
 
 
   create table "public"."form_question" (
-    "id" uuid not null default gen_random_uuid(),
+    "question_code" text not null,
     "form_id" uuid not null,
     "prompt" text not null,
-    "kind" public.form_question_type not null,
+    "type" public.form_question_type not null,
     "position" integer not null,
     "options" jsonb not null default '[]'::jsonb
       );
@@ -103,14 +74,32 @@ alter table "public"."form_question" enable row level security;
 alter table "public"."form_submission" enable row level security;
 
 
+  create table "public"."invites" (
+    "id" uuid not null default gen_random_uuid(),
+    "inviter_user_id" uuid not null,
+    "invitee_user_id" uuid,
+    "invitee_email" text not null,
+    "role" public.app_role not null,
+    "status" public.invite_status not null default 'pending'::public.invite_status,
+    "created_at" timestamp with time zone not null default now(),
+    "updated_at" timestamp with time zone not null default now(),
+    "confirmed_at" timestamp with time zone
+      );
+
+
+
   create table "public"."person" (
     "id" uuid not null default gen_random_uuid(),
     "user_id" uuid not null,
     "role" text not null,
+    "email" text,
     "firstname" text,
     "surname" text,
+    "date_of_birth" date,
     "phone" text,
-    "postcode" text
+    "postcode" text,
+    "partner_program" text,
+    "password_set" boolean not null default false
       );
 
 
@@ -148,7 +137,7 @@ alter table "public"."role_permission" enable row level security;
 
   create table "public"."session" (
     "id" uuid not null default gen_random_uuid(),
-    "class_id" uuid,
+    "workshop_id" uuid,
     "starts_at" timestamp with time zone not null,
     "ends_at" timestamp with time zone not null,
     "location" text,
@@ -158,6 +147,20 @@ alter table "public"."role_permission" enable row level security;
 
 
 alter table "public"."session" enable row level security;
+
+
+  create table "public"."sign_up_flow" (
+    "id" uuid not null default gen_random_uuid(),
+    "form_id" uuid not null,
+    "slug" text not null,
+    "step_order" integer not null,
+    "roles" public.app_role[] not null,
+    "created_at" timestamp with time zone not null default now(),
+    "updated_at" timestamp with time zone not null default now()
+      );
+
+
+alter table "public"."sign_up_flow" enable row level security;
 
 
   create table "public"."user_roles" (
@@ -170,15 +173,40 @@ alter table "public"."session" enable row level security;
 
 alter table "public"."user_roles" enable row level security;
 
-CREATE UNIQUE INDEX class_enrollment_class_id_user_id_key ON public.class_enrollment USING btree (class_id, user_id);
 
-CREATE UNIQUE INDEX class_enrollment_pkey ON public.class_enrollment USING btree (id);
+  create table "public"."workshop" (
+    "id" uuid not null default gen_random_uuid(),
+    "description" text,
+    "enrollment_open_at" timestamp with time zone,
+    "enrollment_close_at" timestamp with time zone,
+    "capacity" integer not null default 0,
+    "wait_list_capacity" integer not null default 0,
+    "created_at" timestamp with time zone not null default now(),
+    "updated_at" timestamp with time zone not null default now()
+      );
 
-CREATE UNIQUE INDEX class_pkey ON public.class USING btree (id);
+
+alter table "public"."workshop" enable row level security;
+
+
+  create table "public"."workshop_enrollment" (
+    "id" uuid not null default gen_random_uuid(),
+    "workshop_id" uuid,
+    "user_id" uuid,
+    "status" public.workshop_enrollment_status not null default 'pending'::public.workshop_enrollment_status,
+    "requested_at" timestamp with time zone not null default now(),
+    "decided_at" timestamp with time zone,
+    "decided_by" uuid,
+    "created_at" timestamp with time zone not null default now(),
+    "updated_at" timestamp with time zone not null default now()
+      );
+
+
+alter table "public"."workshop_enrollment" enable row level security;
 
 CREATE UNIQUE INDEX form_answer_pkey ON public.form_answer USING btree (id);
 
-CREATE UNIQUE INDEX form_answer_submission_id_question_id_key ON public.form_answer USING btree (submission_id, question_id);
+CREATE UNIQUE INDEX form_answer_submission_id_question_code_key ON public.form_answer USING btree (submission_id, question_code);
 
 CREATE UNIQUE INDEX form_assignment_form_id_user_id_key ON public.form_assignment USING btree (form_id, user_id);
 
@@ -190,11 +218,15 @@ CREATE UNIQUE INDEX form_pkey ON public.form USING btree (id);
 
 CREATE UNIQUE INDEX form_question_form_id_position_key ON public.form_question USING btree (form_id, "position");
 
-CREATE UNIQUE INDEX form_question_pkey ON public.form_question USING btree (id);
+CREATE UNIQUE INDEX form_question_pkey ON public.form_question USING btree (question_code);
 
 CREATE UNIQUE INDEX form_submission_form_id_user_id_key ON public.form_submission USING btree (form_id, user_id);
 
 CREATE UNIQUE INDEX form_submission_pkey ON public.form_submission USING btree (id);
+
+CREATE UNIQUE INDEX invites_pkey ON public.invites USING btree (id);
+
+CREATE UNIQUE INDEX person_email_key ON public.person USING btree (email);
 
 CREATE UNIQUE INDEX person_parent_person_id_parent_id_key ON public.person_parent USING btree (person_id, parent_id);
 
@@ -208,11 +240,19 @@ CREATE UNIQUE INDEX role_permission_pkey ON public.role_permission USING btree (
 
 CREATE UNIQUE INDEX session_pkey ON public.session USING btree (id);
 
+CREATE UNIQUE INDEX sign_up_flow_form_id_key ON public.sign_up_flow USING btree (form_id);
+
+CREATE UNIQUE INDEX sign_up_flow_pkey ON public.sign_up_flow USING btree (id);
+
+CREATE UNIQUE INDEX sign_up_flow_step_order_key ON public.sign_up_flow USING btree (step_order);
+
 CREATE UNIQUE INDEX user_roles_pkey ON public.user_roles USING btree (user_id);
 
-alter table "public"."class" add constraint "class_pkey" PRIMARY KEY using index "class_pkey";
+CREATE UNIQUE INDEX workshop_enrollment_pkey ON public.workshop_enrollment USING btree (id);
 
-alter table "public"."class_enrollment" add constraint "class_enrollment_pkey" PRIMARY KEY using index "class_enrollment_pkey";
+CREATE UNIQUE INDEX workshop_enrollment_workshop_id_user_id_key ON public.workshop_enrollment USING btree (workshop_id, user_id);
+
+CREATE UNIQUE INDEX workshop_pkey ON public.workshop USING btree (id);
 
 alter table "public"."form" add constraint "form_pkey" PRIMARY KEY using index "form_pkey";
 
@@ -224,6 +264,8 @@ alter table "public"."form_question" add constraint "form_question_pkey" PRIMARY
 
 alter table "public"."form_submission" add constraint "form_submission_pkey" PRIMARY KEY using index "form_submission_pkey";
 
+alter table "public"."invites" add constraint "invites_pkey" PRIMARY KEY using index "invites_pkey";
+
 alter table "public"."person" add constraint "person_pkey" PRIMARY KEY using index "person_pkey";
 
 alter table "public"."person_parent" add constraint "person_parent_pkey" PRIMARY KEY using index "person_parent_pkey";
@@ -234,45 +276,25 @@ alter table "public"."role_permission" add constraint "role_permission_pkey" PRI
 
 alter table "public"."session" add constraint "session_pkey" PRIMARY KEY using index "session_pkey";
 
+alter table "public"."sign_up_flow" add constraint "sign_up_flow_pkey" PRIMARY KEY using index "sign_up_flow_pkey";
+
 alter table "public"."user_roles" add constraint "user_roles_pkey" PRIMARY KEY using index "user_roles_pkey";
 
-alter table "public"."class" add constraint "class_capacity_check" CHECK ((capacity >= 0)) not valid;
+alter table "public"."workshop" add constraint "workshop_pkey" PRIMARY KEY using index "workshop_pkey";
 
-alter table "public"."class" validate constraint "class_capacity_check";
-
-alter table "public"."class" add constraint "class_check" CHECK (((enrollment_open_at IS NULL) OR (enrollment_close_at IS NULL) OR (enrollment_open_at < enrollment_close_at))) not valid;
-
-alter table "public"."class" validate constraint "class_check";
-
-alter table "public"."class" add constraint "class_wait_list_capacity_check" CHECK ((wait_list_capacity >= 0)) not valid;
-
-alter table "public"."class" validate constraint "class_wait_list_capacity_check";
-
-alter table "public"."class_enrollment" add constraint "class_enrollment_class_id_fkey" FOREIGN KEY (class_id) REFERENCES public.class(id) ON UPDATE CASCADE ON DELETE SET NULL not valid;
-
-alter table "public"."class_enrollment" validate constraint "class_enrollment_class_id_fkey";
-
-alter table "public"."class_enrollment" add constraint "class_enrollment_class_id_user_id_key" UNIQUE using index "class_enrollment_class_id_user_id_key";
-
-alter table "public"."class_enrollment" add constraint "class_enrollment_decided_by_fkey" FOREIGN KEY (decided_by) REFERENCES auth.users(id) ON UPDATE CASCADE ON DELETE SET NULL not valid;
-
-alter table "public"."class_enrollment" validate constraint "class_enrollment_decided_by_fkey";
-
-alter table "public"."class_enrollment" add constraint "class_enrollment_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON UPDATE CASCADE ON DELETE SET NULL not valid;
-
-alter table "public"."class_enrollment" validate constraint "class_enrollment_user_id_fkey";
+alter table "public"."workshop_enrollment" add constraint "workshop_enrollment_pkey" PRIMARY KEY using index "workshop_enrollment_pkey";
 
 alter table "public"."form" add constraint "form_name_key" UNIQUE using index "form_name_key";
 
-alter table "public"."form_answer" add constraint "form_answer_question_id_fkey" FOREIGN KEY (question_id) REFERENCES public.form_question(id) ON DELETE CASCADE not valid;
+alter table "public"."form_answer" add constraint "form_answer_question_code_fkey" FOREIGN KEY (question_code) REFERENCES public.form_question(question_code) ON DELETE CASCADE not valid;
 
-alter table "public"."form_answer" validate constraint "form_answer_question_id_fkey";
+alter table "public"."form_answer" validate constraint "form_answer_question_code_fkey";
 
 alter table "public"."form_answer" add constraint "form_answer_submission_id_fkey" FOREIGN KEY (submission_id) REFERENCES public.form_submission(id) ON DELETE CASCADE not valid;
 
 alter table "public"."form_answer" validate constraint "form_answer_submission_id_fkey";
 
-alter table "public"."form_answer" add constraint "form_answer_submission_id_question_id_key" UNIQUE using index "form_answer_submission_id_question_id_key";
+alter table "public"."form_answer" add constraint "form_answer_submission_id_question_code_key" UNIQUE using index "form_answer_submission_id_question_code_key";
 
 alter table "public"."form_assignment" add constraint "form_assignment_assigned_by_fkey" FOREIGN KEY (assigned_by) REFERENCES auth.users(id) not valid;
 
@@ -304,6 +326,16 @@ alter table "public"."form_submission" add constraint "form_submission_user_id_f
 
 alter table "public"."form_submission" validate constraint "form_submission_user_id_fkey";
 
+alter table "public"."invites" add constraint "invites_invitee_user_id_fkey" FOREIGN KEY (invitee_user_id) REFERENCES auth.users(id) ON DELETE SET NULL not valid;
+
+alter table "public"."invites" validate constraint "invites_invitee_user_id_fkey";
+
+alter table "public"."invites" add constraint "invites_inviter_user_id_fkey" FOREIGN KEY (inviter_user_id) REFERENCES auth.users(id) ON DELETE CASCADE not valid;
+
+alter table "public"."invites" validate constraint "invites_inviter_user_id_fkey";
+
+alter table "public"."person" add constraint "person_email_key" UNIQUE using index "person_email_key";
+
 alter table "public"."person" add constraint "person_role_check" CHECK ((role = ANY (ARRAY['parent'::text, 'student'::text]))) not valid;
 
 alter table "public"."person" validate constraint "person_role_check";
@@ -330,9 +362,17 @@ alter table "public"."session" add constraint "session_check" CHECK ((starts_at 
 
 alter table "public"."session" validate constraint "session_check";
 
-alter table "public"."session" add constraint "session_class_id_fkey" FOREIGN KEY (class_id) REFERENCES public.class(id) ON UPDATE CASCADE ON DELETE SET NULL not valid;
+alter table "public"."session" add constraint "session_workshop_id_fkey" FOREIGN KEY (workshop_id) REFERENCES public.workshop(id) ON UPDATE CASCADE ON DELETE SET NULL not valid;
 
-alter table "public"."session" validate constraint "session_class_id_fkey";
+alter table "public"."session" validate constraint "session_workshop_id_fkey";
+
+alter table "public"."sign_up_flow" add constraint "sign_up_flow_form_id_fkey" FOREIGN KEY (form_id) REFERENCES public.form(id) ON DELETE CASCADE not valid;
+
+alter table "public"."sign_up_flow" validate constraint "sign_up_flow_form_id_fkey";
+
+alter table "public"."sign_up_flow" add constraint "sign_up_flow_form_id_key" UNIQUE using index "sign_up_flow_form_id_key";
+
+alter table "public"."sign_up_flow" add constraint "sign_up_flow_step_order_key" UNIQUE using index "sign_up_flow_step_order_key";
 
 alter table "public"."user_roles" add constraint "user_roles_assigned_by_fkey" FOREIGN KEY (assigned_by) REFERENCES auth.users(id) not valid;
 
@@ -341,6 +381,32 @@ alter table "public"."user_roles" validate constraint "user_roles_assigned_by_fk
 alter table "public"."user_roles" add constraint "user_roles_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE not valid;
 
 alter table "public"."user_roles" validate constraint "user_roles_user_id_fkey";
+
+alter table "public"."workshop" add constraint "workshop_capacity_check" CHECK ((capacity >= 0)) not valid;
+
+alter table "public"."workshop" validate constraint "workshop_capacity_check";
+
+alter table "public"."workshop" add constraint "workshop_check" CHECK (((enrollment_open_at IS NULL) OR (enrollment_close_at IS NULL) OR (enrollment_open_at < enrollment_close_at))) not valid;
+
+alter table "public"."workshop" validate constraint "workshop_check";
+
+alter table "public"."workshop" add constraint "workshop_wait_list_capacity_check" CHECK ((wait_list_capacity >= 0)) not valid;
+
+alter table "public"."workshop" validate constraint "workshop_wait_list_capacity_check";
+
+alter table "public"."workshop_enrollment" add constraint "workshop_enrollment_decided_by_fkey" FOREIGN KEY (decided_by) REFERENCES auth.users(id) ON UPDATE CASCADE ON DELETE SET NULL not valid;
+
+alter table "public"."workshop_enrollment" validate constraint "workshop_enrollment_decided_by_fkey";
+
+alter table "public"."workshop_enrollment" add constraint "workshop_enrollment_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON UPDATE CASCADE ON DELETE SET NULL not valid;
+
+alter table "public"."workshop_enrollment" validate constraint "workshop_enrollment_user_id_fkey";
+
+alter table "public"."workshop_enrollment" add constraint "workshop_enrollment_workshop_id_fkey" FOREIGN KEY (workshop_id) REFERENCES public.workshop(id) ON UPDATE CASCADE ON DELETE SET NULL not valid;
+
+alter table "public"."workshop_enrollment" validate constraint "workshop_enrollment_workshop_id_fkey";
+
+alter table "public"."workshop_enrollment" add constraint "workshop_enrollment_workshop_id_user_id_key" UNIQUE using index "workshop_enrollment_workshop_id_user_id_key";
 
 set check_function_bodies = off;
 
@@ -373,6 +439,10 @@ begin
     nullif((current_setting('request.jwt.claims', true)::jsonb ->> 'user_role'), '')::public.app_role,
     'unassigned'::public.app_role
   ) into user_role;
+
+  if (user_role = 'admin') then
+    return true;
+  end if;
 
   select count(*)
     into bind_permissions
@@ -582,7 +652,7 @@ end;
 $function$
 ;
 
-CREATE OR REPLACE FUNCTION public.set_class_enrollment_decision_fields()
+CREATE OR REPLACE FUNCTION public.set_workshop_enrollment_decision_fields()
  RETURNS trigger
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -701,32 +771,6 @@ end;
 $function$
 ;
 
-CREATE OR REPLACE FUNCTION public.touch_class_enrollment_updated_at()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.touch_class_updated_at()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$function$
-;
-
 CREATE OR REPLACE FUNCTION public.touch_form_updated_at()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -766,89 +810,44 @@ end;
 $function$
 ;
 
-grant delete on table "public"."class" to "authenticated";
+CREATE OR REPLACE FUNCTION public.touch_sign_up_flow_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$function$
+;
 
-grant insert on table "public"."class" to "authenticated";
+CREATE OR REPLACE FUNCTION public.touch_workshop_enrollment_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$function$
+;
 
-grant references on table "public"."class" to "authenticated";
-
-grant select on table "public"."class" to "authenticated";
-
-grant trigger on table "public"."class" to "authenticated";
-
-grant truncate on table "public"."class" to "authenticated";
-
-grant update on table "public"."class" to "authenticated";
-
-grant delete on table "public"."class" to "service_role";
-
-grant insert on table "public"."class" to "service_role";
-
-grant references on table "public"."class" to "service_role";
-
-grant select on table "public"."class" to "service_role";
-
-grant trigger on table "public"."class" to "service_role";
-
-grant truncate on table "public"."class" to "service_role";
-
-grant update on table "public"."class" to "service_role";
-
-grant delete on table "public"."class" to "supabase_auth_admin";
-
-grant insert on table "public"."class" to "supabase_auth_admin";
-
-grant references on table "public"."class" to "supabase_auth_admin";
-
-grant select on table "public"."class" to "supabase_auth_admin";
-
-grant trigger on table "public"."class" to "supabase_auth_admin";
-
-grant truncate on table "public"."class" to "supabase_auth_admin";
-
-grant update on table "public"."class" to "supabase_auth_admin";
-
-grant delete on table "public"."class_enrollment" to "authenticated";
-
-grant insert on table "public"."class_enrollment" to "authenticated";
-
-grant references on table "public"."class_enrollment" to "authenticated";
-
-grant select on table "public"."class_enrollment" to "authenticated";
-
-grant trigger on table "public"."class_enrollment" to "authenticated";
-
-grant truncate on table "public"."class_enrollment" to "authenticated";
-
-grant update on table "public"."class_enrollment" to "authenticated";
-
-grant delete on table "public"."class_enrollment" to "service_role";
-
-grant insert on table "public"."class_enrollment" to "service_role";
-
-grant references on table "public"."class_enrollment" to "service_role";
-
-grant select on table "public"."class_enrollment" to "service_role";
-
-grant trigger on table "public"."class_enrollment" to "service_role";
-
-grant truncate on table "public"."class_enrollment" to "service_role";
-
-grant update on table "public"."class_enrollment" to "service_role";
-
-grant delete on table "public"."class_enrollment" to "supabase_auth_admin";
-
-grant insert on table "public"."class_enrollment" to "supabase_auth_admin";
-
-grant references on table "public"."class_enrollment" to "supabase_auth_admin";
-
-grant select on table "public"."class_enrollment" to "supabase_auth_admin";
-
-grant trigger on table "public"."class_enrollment" to "supabase_auth_admin";
-
-grant truncate on table "public"."class_enrollment" to "supabase_auth_admin";
-
-grant update on table "public"."class_enrollment" to "supabase_auth_admin";
+CREATE OR REPLACE FUNCTION public.touch_workshop_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$function$
+;
 
 grant delete on table "public"."form" to "authenticated";
 
@@ -1060,6 +1059,48 @@ grant truncate on table "public"."form_submission" to "supabase_auth_admin";
 
 grant update on table "public"."form_submission" to "supabase_auth_admin";
 
+grant delete on table "public"."invites" to "anon";
+
+grant insert on table "public"."invites" to "anon";
+
+grant references on table "public"."invites" to "anon";
+
+grant select on table "public"."invites" to "anon";
+
+grant trigger on table "public"."invites" to "anon";
+
+grant truncate on table "public"."invites" to "anon";
+
+grant update on table "public"."invites" to "anon";
+
+grant delete on table "public"."invites" to "authenticated";
+
+grant insert on table "public"."invites" to "authenticated";
+
+grant references on table "public"."invites" to "authenticated";
+
+grant select on table "public"."invites" to "authenticated";
+
+grant trigger on table "public"."invites" to "authenticated";
+
+grant truncate on table "public"."invites" to "authenticated";
+
+grant update on table "public"."invites" to "authenticated";
+
+grant delete on table "public"."invites" to "service_role";
+
+grant insert on table "public"."invites" to "service_role";
+
+grant references on table "public"."invites" to "service_role";
+
+grant select on table "public"."invites" to "service_role";
+
+grant trigger on table "public"."invites" to "service_role";
+
+grant truncate on table "public"."invites" to "service_role";
+
+grant update on table "public"."invites" to "service_role";
+
 grant delete on table "public"."person" to "anon";
 
 grant insert on table "public"."person" to "anon";
@@ -1260,6 +1301,36 @@ grant truncate on table "public"."session" to "supabase_auth_admin";
 
 grant update on table "public"."session" to "supabase_auth_admin";
 
+grant select on table "public"."sign_up_flow" to "authenticated";
+
+grant delete on table "public"."sign_up_flow" to "service_role";
+
+grant insert on table "public"."sign_up_flow" to "service_role";
+
+grant references on table "public"."sign_up_flow" to "service_role";
+
+grant select on table "public"."sign_up_flow" to "service_role";
+
+grant trigger on table "public"."sign_up_flow" to "service_role";
+
+grant truncate on table "public"."sign_up_flow" to "service_role";
+
+grant update on table "public"."sign_up_flow" to "service_role";
+
+grant delete on table "public"."sign_up_flow" to "supabase_auth_admin";
+
+grant insert on table "public"."sign_up_flow" to "supabase_auth_admin";
+
+grant references on table "public"."sign_up_flow" to "supabase_auth_admin";
+
+grant select on table "public"."sign_up_flow" to "supabase_auth_admin";
+
+grant trigger on table "public"."sign_up_flow" to "supabase_auth_admin";
+
+grant truncate on table "public"."sign_up_flow" to "supabase_auth_admin";
+
+grant update on table "public"."sign_up_flow" to "supabase_auth_admin";
+
 grant delete on table "public"."user_roles" to "authenticated";
 
 grant insert on table "public"."user_roles" to "authenticated";
@@ -1302,97 +1373,89 @@ grant truncate on table "public"."user_roles" to "supabase_auth_admin";
 
 grant update on table "public"."user_roles" to "supabase_auth_admin";
 
+grant delete on table "public"."workshop" to "authenticated";
 
-  create policy "class_delete_admin"
-  on "public"."class"
-  as permissive
-  for delete
-  to public
-using (public.authorize('class.delete'::public.app_permissions));
+grant insert on table "public"."workshop" to "authenticated";
 
+grant references on table "public"."workshop" to "authenticated";
 
+grant select on table "public"."workshop" to "authenticated";
 
-  create policy "class_insert_admin"
-  on "public"."class"
-  as permissive
-  for insert
-  to public
-with check (public.authorize('class.create'::public.app_permissions));
+grant trigger on table "public"."workshop" to "authenticated";
 
+grant truncate on table "public"."workshop" to "authenticated";
 
+grant update on table "public"."workshop" to "authenticated";
 
-  create policy "class_read_auth_admin"
-  on "public"."class"
-  as permissive
-  for select
-  to supabase_auth_admin
-using (true);
+grant delete on table "public"."workshop" to "service_role";
 
+grant insert on table "public"."workshop" to "service_role";
 
+grant references on table "public"."workshop" to "service_role";
 
-  create policy "class_select_all"
-  on "public"."class"
-  as permissive
-  for select
-  to public
-using (true);
+grant select on table "public"."workshop" to "service_role";
 
+grant trigger on table "public"."workshop" to "service_role";
 
+grant truncate on table "public"."workshop" to "service_role";
 
-  create policy "class_update_admin"
-  on "public"."class"
-  as permissive
-  for update
-  to public
-using (public.authorize('class.update'::public.app_permissions))
-with check (public.authorize('class.update'::public.app_permissions));
+grant update on table "public"."workshop" to "service_role";
 
+grant delete on table "public"."workshop" to "supabase_auth_admin";
 
+grant insert on table "public"."workshop" to "supabase_auth_admin";
 
-  create policy "class_enrollment_insert_self"
-  on "public"."class_enrollment"
-  as permissive
-  for insert
-  to public
-with check (((user_id = auth.uid()) AND (COALESCE(status, 'pending'::public.class_enrollment_status) = 'pending'::public.class_enrollment_status)));
+grant references on table "public"."workshop" to "supabase_auth_admin";
 
+grant select on table "public"."workshop" to "supabase_auth_admin";
 
+grant trigger on table "public"."workshop" to "supabase_auth_admin";
 
-  create policy "class_enrollment_read_auth_admin"
-  on "public"."class_enrollment"
-  as permissive
-  for select
-  to supabase_auth_admin
-using (true);
+grant truncate on table "public"."workshop" to "supabase_auth_admin";
 
+grant update on table "public"."workshop" to "supabase_auth_admin";
 
+grant delete on table "public"."workshop_enrollment" to "authenticated";
 
-  create policy "class_enrollment_select_admin"
-  on "public"."class_enrollment"
-  as permissive
-  for select
-  to public
-using (public.authorize('class_enrollment.read'::public.app_permissions));
+grant insert on table "public"."workshop_enrollment" to "authenticated";
 
+grant references on table "public"."workshop_enrollment" to "authenticated";
 
+grant select on table "public"."workshop_enrollment" to "authenticated";
 
-  create policy "class_enrollment_select_self"
-  on "public"."class_enrollment"
-  as permissive
-  for select
-  to public
-using ((user_id = auth.uid()));
+grant trigger on table "public"."workshop_enrollment" to "authenticated";
 
+grant truncate on table "public"."workshop_enrollment" to "authenticated";
 
+grant update on table "public"."workshop_enrollment" to "authenticated";
 
-  create policy "class_enrollment_update_admin"
-  on "public"."class_enrollment"
-  as permissive
-  for update
-  to public
-using ((public.authorize('class_enrollment.update'::public.app_permissions) OR public.authorize('class_enrollment.update_status'::public.app_permissions)))
-with check ((public.authorize('class_enrollment.update'::public.app_permissions) OR public.authorize('class_enrollment.update_status'::public.app_permissions)));
+grant delete on table "public"."workshop_enrollment" to "service_role";
 
+grant insert on table "public"."workshop_enrollment" to "service_role";
+
+grant references on table "public"."workshop_enrollment" to "service_role";
+
+grant select on table "public"."workshop_enrollment" to "service_role";
+
+grant trigger on table "public"."workshop_enrollment" to "service_role";
+
+grant truncate on table "public"."workshop_enrollment" to "service_role";
+
+grant update on table "public"."workshop_enrollment" to "service_role";
+
+grant delete on table "public"."workshop_enrollment" to "supabase_auth_admin";
+
+grant insert on table "public"."workshop_enrollment" to "supabase_auth_admin";
+
+grant references on table "public"."workshop_enrollment" to "supabase_auth_admin";
+
+grant select on table "public"."workshop_enrollment" to "supabase_auth_admin";
+
+grant trigger on table "public"."workshop_enrollment" to "supabase_auth_admin";
+
+grant truncate on table "public"."workshop_enrollment" to "supabase_auth_admin";
+
+grant update on table "public"."workshop_enrollment" to "supabase_auth_admin";
 
 
   create policy "form_assignee_read"
@@ -1769,7 +1832,7 @@ using (true);
   as permissive
   for delete
   to public
-using (public.authorize('class.delete'::public.app_permissions));
+using (public.authorize('workshop.delete'::public.app_permissions));
 
 
 
@@ -1778,7 +1841,7 @@ using (public.authorize('class.delete'::public.app_permissions));
   as permissive
   for insert
   to public
-with check (public.authorize('class.create'::public.app_permissions));
+with check (public.authorize('workshop.create'::public.app_permissions));
 
 
 
@@ -1805,8 +1868,26 @@ using (true);
   as permissive
   for update
   to public
-using (public.authorize('class.update'::public.app_permissions))
-with check (public.authorize('class.update'::public.app_permissions));
+using (public.authorize('workshop.update'::public.app_permissions))
+with check (public.authorize('workshop.update'::public.app_permissions));
+
+
+
+  create policy "sign_up_flow_select_auth_admin"
+  on "public"."sign_up_flow"
+  as permissive
+  for select
+  to supabase_auth_admin
+using (true);
+
+
+
+  create policy "sign_up_flow_select_site_read"
+  on "public"."sign_up_flow"
+  as permissive
+  for select
+  to public
+using (public.authorize('site.read'::public.app_permissions));
 
 
 
@@ -1837,11 +1918,97 @@ using (public.authorize('user_roles.manage'::public.app_permissions))
 with check (public.authorize('user_roles.manage'::public.app_permissions));
 
 
-CREATE TRIGGER on_class_updated_set_timestamp BEFORE UPDATE ON public.class FOR EACH ROW EXECUTE FUNCTION public.touch_class_updated_at();
 
-CREATE TRIGGER on_class_enrollment_set_decision_fields BEFORE UPDATE ON public.class_enrollment FOR EACH ROW EXECUTE FUNCTION public.set_class_enrollment_decision_fields();
+  create policy "workshop_delete_admin"
+  on "public"."workshop"
+  as permissive
+  for delete
+  to public
+using (public.authorize('workshop.delete'::public.app_permissions));
 
-CREATE TRIGGER on_class_enrollment_updated_set_timestamp BEFORE UPDATE ON public.class_enrollment FOR EACH ROW EXECUTE FUNCTION public.touch_class_enrollment_updated_at();
+
+
+  create policy "workshop_insert_admin"
+  on "public"."workshop"
+  as permissive
+  for insert
+  to public
+with check (public.authorize('workshop.create'::public.app_permissions));
+
+
+
+  create policy "workshop_read_auth_admin"
+  on "public"."workshop"
+  as permissive
+  for select
+  to supabase_auth_admin
+using (true);
+
+
+
+  create policy "workshop_select_all"
+  on "public"."workshop"
+  as permissive
+  for select
+  to public
+using (true);
+
+
+
+  create policy "workshop_update_admin"
+  on "public"."workshop"
+  as permissive
+  for update
+  to public
+using (public.authorize('workshop.update'::public.app_permissions))
+with check (public.authorize('workshop.update'::public.app_permissions));
+
+
+
+  create policy "workshop_enrollment_insert_self"
+  on "public"."workshop_enrollment"
+  as permissive
+  for insert
+  to public
+with check (((user_id = auth.uid()) AND (COALESCE(status, 'pending'::public.workshop_enrollment_status) = 'pending'::public.workshop_enrollment_status)));
+
+
+
+  create policy "workshop_enrollment_read_auth_admin"
+  on "public"."workshop_enrollment"
+  as permissive
+  for select
+  to supabase_auth_admin
+using (true);
+
+
+
+  create policy "workshop_enrollment_select_admin"
+  on "public"."workshop_enrollment"
+  as permissive
+  for select
+  to public
+using (public.authorize('workshop_enrollment.read'::public.app_permissions));
+
+
+
+  create policy "workshop_enrollment_select_self"
+  on "public"."workshop_enrollment"
+  as permissive
+  for select
+  to public
+using ((user_id = auth.uid()));
+
+
+
+  create policy "workshop_enrollment_update_admin"
+  on "public"."workshop_enrollment"
+  as permissive
+  for update
+  to public
+using ((public.authorize('workshop_enrollment.update'::public.app_permissions) OR public.authorize('workshop_enrollment.update_status'::public.app_permissions)))
+with check ((public.authorize('workshop_enrollment.update'::public.app_permissions) OR public.authorize('workshop_enrollment.update_status'::public.app_permissions)));
+
 
 CREATE TRIGGER on_form_auto_assign_changed_sync_assignments AFTER UPDATE OF auto_assign ON public.form FOR EACH ROW EXECUTE FUNCTION public.sync_auto_assigned_forms_for_form_trigger();
 
@@ -1855,9 +2022,15 @@ CREATE TRIGGER on_form_submission_mark_assignment AFTER INSERT OR UPDATE ON publ
 
 CREATE TRIGGER on_profile_updated_set_timestamp BEFORE UPDATE ON public.profiles FOR EACH ROW EXECUTE FUNCTION public.touch_profile_updated_at();
 
-CREATE TRIGGER on_session_updated_set_timestamp BEFORE UPDATE ON public.session FOR EACH ROW EXECUTE FUNCTION public.touch_session_updated_at();
+CREATE TRIGGER on_sign_up_flow_updated_set_timestamp BEFORE UPDATE ON public.sign_up_flow FOR EACH ROW EXECUTE FUNCTION public.touch_sign_up_flow_updated_at();
 
 CREATE TRIGGER on_user_role_changed_sync_forms AFTER INSERT OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.sync_auto_assigned_forms_for_user_trigger();
+
+CREATE TRIGGER on_workshop_updated_set_timestamp BEFORE UPDATE ON public.workshop FOR EACH ROW EXECUTE FUNCTION public.touch_workshop_updated_at();
+
+CREATE TRIGGER on_workshop_enrollment_set_decision_fields BEFORE UPDATE ON public.workshop_enrollment FOR EACH ROW EXECUTE FUNCTION public.set_workshop_enrollment_decision_fields();
+
+CREATE TRIGGER on_workshop_enrollment_updated_set_timestamp BEFORE UPDATE ON public.workshop_enrollment FOR EACH ROW EXECUTE FUNCTION public.touch_workshop_enrollment_updated_at();
 
 CREATE TRIGGER on_auth_user_created_create_profile AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_profile();
 

@@ -34,83 +34,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      class: {
-        Row: {
-          capacity: number
-          created_at: string
-          description: string | null
-          enrollment_close_at: string | null
-          enrollment_open_at: string | null
-          id: string
-          updated_at: string
-          wait_list_capacity: number
-        }
-        Insert: {
-          capacity?: number
-          created_at?: string
-          description?: string | null
-          enrollment_close_at?: string | null
-          enrollment_open_at?: string | null
-          id?: string
-          updated_at?: string
-          wait_list_capacity?: number
-        }
-        Update: {
-          capacity?: number
-          created_at?: string
-          description?: string | null
-          enrollment_close_at?: string | null
-          enrollment_open_at?: string | null
-          id?: string
-          updated_at?: string
-          wait_list_capacity?: number
-        }
-        Relationships: []
-      }
-      class_enrollment: {
-        Row: {
-          class_id: string | null
-          created_at: string
-          decided_at: string | null
-          decided_by: string | null
-          id: string
-          requested_at: string
-          status: Database["public"]["Enums"]["class_enrollment_status"]
-          updated_at: string
-          user_id: string | null
-        }
-        Insert: {
-          class_id?: string | null
-          created_at?: string
-          decided_at?: string | null
-          decided_by?: string | null
-          id?: string
-          requested_at?: string
-          status?: Database["public"]["Enums"]["class_enrollment_status"]
-          updated_at?: string
-          user_id?: string | null
-        }
-        Update: {
-          class_id?: string | null
-          created_at?: string
-          decided_at?: string | null
-          decided_by?: string | null
-          id?: string
-          requested_at?: string
-          status?: Database["public"]["Enums"]["class_enrollment_status"]
-          updated_at?: string
-          user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "class_enrollment_class_id_fkey"
-            columns: ["class_id"]
-            isOneToOne: false
-            referencedRelation: "class"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       form: {
         Row: {
           auto_assign: Database["public"]["Enums"]["app_role"][]
@@ -434,38 +357,38 @@ export type Database = {
       }
       session: {
         Row: {
-          class_id: string | null
           created_at: string
           ends_at: string
           id: string
           location: string | null
           starts_at: string
           updated_at: string
+          workshop_id: string | null
         }
         Insert: {
-          class_id?: string | null
           created_at?: string
           ends_at: string
           id?: string
           location?: string | null
           starts_at: string
           updated_at?: string
+          workshop_id?: string | null
         }
         Update: {
-          class_id?: string | null
           created_at?: string
           ends_at?: string
           id?: string
           location?: string | null
           starts_at?: string
           updated_at?: string
+          workshop_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "session_class_id_fkey"
-            columns: ["class_id"]
+            foreignKeyName: "session_workshop_id_fkey"
+            columns: ["workshop_id"]
             isOneToOne: false
-            referencedRelation: "class"
+            referencedRelation: "workshop"
             referencedColumns: ["id"]
           },
         ]
@@ -528,6 +451,83 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      workshop: {
+        Row: {
+          capacity: number
+          created_at: string
+          description: string | null
+          enrollment_close_at: string | null
+          enrollment_open_at: string | null
+          id: string
+          updated_at: string
+          wait_list_capacity: number
+        }
+        Insert: {
+          capacity?: number
+          created_at?: string
+          description?: string | null
+          enrollment_close_at?: string | null
+          enrollment_open_at?: string | null
+          id?: string
+          updated_at?: string
+          wait_list_capacity?: number
+        }
+        Update: {
+          capacity?: number
+          created_at?: string
+          description?: string | null
+          enrollment_close_at?: string | null
+          enrollment_open_at?: string | null
+          id?: string
+          updated_at?: string
+          wait_list_capacity?: number
+        }
+        Relationships: []
+      }
+      workshop_enrollment: {
+        Row: {
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          id: string
+          requested_at: string
+          status: Database["public"]["Enums"]["workshop_enrollment_status"]
+          updated_at: string
+          user_id: string | null
+          workshop_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          requested_at?: string
+          status?: Database["public"]["Enums"]["workshop_enrollment_status"]
+          updated_at?: string
+          user_id?: string | null
+          workshop_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          requested_at?: string
+          status?: Database["public"]["Enums"]["workshop_enrollment_status"]
+          updated_at?: string
+          user_id?: string | null
+          workshop_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workshop_enrollment_workshop_id_fkey"
+            columns: ["workshop_id"]
+            isOneToOne: false
+            referencedRelation: "workshop"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
@@ -599,6 +599,14 @@ export type Database = {
         | "class_enrollment.read"
         | "class_enrollment.update"
         | "class_enrollment.update_status"
+        | "workshop.create"
+        | "workshop.read"
+        | "workshop.update"
+        | "workshop.delete"
+        | "workshop_enrollment.create"
+        | "workshop_enrollment.read"
+        | "workshop_enrollment.update"
+        | "workshop_enrollment.update_status"
         | "cohort_enrollment.create"
         | "cohort_enrollment.read"
         | "cohort_enrollment.update"
@@ -615,7 +623,6 @@ export type Database = {
         | "instructor"
         | "student"
         | "parent"
-      class_enrollment_status: "pending" | "approved" | "rejected"
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
@@ -626,6 +633,7 @@ export type Database = {
         | "agreement"
         | "checkbox"
       invite_status: "pending" | "confirmed" | "revoked"
+      workshop_enrollment_status: "pending" | "approved" | "rejected"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -794,6 +802,14 @@ export const Constants = {
         "class_enrollment.read",
         "class_enrollment.update",
         "class_enrollment.update_status",
+        "workshop.create",
+        "workshop.read",
+        "workshop.update",
+        "workshop.delete",
+        "workshop_enrollment.create",
+        "workshop_enrollment.read",
+        "workshop_enrollment.update",
+        "workshop_enrollment.update_status",
         "cohort_enrollment.create",
         "cohort_enrollment.read",
         "cohort_enrollment.update",
@@ -812,7 +828,6 @@ export const Constants = {
         "student",
         "parent",
       ],
-      class_enrollment_status: ["pending", "approved", "rejected"],
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
@@ -824,6 +839,7 @@ export const Constants = {
         "checkbox",
       ],
       invite_status: ["pending", "confirmed", "revoked"],
+      workshop_enrollment_status: ["pending", "approved", "rejected"],
     },
   },
 } as const
