@@ -2,7 +2,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 
 type Row = Record<string, unknown>
 
-export function AdminDatatable({ columns, rows }: { columns: string[]; rows: Row[] }) {
+export function AdminDatatable({
+  columns,
+  rows,
+  getCellValue,
+}: {
+  columns: string[]
+  rows: Row[]
+  getCellValue?: (column: string, row: Row) => string
+}) {
   return (
     <Table>
       <TableHeader>
@@ -17,7 +25,7 @@ export function AdminDatatable({ columns, rows }: { columns: string[]; rows: Row
           <TableRow key={`row-${rowIndex}`}>
             {columns.map(column => (
               <TableCell key={`${rowIndex}-${column}`}>
-                {typeof row[column] === 'object'
+                {getCellValue ? getCellValue(column, row) : typeof row[column] === 'object'
                   ? JSON.stringify(row[column])
                   : row[column]?.toString() ?? ''}
               </TableCell>
