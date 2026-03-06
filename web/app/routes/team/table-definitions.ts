@@ -17,8 +17,8 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   person: {
     label: 'Person',
     table: 'person',
-    select: 'id, user_id, role, email, firstname, surname, phone, postcode, password_set',
-    columns: ['id', 'user_id', 'email', 'firstname', 'surname', 'role', 'password_set'],
+    select: 'id, user_id, partner_program, role, email, firstname, surname, phone, postcode, password_set',
+    columns: ['id', 'user_id', 'partner_program', 'email', 'firstname', 'surname', 'role', 'password_set'],
     order: 'id',
   },
   'person-parent': {

@@ -31,7 +31,7 @@ export default [
     route("person", "routes/team/person.tsx"),
     route("person-parent", "routes/team/person-parent.tsx"),
     route("profiles", "routes/team/profiles.tsx"),
-    route("class", "routes/team/class.tsx"),
+    route("workshops", "routes/team/workshop.tsx"),
     route("session", "routes/team/session.tsx"),
     route("class-enrollment", "routes/team/class-enrollment.tsx"),
     route("form", "routes/team/form.tsx"),
