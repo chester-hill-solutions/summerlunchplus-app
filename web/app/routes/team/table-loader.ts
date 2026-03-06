@@ -20,35 +20,34 @@ export function createTableLoader(tableName: string) {
     }
 
     const rows = (data ?? []) as unknown as Record<string, unknown>[]
-    if (definition.userEmailMappings?.length && rows.length) {
-      const userIds = new Set<string>()
-      for (const row of rows) {
-        for (const mapping of definition.userEmailMappings!) {
-          const value = row[mapping.key]
-          if (typeof value === 'string' && value) {
-            userIds.add(value)
-          }
-        }
-      }
-
-      if (userIds.size > 0) {
-        const { data: users } = await supabase
-          .from('auth.users')
-          .select('id, email')
-          .in('id', Array.from(userIds))
-        const emailById = new Map<string, string>()
-        for (const user of users ?? []) {
-          if (user?.id && typeof user.email === 'string') {
-            emailById.set(user.id, user.email)
-          }
-        }
-
+    if (definition.lookupMappings?.length && rows.length) {
+      for (const mapping of definition.lookupMappings) {
+        const keyCol = mapping.keyColumn
+        const ids = new Set<string>()
         for (const row of rows) {
-          for (const mapping of definition.userEmailMappings!) {
-            const value = row[mapping.key]
-            const email = typeof value === 'string' ? emailById.get(value) ?? '' : ''
-            row[mapping.column] = email
+          const value = row[keyCol]
+          if (typeof value === 'string' && value) {
+            ids.add(value)
           }
+        }
+        if (!ids.size) continue
+
+        const { data: lookupRows } = await supabase
+          .from(mapping.table)
+          .select(`${mapping.keyColumnInTable ?? 'id'}, ${mapping.valueColumn}`)
+          .in(mapping.keyColumnInTable ?? 'id', Array.from(ids))
+        const valueById = new Map<string, string>()
+        for (const lookup of lookupRows ?? []) {
+          const idValue = lookup?.[mapping.keyColumnInTable ?? 'id']
+          const displayValue = lookup?.[mapping.valueColumn]
+          if (typeof idValue === 'string' && typeof displayValue === 'string') {
+            valueById.set(idValue, displayValue)
+          }
+        }
+        for (const row of rows) {
+          const idValue = row[keyCol]
+          const lookupValue = typeof idValue === 'string' ? valueById.get(idValue) ?? '' : ''
+          row[mapping.resultColumn] = lookupValue
         }
       }
     }
