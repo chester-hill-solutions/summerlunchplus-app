@@ -48,10 +48,20 @@ type LoaderData = {
 }
 
 const PARTNER_SITE_OPTIONS = [
-  'Downtown Community Hub',
-  'Northside Family Centre',
-  'Eastside Beacon Hub',
-  'Virtual / Remote'
+  'Thorncliffe Park -TNO',
+  'Taylor-Massey & Oakridge',
+  'Thorncliffe Park (TNO)',
+  'Milton Food for Life',
+  'Gloucester -GEFC',
+  'Orangeville Food Bank',
+  'Cresent Town Community',
+  'Eastview Community Centre',
+  'Greenest City',
+  'Partage Vanier',
+  'Parkdale Community Food Bank',
+  'Hamilton - Eva Rothwell Centre',
+  'Other',
+  'Corktown Community',
 ]
 
 const formControlClasses =
