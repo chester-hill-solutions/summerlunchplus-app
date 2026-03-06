@@ -71,19 +71,19 @@ select 'program_background_whole_grains_frequency', id, 'How often do you eat wh
 union all
 select 'program_background_sugary_frequency', id, 'How often do you drink sugary beverages (e.g. juice, pop, soda, ice-tea, energy drinks, sports drinks, etc.)', 'single_choice'::form_question_type, 17, '["More than 2 times per day","A few times per week","Once a week","Less than once a week","Never"]'::jsonb from program_form
 union all
-select 'parent_consent_acknowledge', id, 'I consent to my child attending summerlunch+ and understand the guidelines.', 'single_choice'::form_question_type, 18, '["yes","no"]'::jsonb from parent_form
+select 'parent_consent_privacy', id, 'I understand that summerlunch+ is dedicated to protecting my privacy and will only use my personal data for the administration of the virtual summer cooking program and for communicating pertinent program-related information.', 'checkbox'::form_question_type, 18, '[]'::jsonb from parent_form
 union all
-select 'parent_emergency_name', id, 'Emergency contact name', 'text'::form_question_type, 19, '[]'::jsonb from parent_form
+select 'parent_consent_presence', id, 'I understand that a parent/caregiver or elder sibling must be present during live cooking classes to ensure the safety of the summerlunch+ participant.', 'checkbox'::form_question_type, 19, '[]'::jsonb from parent_form
 union all
-select 'parent_emergency_phone', id, 'Emergency contact phone', 'text'::form_question_type, 20, '[]'::jsonb from parent_form
+select 'parent_consent_attendance', id, 'I understand that if my child(ren) do(es) not participate in 2 weeks of programming without notice, they will need to forfeit their spot in the program. Please let the summerlunch+ team know in advance if you need to miss a week of the program.', 'checkbox'::form_question_type, 20, '[]'::jsonb from parent_form
 union all
-select 'parent_health_notes', id, 'Allergies, medications, or health notes', 'text'::form_question_type, 21, '[]'::jsonb from parent_form
+select 'parent_consent_photos', id, 'I give permission to summerlunch+ to use the photos and comments I share to the summerlunch+ platform for their social media and website.', 'checkbox'::form_question_type, 21, '[]'::jsonb from parent_form
 union all
-select 'student_consent_acknowledge', id, 'I agree to participate in summerlunch+ and follow program expectations.', 'single_choice'::form_question_type, 22, '["yes","no"]'::jsonb from student_form
+select 'student_consent_gift_card', id, 'I understand that I will be receiving a grocery gift card or grocery meal kit every week to make the recipes provided by summerlunch+.', 'checkbox'::form_question_type, 22, '[]'::jsonb from student_form
 union all
-select 'student_consent_updates', id, 'Do you agree to let us share progress updates with your caregivers?', 'single_choice'::form_question_type, 23, '["yes","no"]'::jsonb from student_form
+select 'student_consent_questionnaire', id, 'I will participate in the pre and post program questionnaires.', 'checkbox'::form_question_type, 23, '[]'::jsonb from student_form
 union all
-select 'student_consent_details', id, 'Is there anything else we should know to support you?', 'text'::form_question_type, 24, '[]'::jsonb from student_form
+select 'student_consent_interview', id, 'Can summerlunch+ contact you for an interview? Participants will be provided a gift card for participation in our interview.', 'checkbox'::form_question_type, 24, '[]'::jsonb from student_form
 on conflict (question_code) do update
   set prompt = excluded.prompt,
       "type" = excluded."type",
