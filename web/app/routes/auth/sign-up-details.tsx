@@ -27,7 +27,7 @@ type FormStep = {
 type LoaderStep = 'details' | 'forms' | 'invite'
 
 type LoaderData = {
-  role: 'parent' | 'student' | null
+  role: 'guardian' | 'student' | null
   pid: string
   step: LoaderStep
   firstname: string | null
@@ -36,7 +36,7 @@ type LoaderData = {
   postcode: string | null
   partnerProgram: string | null
   inviterPid: string | null
-  inviterRole: 'parent' | 'student' | null
+  inviterRole: 'guardian' | 'student' | null
   hasRelationship: boolean
   formSteps: FormStep[]
   currentForm: FormStep | null
@@ -75,36 +75,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url)
   const requestedStep = (url.searchParams.get('step') as LoaderStep) || 'details'
   const requestedFormId = url.searchParams.get('form_id')
-  const roleParam = url.searchParams.get('role') as 'parent' | 'student' | null
+  const roleParam = url.searchParams.get('role') as 'guardian' | 'student' | null
   const pidParam = url.searchParams.get('pid')
 
   let pid = pidParam
   if (!pid) {
-    const { data: personCandidate } = await supabase
-      .from('person')
+    const { data: profileCandidate } = await supabase
+      .from('profile')
       .select('id')
       .eq('user_id', userData.user.id)
       .single()
-    if (!personCandidate?.id) throw redirect('/auth/sign-up', { headers })
-    pid = personCandidate.id
+    if (!profileCandidate?.id) throw redirect('/auth/sign-up', { headers })
+    pid = profileCandidate.id
   }
   if (!pid) throw redirect('/auth/sign-up', { headers })
 
-  const { data: person } = await supabase
-    .from('person')
+  const { data: profile } = await supabase
+    .from('profile')
     .select('firstname, surname, phone, postcode, role, partner_program')
     .eq('id', pid)
     .single()
-  if (!person) throw redirect('/auth/sign-up', { headers })
+  if (!profile) throw redirect('/auth/sign-up', { headers })
 
-  const resolvedRole = (roleParam ?? (person.role as 'parent' | 'student') ?? 'student') as 'parent' | 'student'
+  const resolvedRole = (roleParam ?? (profile.role as 'guardian' | 'student') ?? 'student') as 'guardian' | 'student'
   const detailsComplete =
-    Boolean(person.firstname && person.surname && person.phone && person.postcode && person.partner_program)
+    Boolean(profile.firstname && profile.surname && profile.phone && profile.postcode && profile.partner_program)
 
   const { data: relationship } = await supabase
-    .from('person_parent')
+    .from('person_guardian_child')
     .select('id')
-    .or(`person_id.eq.${pid},parent_id.eq.${pid}`)
+    .or(`child_profile_id.eq.${pid},guardian_profile_id.eq.${pid}`)
     .limit(1)
     .maybeSingle()
   const hasRelationship = Boolean(relationship?.id)
@@ -153,16 +153,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const currentFormAnswers: Record<string, Json> = {}
   if (currentForm) {
     const { data: questions } = await supabase
-      .from('form_question')
-      .select('question_code, prompt, type, position, options')
+      .from('form_question_map')
+      .select('question_code, position, prompt_override, options_override, form_question ( prompt, type, options )')
       .eq('form_id', currentForm.formId)
       .order('position')
-    currentFormQuestions = (questions ?? []).map(q => ({
-      question_code: q.question_code ?? '',
-      prompt: q.prompt,
-      type: q.type as Database['public']['Enums']['form_question_type'],
-      options: q.options,
-    }))
+    currentFormQuestions = (questions ?? []).map(q => {
+      const base = Array.isArray(q.form_question) ? q.form_question[0] : q.form_question
+      return {
+        question_code: q.question_code ?? '',
+        prompt: q.prompt_override ?? base?.prompt ?? '',
+        type: (base?.type ?? 'text') as Database['public']['Enums']['form_question_type'],
+        options: (q.options_override ?? base?.options ?? []) as Json,
+      }
+    })
     const { data: submission } = await supabase
       .from('form_submission')
       .select('id')
@@ -214,13 +217,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     role: resolvedRole,
     pid,
     step: effectiveStep,
-    firstname: person.firstname,
-    surname: person.surname,
-    phone: person.phone,
-    postcode: person.postcode,
-    partnerProgram: person.partner_program ?? null,
+    firstname: profile.firstname,
+    surname: profile.surname,
+    phone: profile.phone,
+    postcode: profile.postcode,
+    partnerProgram: profile.partner_program ?? null,
     inviterPid: url.searchParams.get('inviter_pid'),
-    inviterRole: (url.searchParams.get('inviter_role') as 'parent' | 'student') ?? null,
+    inviterRole: (url.searchParams.get('inviter_role') as 'guardian' | 'student') ?? null,
     hasRelationship,
     formSteps,
     currentForm,
@@ -238,7 +241,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const origin = url.origin
 
   const formData = await request.formData()
-  const role = formData.get('role') as 'parent' | 'student'
+  const role = formData.get('role') as 'guardian' | 'student'
   const pid = formData.get('pid') as string
   const step = (formData.get('step') as LoaderStep) ?? 'details'
   const firstname = (formData.get('firstname') as string)?.trim()
@@ -247,6 +250,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const postcode = (formData.get('postcode') as string)?.trim()
   const partnerProgramValue = (formData.get('partner-program') as string)?.trim() ?? ''
   const dateOfBirth = (formData.get('date_of_birth') as string)?.trim()
+  const childFirstname = (formData.get('child_firstname') as string)?.trim()
+  const childSurname = (formData.get('child_surname') as string)?.trim()
   const inviteEmail = (formData.get('invite-email') as string)?.trim()
   const postalRe = /^[A-Z]\d[A-Z] \d[A-Z]\d$/
   const { data: currentUser } = await supabase.auth.getUser()
@@ -258,16 +263,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { error: 'Form is missing' }
     }
 
-    const { data: form } = await supabase
-      .from('form')
-      .select('id, form_question (question_code, prompt, type, options)')
-      .eq('id', formId)
-      .single()
-    if (!form) {
-      return { error: 'Form not found' }
-    }
-
-    const questions = form.form_question ?? []
+    const { data: questionRows } = await supabase
+      .from('form_question_map')
+      .select('question_code, prompt_override, options_override, form_question ( prompt, type, options )')
+      .eq('form_id', formId)
+      .order('position')
+    const questions = questionRows ?? []
     if (!questions.length) {
       return { error: 'Form is not configured' }
     }
@@ -279,19 +280,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const answers: { questionCode: string; value: Json }[] = []
     for (const question of questions) {
+      const base = Array.isArray(question.form_question) ? question.form_question[0] : question.form_question
+      const prompt = question.prompt_override ?? base?.prompt ?? ''
+      const type = base?.type as Database['public']['Enums']['form_question_type']
       const fieldName = `question_${question.question_code}`
-      if (question.type === 'multi_choice') {
+      if (type === 'multi_choice') {
         const choices = formData
           .getAll(fieldName)
           .filter((value): value is string => typeof value === 'string')
         if (!choices.length) {
-          return { error: `Please answer "${question.prompt}"` }
+          return { error: `Please answer "${prompt}"` }
         }
         answers.push({ questionCode: question.question_code, value: choices })
         continue
       }
 
-      if (question.type === 'checkbox') {
+      if (type === 'checkbox') {
         const checked = formData.has(fieldName)
         answers.push({ questionCode: question.question_code, value: checked })
         continue
@@ -299,7 +303,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       const rawValue = (formData.get(fieldName) as string | null)?.trim() ?? ''
       if (!rawValue) {
-        return { error: `Please answer "${question.prompt}"` }
+        return { error: `Please answer "${prompt}"` }
       }
       answers.push({ questionCode: question.question_code, value: rawValue })
     }
@@ -346,6 +350,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!partnerProgramValue) {
       return { error: 'Please select which site you are attending from' }
     }
+    if (role === 'guardian' && (!childFirstname || !childSurname)) {
+      return { error: 'Child first and last name are required' }
+    }
 
     const userId = currentUser?.user?.id
     console.log('sign-up-details action start', { pid, userId })
@@ -353,7 +360,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { error: 'Unable to identify user' }
     }
 
-    const personPayload: Record<string, unknown> = {
+    const profilePayload: Record<string, unknown> = {
       id: pid,
       user_id: userId,
       firstname,
@@ -362,33 +369,68 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       postcode,
       email: inviterEmail,
       partner_program: partnerProgramValue,
+      role,
     }
 
     if (role === 'student') {
-      personPayload.date_of_birth = dateOfBirth || null
+      profilePayload.date_of_birth = dateOfBirth || null
     }
 
-    const { data: updatedPerson, error: updateError } = await supabase
-      .from('person')
-      .update(personPayload)
+    const { data: updatedProfile, error: updateError } = await supabase
+      .from('profile')
+      .update(profilePayload)
       .eq('id', pid)
       .select('id')
       .single()
     if (updateError) {
-      console.error('person update failed', updateError.message, { pid, personPayload })
+      console.error('profile update failed', updateError.message, { pid, profilePayload })
     }
 
-    if (!updatedPerson?.id) {
-      const { data: insertedPerson, error: insertError } = await supabase
-        .from('person')
-        .insert(personPayload)
+    if (!updatedProfile?.id) {
+      const { data: insertedProfile, error: insertError } = await supabase
+        .from('profile')
+        .insert(profilePayload)
         .select('id')
         .single()
       if (insertError) {
-        console.error('person insert fallback failed', insertError.message, { pid, personPayload })
+        console.error('profile insert fallback failed', insertError.message, { pid, profilePayload })
       }
-      if (insertError || !insertedPerson?.id) {
+      if (insertError || !insertedProfile?.id) {
         return { error: insertError?.message ?? 'Unable to save profile' }
+      }
+    }
+
+    if (role === 'guardian' && childFirstname && childSurname) {
+      const { data: existingLink } = await supabase
+        .from('person_guardian_child')
+        .select('id')
+        .eq('guardian_profile_id', pid)
+        .eq('primary_child', true)
+        .maybeSingle()
+      if (!existingLink?.id) {
+        const { data: childProfile, error: childError } = await supabase
+          .from('profile')
+          .insert({
+            role: 'student',
+            firstname: childFirstname,
+            surname: childSurname,
+          })
+          .select('id')
+          .single()
+        if (childError || !childProfile?.id) {
+          return { error: childError?.message ?? 'Unable to create child profile' }
+        }
+
+        const { error: linkError } = await supabase
+          .from('person_guardian_child')
+          .insert({
+            guardian_profile_id: pid,
+            child_profile_id: childProfile.id,
+            primary_child: true,
+          })
+        if (linkError) {
+          return { error: linkError.message }
+        }
       }
     }
 
@@ -397,15 +439,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (step === 'invite') {
     if (!inviteEmail) {
-      return { error: 'Invite email is required' }
+      return redirect('/home', { headers })
     }
 
-    const targetRole = role === 'student' ? 'parent' : 'student'
+    const targetRole = role === 'student' ? 'guardian' : 'student'
     const redirectTo = `${origin}/auth/sign-up-details?role=${targetRole}`
     const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(inviteEmail, {
       redirectTo,
       data: {
-        inviter_pid: pid,
+        inviter_profile_id: pid,
         inviter_role: role,
         inviter_email: inviterEmail,
         role: targetRole,
@@ -417,7 +459,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const inviteeUserId = inviteData.user.id
     const { data: inviteeRow, error: inviteeError } = await supabase
-      .from('person')
+      .from('profile')
       .upsert(
         {
           user_id: inviteeUserId,
@@ -433,13 +475,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     const inviteePid = inviteeRow.id
 
-    const childId = role === 'parent' ? inviteePid : pid
-    const parentId = role === 'parent' ? pid : inviteePid
+    const childId = role === 'guardian' ? inviteePid : pid
+    const guardianId = role === 'guardian' ? pid : inviteePid
     await supabase
-      .from('person_parent')
+      .from('person_guardian_child')
       .upsert(
-        { person_id: childId, parent_id: parentId },
-        { onConflict: 'person_id,parent_id' }
+        { child_profile_id: childId, guardian_profile_id: guardianId, primary_child: true },
+        { onConflict: 'guardian_profile_id,child_profile_id' }
       )
 
     const inviterId = currentUser?.user?.id ?? null
@@ -484,7 +526,7 @@ export default function SignUpDetails() {
   const [partnerProgram, setPartnerProgram] = useState(loaderPartnerProgram ?? '')
   const error = fetcher.data?.error
   const loading = fetcher.state === 'submitting'
-  const inviteLabel = role === 'student' ? "Parent's email" : "Student's email"
+  const inviteLabel = role === 'student' ? "Guardian's email" : "Student's email"
 
   const formatPC = (val: string) => {
     const raw = val.toUpperCase().replace(/[^A-Z0-9]/g, '')
@@ -495,7 +537,7 @@ export default function SignUpDetails() {
   const stageTitles: Record<LoaderStep, string> = {
     details: 'Complete your profile',
     forms: currentForm?.name ?? 'Required form',
-    invite: 'Invite a Parent/Student',
+    invite: 'Invite a Guardian/Student',
   }
 
   const stageDescriptions: Record<LoaderStep, string> = {
@@ -546,6 +588,18 @@ export default function SignUpDetails() {
                   <Label htmlFor="surname">Surname</Label>
                   <Input id="surname" name="surname" defaultValue={surname ?? ''} required />
                 </div>
+                {role === 'guardian' && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label htmlFor="child_firstname">Child first name</Label>
+                      <Input id="child_firstname" name="child_firstname" required />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="child_surname">Child surname</Label>
+                      <Input id="child_surname" name="child_surname" required />
+                    </div>
+                  </div>
+                )}
                 <div className="grid gap-2">
                   <Label htmlFor="phone">Phone</Label>
                   <Input id="phone" name="phone" type="tel" defaultValue={phone ?? ''} required />
@@ -626,7 +680,7 @@ export default function SignUpDetails() {
                 <input type="hidden" name="postcode" value={postcode ?? ''} />
                 <div className="grid gap-2">
                   <Label htmlFor="invite-email">{inviteLabel}</Label>
-                  <Input id="invite-email" name="invite-email" type="email" required />
+                  <Input id="invite-email" name="invite-email" type="email" />
                 </div>
                 {error && <p className="text-sm text-red-500">{error}</p>}
                 <Button type="submit" className="w-full" disabled={loading}>

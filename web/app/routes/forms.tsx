@@ -102,7 +102,7 @@ const ALL_ROLES: { value: string; label: string }[] = [
   { value: "staff", label: "Staff" },
   { value: "instructor", label: "Instructor" },
   { value: "student", label: "Student" },
-  { value: "parent", label: "Parent" },
+  { value: "guardian", label: "Guardian" },
 ];
 
 function CreateFormCard() {

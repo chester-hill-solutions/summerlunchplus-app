@@ -34,7 +34,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { supabase, headers } = createClient(request)
 
   const formData = await request.formData()
-  const role = formData.get('role') as 'parent' | 'student'
+  const role = formData.get('role') as 'guardian' | 'student'
   const email = formData.get('email') as string
   const password = formData.get('password') as string
   const repeatPassword = formData.get('repeat-password') as string
@@ -60,28 +60,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const userId = signUpData.user.id
   const invitedEmail = signUpData.user.email ?? email
-  const { data: personRow, error: personError } = await supabase
-    .from('person')
+  const { data: profileRow, error: profileError } = await supabase
+    .from('profile')
     .upsert(
       { user_id: userId, role, email: invitedEmail, password_set: true },
       { onConflict: 'email' }
     )
     .select('id')
     .single()
-  if (personError || !personRow?.id) {
-    return { error: personError?.message ?? 'Profile creation failed' }
+  if (profileError || !profileRow?.id) {
+    return { error: profileError?.message ?? 'Profile creation failed' }
   }
-  const personId = personRow.id
-  await supabase.auth.updateUser({ data: { role, profile_id: personId } })
+  const profileId = profileRow.id
+  await supabase.auth.updateUser({ data: { role, profile_id: profileId } })
 
-  return redirect(`/auth/sign-up-details?role=${role}&pid=${personId}`, { headers })
+  return redirect(`/auth/sign-up-details?role=${role}&pid=${profileId}`, { headers })
 }
 
 export default function SignUp() {
   const fetcher = useFetcher<typeof action>()
   const error = fetcher.data?.error
   const loading = fetcher.state === 'submitting'
-  const [role, setRole] = useState<'parent' | 'student' | ''>('')
+  const [role, setRole] = useState<'guardian' | 'student' | ''>('')
 
   return (
     <Card>
@@ -94,10 +94,10 @@ export default function SignUp() {
           <div className="flex gap-4 justify-center">
             <Button
               className="px-8 py-6"
-              onClick={() => setRole('parent')}
-            >
-              I am a Parent
-            </Button>
+                onClick={() => setRole('guardian')}
+              >
+                I am a Guardian
+              </Button>
             <Button
               className="px-8 py-6"
               onClick={() => setRole('student')}

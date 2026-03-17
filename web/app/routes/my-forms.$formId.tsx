@@ -89,8 +89,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   assignment.submission = submission ? { ...submission, submitted_at: submission.submitted_at ?? "" } : null;
 
   const { data: questions, error: questionsError } = await supabase
-    .from("form_question")
-    .select("question_code, form_id, prompt, type, position, options")
+    .from("form_question_map")
+    .select("form_id, question_code, position, prompt_override, options_override, form_question ( prompt, type, options )")
     .eq("form_id", formId)
     .order("position", { ascending: true });
 
@@ -102,10 +102,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   responseHeaders.set("Content-Type", "application/json");
   const payload: LoaderData = {
     assignment,
-    questions: (questions ?? []).map((q) => ({
-      ...q,
-      options: Array.isArray(q.options) ? (q.options as string[]) : [],
-    })),
+    questions: (questions ?? []).map((q) => {
+      const base = Array.isArray(q.form_question) ? q.form_question[0] : q.form_question;
+      return {
+        form_id: String(q.form_id),
+        question_code: String(q.question_code ?? ""),
+        prompt: q.prompt_override ?? base?.prompt ?? "",
+        type: base?.type ?? "text",
+        options: Array.isArray(q.options_override ?? base?.options) ? (q.options_override ?? base?.options) : [],
+      };
+    }),
   };
   return new Response(JSON.stringify(payload), { headers: responseHeaders });
 }
@@ -149,8 +155,8 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   const { data: questions, error: questionsError } = await supabase
-    .from("form_question")
-    .select("question_code, type")
+    .from("form_question_map")
+    .select("question_code, form_question ( type )")
     .eq("form_id", formId);
 
   if (questionsError) {
@@ -174,13 +180,15 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   const answers = (questions ?? []).map((q) => {
+    const base = Array.isArray(q.form_question) ? q.form_question[0] : q.form_question;
+    const type = base?.type ?? "text";
     const key = `q-${q.question_code}`;
     const rawValue =
-      q.type === "multi_choice"
+      type === "multi_choice"
         ? formData.getAll(key).map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean).join(", ")
         : formData.get(key);
     const normalized = typeof rawValue === "string" ? rawValue.trim() : "";
-    const payload = q.type === "single_choice" ? { value: normalized } : { text: normalized };
+    const payload = type === "single_choice" ? { value: normalized } : { text: normalized };
     return { submission_id: submissionRows.id, question_code: q.question_code, value: payload };
   });
 
