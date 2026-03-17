@@ -36,7 +36,6 @@ export type Database = {
     Tables: {
       form: {
         Row: {
-          auto_assign: Database["public"]["Enums"]["app_role"][]
           created_at: string
           due_at: string | null
           id: string
@@ -45,7 +44,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          auto_assign?: Database["public"]["Enums"]["app_role"][]
           created_at?: string
           due_at?: string | null
           id?: string
@@ -54,7 +52,6 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          auto_assign?: Database["public"]["Enums"]["app_role"][]
           created_at?: string
           due_at?: string | null
           id?: string
@@ -140,36 +137,61 @@ export type Database = {
       }
       form_question: {
         Row: {
-          form_id: string
           options: Json
-          position: number
           prompt: string
           question_code: string
           type: Database["public"]["Enums"]["form_question_type"]
         }
         Insert: {
-          form_id: string
           options?: Json
-          position: number
           prompt: string
           question_code: string
           type: Database["public"]["Enums"]["form_question_type"]
         }
         Update: {
-          form_id?: string
           options?: Json
-          position?: number
           prompt?: string
           question_code?: string
           type?: Database["public"]["Enums"]["form_question_type"]
         }
+        Relationships: []
+      }
+      form_question_map: {
+        Row: {
+          form_id: string
+          options_override: Json | null
+          position: number
+          prompt_override: string | null
+          question_code: string
+        }
+        Insert: {
+          form_id: string
+          options_override?: Json | null
+          position: number
+          prompt_override?: string | null
+          question_code: string
+        }
+        Update: {
+          form_id?: string
+          options_override?: Json | null
+          position?: number
+          prompt_override?: string | null
+          question_code?: string
+        }
         Relationships: [
           {
-            foreignKeyName: "form_question_form_id_fkey"
+            foreignKeyName: "form_question_map_form_id_fkey"
             columns: ["form_id"]
             isOneToOne: false
             referencedRelation: "form"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_question_map_question_code_fkey"
+            columns: ["question_code"]
+            isOneToOne: false
+            referencedRelation: "form_question"
+            referencedColumns: ["question_code"]
           },
         ]
       }
@@ -238,105 +260,87 @@ export type Database = {
         }
         Relationships: []
       }
-      person: {
+      person_guardian_child: {
         Row: {
-          date_of_birth: string | null
-          email: string | null
-          firstname: string | null
+          child_profile_id: string
+          guardian_profile_id: string
           id: string
-          password_set: boolean
-          phone: string | null
-          postcode: string | null
-          role: string
-          surname: string | null
-          user_id: string
+          primary_child: boolean
         }
         Insert: {
-          date_of_birth?: string | null
-          email?: string | null
-          firstname?: string | null
+          child_profile_id: string
+          guardian_profile_id: string
           id?: string
-          password_set?: boolean
-          phone?: string | null
-          postcode?: string | null
-          role: string
-          surname?: string | null
-          user_id: string
+          primary_child?: boolean
         }
         Update: {
-          date_of_birth?: string | null
-          email?: string | null
-          firstname?: string | null
+          child_profile_id?: string
+          guardian_profile_id?: string
           id?: string
-          password_set?: boolean
-          phone?: string | null
-          postcode?: string | null
-          role?: string
-          surname?: string | null
-          user_id?: string
-        }
-        Relationships: []
-      }
-      person_parent: {
-        Row: {
-          id: string
-          parent_id: string
-          person_id: string
-        }
-        Insert: {
-          id?: string
-          parent_id: string
-          person_id: string
-        }
-        Update: {
-          id?: string
-          parent_id?: string
-          person_id?: string
+          primary_child?: boolean
         }
         Relationships: [
           {
-            foreignKeyName: "person_parent_parent_id_fkey"
-            columns: ["parent_id"]
+            foreignKeyName: "person_guardian_child_child_profile_id_fkey"
+            columns: ["child_profile_id"]
             isOneToOne: false
-            referencedRelation: "person"
+            referencedRelation: "profile"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "person_parent_person_id_fkey"
-            columns: ["person_id"]
+            foreignKeyName: "person_guardian_child_guardian_profile_id_fkey"
+            columns: ["guardian_profile_id"]
             isOneToOne: false
-            referencedRelation: "person"
+            referencedRelation: "profile"
             referencedColumns: ["id"]
           },
         ]
       }
-      profiles: {
+      profile: {
         Row: {
-          avatar_url: string | null
           created_at: string
+          date_of_birth: string | null
           email: string | null
-          full_name: string | null
+          firstname: string | null
           id: string
-          metadata: Json
+          partner_program: string | null
+          password_set: boolean
+          phone: string | null
+          postcode: string | null
+          role: Database["public"]["Enums"]["app_role"]
+          surname: string | null
           updated_at: string
+          user_id: string | null
         }
         Insert: {
-          avatar_url?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email?: string | null
-          full_name?: string | null
-          id: string
-          metadata?: Json
+          firstname?: string | null
+          id?: string
+          partner_program?: string | null
+          password_set?: boolean
+          phone?: string | null
+          postcode?: string | null
+          role: Database["public"]["Enums"]["app_role"]
+          surname?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
-          avatar_url?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email?: string | null
-          full_name?: string | null
+          firstname?: string | null
           id?: string
-          metadata?: Json
+          partner_program?: string | null
+          password_set?: boolean
+          phone?: string | null
+          postcode?: string | null
+          role?: Database["public"]["Enums"]["app_role"]
+          surname?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -352,6 +356,36 @@ export type Database = {
         Update: {
           permission?: Database["public"]["Enums"]["app_permissions"]
           role?: Database["public"]["Enums"]["app_role"]
+        }
+        Relationships: []
+      }
+      semester: {
+        Row: {
+          created_at: string
+          ends_at: string
+          enrollment_close_at: string | null
+          enrollment_open_at: string | null
+          id: string
+          starts_at: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          ends_at: string
+          enrollment_close_at?: string | null
+          enrollment_open_at?: string | null
+          id?: string
+          starts_at: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          ends_at?: string
+          enrollment_close_at?: string | null
+          enrollment_open_at?: string | null
+          id?: string
+          starts_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -393,12 +427,59 @@ export type Database = {
           },
         ]
       }
+      session_attendance: {
+        Row: {
+          created_at: string
+          id: string
+          notes: string | null
+          profile_id: string
+          recorded_by: string | null
+          session_id: string
+          status: Database["public"]["Enums"]["session_attendance_status"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          profile_id: string
+          recorded_by?: string | null
+          session_id: string
+          status?: Database["public"]["Enums"]["session_attendance_status"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          profile_id?: string
+          recorded_by?: string | null
+          session_id?: string
+          status?: Database["public"]["Enums"]["session_attendance_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_attendance_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_attendance_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "session"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sign_up_flow: {
         Row: {
           created_at: string
           form_id: string
           id: string
-          roles: Database["public"]["Enums"]["app_role"][]
           slug: string
           step_order: number
           updated_at: string
@@ -407,7 +488,6 @@ export type Database = {
           created_at?: string
           form_id: string
           id?: string
-          roles: Database["public"]["Enums"]["app_role"][]
           slug: string
           step_order: number
           updated_at?: string
@@ -416,7 +496,6 @@ export type Database = {
           created_at?: string
           form_id?: string
           id?: string
-          roles?: Database["public"]["Enums"]["app_role"][]
           slug?: string
           step_order?: number
           updated_at?: string
@@ -460,6 +539,7 @@ export type Database = {
           enrollment_close_at: string | null
           enrollment_open_at: string | null
           id: string
+          semester_id: string
           updated_at: string
           wait_list_capacity: number
         }
@@ -470,6 +550,7 @@ export type Database = {
           enrollment_close_at?: string | null
           enrollment_open_at?: string | null
           id?: string
+          semester_id: string
           updated_at?: string
           wait_list_capacity?: number
         }
@@ -480,10 +561,19 @@ export type Database = {
           enrollment_close_at?: string | null
           enrollment_open_at?: string | null
           id?: string
+          semester_id?: string
           updated_at?: string
           wait_list_capacity?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "workshop_semester_id_fkey"
+            columns: ["semester_id"]
+            isOneToOne: false
+            referencedRelation: "semester"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       workshop_enrollment: {
         Row: {
@@ -491,10 +581,11 @@ export type Database = {
           decided_at: string | null
           decided_by: string | null
           id: string
+          profile_id: string | null
           requested_at: string
+          semester_id: string
           status: Database["public"]["Enums"]["workshop_enrollment_status"]
           updated_at: string
-          user_id: string | null
           workshop_id: string | null
         }
         Insert: {
@@ -502,10 +593,11 @@ export type Database = {
           decided_at?: string | null
           decided_by?: string | null
           id?: string
+          profile_id?: string | null
           requested_at?: string
+          semester_id: string
           status?: Database["public"]["Enums"]["workshop_enrollment_status"]
           updated_at?: string
-          user_id?: string | null
           workshop_id?: string | null
         }
         Update: {
@@ -513,13 +605,28 @@ export type Database = {
           decided_at?: string | null
           decided_by?: string | null
           id?: string
+          profile_id?: string | null
           requested_at?: string
+          semester_id?: string
           status?: Database["public"]["Enums"]["workshop_enrollment_status"]
           updated_at?: string
-          user_id?: string | null
           workshop_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "workshop_enrollment_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_enrollment_semester_id_fkey"
+            columns: ["semester_id"]
+            isOneToOne: false
+            referencedRelation: "semester"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "workshop_enrollment_workshop_id_fkey"
             columns: ["workshop_id"]
@@ -571,6 +678,10 @@ export type Database = {
         | "form_question.read"
         | "form_question.update"
         | "form_question.delete"
+        | "form_question_map.create"
+        | "form_question_map.read"
+        | "form_question_map.update"
+        | "form_question_map.delete"
         | "form_assignment.create"
         | "form_assignment.read"
         | "form_assignment.update"
@@ -587,18 +698,6 @@ export type Database = {
         | "semester.read"
         | "semester.update"
         | "semester.delete"
-        | "cohort.create"
-        | "cohort.read"
-        | "cohort.update"
-        | "cohort.delete"
-        | "class.create"
-        | "class.read"
-        | "class.update"
-        | "class.delete"
-        | "class_enrollment.create"
-        | "class_enrollment.read"
-        | "class_enrollment.update"
-        | "class_enrollment.update_status"
         | "workshop.create"
         | "workshop.read"
         | "workshop.update"
@@ -607,10 +706,10 @@ export type Database = {
         | "workshop_enrollment.read"
         | "workshop_enrollment.update"
         | "workshop_enrollment.update_status"
-        | "cohort_enrollment.create"
-        | "cohort_enrollment.read"
-        | "cohort_enrollment.update"
-        | "cohort_enrollment.update_status"
+        | "session_attendance.create"
+        | "session_attendance.read"
+        | "session_attendance.update"
+        | "session_attendance.delete"
         | "user_roles.manage"
         | "role_permission.manage"
         | "profiles.read"
@@ -622,7 +721,7 @@ export type Database = {
         | "staff"
         | "instructor"
         | "student"
-        | "parent"
+        | "guardian"
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
@@ -633,6 +732,7 @@ export type Database = {
         | "agreement"
         | "checkbox"
       invite_status: "pending" | "confirmed" | "revoked"
+      session_attendance_status: "present" | "absent" | "excused"
       workshop_enrollment_status: "pending" | "approved" | "rejected"
     }
     CompositeTypes: {
@@ -774,6 +874,10 @@ export const Constants = {
         "form_question.read",
         "form_question.update",
         "form_question.delete",
+        "form_question_map.create",
+        "form_question_map.read",
+        "form_question_map.update",
+        "form_question_map.delete",
         "form_assignment.create",
         "form_assignment.read",
         "form_assignment.update",
@@ -790,18 +894,6 @@ export const Constants = {
         "semester.read",
         "semester.update",
         "semester.delete",
-        "cohort.create",
-        "cohort.read",
-        "cohort.update",
-        "cohort.delete",
-        "class.create",
-        "class.read",
-        "class.update",
-        "class.delete",
-        "class_enrollment.create",
-        "class_enrollment.read",
-        "class_enrollment.update",
-        "class_enrollment.update_status",
         "workshop.create",
         "workshop.read",
         "workshop.update",
@@ -810,10 +902,10 @@ export const Constants = {
         "workshop_enrollment.read",
         "workshop_enrollment.update",
         "workshop_enrollment.update_status",
-        "cohort_enrollment.create",
-        "cohort_enrollment.read",
-        "cohort_enrollment.update",
-        "cohort_enrollment.update_status",
+        "session_attendance.create",
+        "session_attendance.read",
+        "session_attendance.update",
+        "session_attendance.delete",
         "user_roles.manage",
         "role_permission.manage",
         "profiles.read",
@@ -826,7 +918,7 @@ export const Constants = {
         "staff",
         "instructor",
         "student",
-        "parent",
+        "guardian",
       ],
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
@@ -839,6 +931,7 @@ export const Constants = {
         "checkbox",
       ],
       invite_status: ["pending", "confirmed", "revoked"],
+      session_attendance_status: ["present", "absent", "excused"],
       workshop_enrollment_status: ["pending", "approved", "rejected"],
     },
   },

@@ -28,11 +28,18 @@ create table public.form (
 
 create table public.form_question (
   question_code text primary key,
-  form_id uuid not null references public.form (id) on delete cascade,
   prompt text not null,
   "type" form_question_type not null,
+  options jsonb not null default '[]'::jsonb
+);
+
+create table public.form_question_map (
+  form_id uuid not null references public.form (id) on delete cascade,
+  question_code text not null references public.form_question (question_code) on delete cascade,
   position integer not null,
-  options jsonb not null default '[]'::jsonb,
+  prompt_override text,
+  options_override jsonb,
+  unique (form_id, question_code),
   unique (form_id, position)
 );
 
@@ -386,6 +393,7 @@ $$;
 -- RLS
 alter table public.form enable row level security;
 alter table public.form_question enable row level security;
+alter table public.form_question_map enable row level security;
 alter table public.form_assignment enable row level security;
 alter table public.form_submission enable row level security;
 alter table public.form_answer enable row level security;
@@ -433,6 +441,27 @@ create policy form_question_delete_authorized
   on public.form_question
   for delete
   using (public.authorize('form_question.delete'));
+
+create policy form_question_map_select_authorized
+  on public.form_question_map
+  for select
+  using (public.authorize('form_question_map.read'));
+
+create policy form_question_map_insert_authorized
+  on public.form_question_map
+  for insert
+  with check (public.authorize('form_question_map.create'));
+
+create policy form_question_map_update_authorized
+  on public.form_question_map
+  for update
+  using (public.authorize('form_question_map.update'))
+  with check (public.authorize('form_question_map.update'));
+
+create policy form_question_map_delete_authorized
+  on public.form_question_map
+  for delete
+  using (public.authorize('form_question_map.delete'));
 
 create policy form_assignment_select_authorized
   on public.form_assignment
@@ -523,6 +552,12 @@ create policy form_question_read_auth_admin
   to supabase_auth_admin
   using (true);
 
+create policy form_question_map_read_auth_admin
+  on public.form_question_map
+  for select
+  to supabase_auth_admin
+  using (true);
+
 create policy form_assignment_read_auth_admin
   on public.form_assignment
   for select
@@ -566,14 +601,26 @@ create policy form_question_assignee_read
   on public.form_question
   for select
   using (exists (
-    select 1 from public.form_assignment fa
-    where fa.form_id = form_question.form_id and fa.user_id = auth.uid()
+    select 1
+    from public.form_question_map fqm
+    join public.form_assignment fa on fa.form_id = fqm.form_id
+    where fqm.question_code = form_question.question_code
+      and fa.user_id = auth.uid()
   ));
 
 create policy form_assignment_assignee_read
   on public.form_assignment
   for select
   using (user_id = auth.uid());
+
+create policy form_question_map_assignee_read
+  on public.form_question_map
+  for select
+  using (exists (
+    select 1 from public.form_assignment fa
+    where fa.form_id = form_question_map.form_id
+      and fa.user_id = auth.uid()
+  ));
 
 create policy form_assignment_self_insert
   on public.form_assignment
@@ -636,6 +683,7 @@ create policy form_assignment_assignee_update_status
 -- Grants
 grant all on table public.form to supabase_auth_admin;
 grant all on table public.form_question to supabase_auth_admin;
+grant all on table public.form_question_map to supabase_auth_admin;
 grant all on table public.form_assignment to supabase_auth_admin;
 grant all on table public.form_submission to supabase_auth_admin;
 grant all on table public.form_answer to supabase_auth_admin;
@@ -643,6 +691,7 @@ grant all on table public.sign_up_flow to supabase_auth_admin;
 
 revoke all on table public.form from authenticated, anon, public;
 revoke all on table public.form_question from authenticated, anon, public;
+revoke all on table public.form_question_map from authenticated, anon, public;
 revoke all on table public.form_assignment from authenticated, anon, public;
 revoke all on table public.form_submission from authenticated, anon, public;
 revoke all on table public.form_answer from authenticated, anon, public;
@@ -650,6 +699,7 @@ revoke all on table public.sign_up_flow from authenticated, anon, public;
 
 grant all on table public.form to authenticated;
 grant all on table public.form_question to authenticated;
+grant all on table public.form_question_map to authenticated;
 grant all on table public.form_assignment to authenticated;
 grant all on table public.form_submission to authenticated;
 grant all on table public.form_answer to authenticated;

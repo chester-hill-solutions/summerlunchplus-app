@@ -1,7 +1,7 @@
 -- Track invites and required auth metadata.
 create type public.invite_status as enum ('pending', 'confirmed', 'revoked');
 
-alter table public.person
+alter table public.profile
   add column if not exists password_set boolean not null default false;
 
 create table if not exists public.invites (

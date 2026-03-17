@@ -8,18 +8,21 @@ create type app_role as enum (
   'staff',
   'instructor',
   'student',
-  'parent'
+  'guardian'
 );
 
 create type app_permissions as enum (
   'site.read',
   'form.create', 'form.read', 'form.update', 'form.delete',
   'form_question.create', 'form_question.read', 'form_question.update', 'form_question.delete',
+  'form_question_map.create', 'form_question_map.read', 'form_question_map.update', 'form_question_map.delete',
   'form_assignment.create', 'form_assignment.read', 'form_assignment.update', 'form_assignment.delete',
   'form_submission.create', 'form_submission.read', 'form_submission.update', 'form_submission.delete',
   'form_answer.create', 'form_answer.read', 'form_answer.update', 'form_answer.delete',
+  'semester.create', 'semester.read', 'semester.update', 'semester.delete',
   'workshop.create', 'workshop.read', 'workshop.update', 'workshop.delete',
   'workshop_enrollment.create', 'workshop_enrollment.read', 'workshop_enrollment.update', 'workshop_enrollment.update_status',
+  'session_attendance.create', 'session_attendance.read', 'session_attendance.update', 'session_attendance.delete',
   'user_roles.manage', 'role_permission.manage',
   'profiles.read', 'profiles.update'
 );
@@ -167,82 +170,3 @@ for each row execute function public.handle_new_user_role();
 insert into public.user_roles (user_id)
 select id from auth.users u
 where not exists (select 1 from public.user_roles r where r.user_id = u.id);
-
--- Profiles table to avoid repeated auth lookups.
-create table if not exists public.profiles (
-  id uuid primary key references auth.users on delete cascade,
-  email text,
-  full_name text,
-  avatar_url text,
-  metadata jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-alter table public.profiles enable row level security;
-
-create or replace function public.handle_new_profile()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  insert into public.profiles (id, email)
-  values (new.id, new.email)
-  on conflict (id) do nothing;
-  return new;
-end;
-$$;
-
-drop trigger if exists on_auth_user_created_create_profile on auth.users;
-create trigger on_auth_user_created_create_profile
-after insert on auth.users
-for each row execute function public.handle_new_profile();
-
--- Keep profile updated_at fresh on updates.
-create or replace function public.touch_profile_updated_at()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
-
-drop trigger if exists on_profile_updated_set_timestamp on public.profiles;
-create trigger on_profile_updated_set_timestamp
-before update on public.profiles
-for each row execute function public.touch_profile_updated_at();
-
--- Backfill profiles for existing users.
-insert into public.profiles (id, email)
-select id, email from auth.users u
-where not exists (select 1 from public.profiles p where p.id = u.id);
-
--- Policies for profiles.
-create policy profiles_read_self
-  on public.profiles
-  for select
-  using (id = auth.uid());
-
-create policy profiles_update_self
-  on public.profiles
-  for update
-  using (id = auth.uid())
-  with check (id = auth.uid());
-
--- Admin auth role read access.
-create policy profiles_read_auth_admin
-  on public.profiles
-  for select
-  to supabase_auth_admin
-  using (true);
-
--- Grants for profiles.
-grant all on table public.profiles to supabase_auth_admin;
-revoke all on table public.profiles from authenticated, anon, public;
-grant select, update on table public.profiles to authenticated;
