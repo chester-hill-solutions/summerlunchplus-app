@@ -427,6 +427,12 @@ begin
 end;
 $$;
 
+alter table public.form
+  add column if not exists auto_assign public.app_role[] not null default '{}'::public.app_role[];
+
+alter table public.sign_up_flow
+  add column if not exists roles public.app_role[] not null default '{}'::public.app_role[];
+
 
 
   create table "public"."form_question_map" (
@@ -513,6 +519,12 @@ alter table "public"."user_roles" alter column "role" set default 'unassigned'::
 drop type "public"."app_permissions__old_version_to_be_dropped" cascade;
 
 drop type "public"."app_role__old_version_to_be_dropped" cascade;
+
+alter table public.form
+  add column if not exists auto_assign public.app_role[] not null default '{}'::public.app_role[];
+
+alter table public.sign_up_flow
+  add column if not exists roles public.app_role[] not null default '{}'::public.app_role[];
 
 alter table "public"."form_question" drop column "form_id";
 

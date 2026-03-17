@@ -89,6 +89,13 @@ on conflict (question_code) do update
       "type" = excluded."type",
       options = excluded.options;
 
+with program_form as (
+  select id from public.form where name = 'Program Background'
+), guardian_form as (
+  select id from public.form where name = 'Guardian Consent'
+), student_form as (
+  select id from public.form where name = 'Student Consent'
+)
 insert into public.form_question_map (form_id, question_code, position)
 select id, 'program_background_first_time', 1 from program_form
 union all

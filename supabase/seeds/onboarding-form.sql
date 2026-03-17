@@ -19,6 +19,9 @@ on conflict (question_code) do update
       "type" = excluded."type",
       options = excluded.options;
 
+with form_row as (
+  select id from public.form where name = 'Onboarding Survey'
+)
 insert into public.form_question_map (form_id, question_code, position)
 select id, 'onboarding_where_you_live', 1 from form_row
 union all

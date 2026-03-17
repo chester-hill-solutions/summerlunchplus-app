@@ -62,6 +62,14 @@ on conflict (id) do update
     ends_at = excluded.ends_at,
     location = excluded.location;
 
+insert into public.profile (id, role, firstname, surname)
+values
+  ('22222222-bbbb-bbbb-bbbb-222222222222'::uuid, 'student', 'Sample', 'Student')
+on conflict (id) do update
+  set role = excluded.role,
+      firstname = excluded.firstname,
+      surname = excluded.surname;
+
 insert into public.session_attendance (session_id, profile_id, status)
 values
   ('22222222-2222-2222-2222-222222222222'::uuid, '22222222-bbbb-bbbb-bbbb-222222222222'::uuid, 'present')
