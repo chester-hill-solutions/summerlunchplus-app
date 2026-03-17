@@ -8,9 +8,13 @@ cross join (
       ('workshop.read'::public.app_permissions),
       ('workshop.update'::public.app_permissions),
       ('workshop.delete'::public.app_permissions),
+      ('semester.read'::public.app_permissions),
+      ('semester.update'::public.app_permissions),
       ('workshop_enrollment.create'::public.app_permissions),
       ('workshop_enrollment.read'::public.app_permissions),
       ('workshop_enrollment.update'::public.app_permissions),
-      ('workshop_enrollment.update_status'::public.app_permissions)
+      ('workshop_enrollment.update_status'::public.app_permissions),
+      ('session_attendance.read'::public.app_permissions),
+      ('session_attendance.update'::public.app_permissions)
 ) as p(permission)
 on conflict do nothing;

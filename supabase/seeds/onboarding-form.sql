@@ -8,16 +8,25 @@ with form_row as (
         auto_assign = excluded.auto_assign
   returning id
 )
-insert into public.form_question (question_code, form_id, prompt, "type", position, options)
-select 'onboarding_where_you_live', id, 'Where do you live?', 'text'::form_question_type, 1, '[]'::jsonb from form_row
+insert into public.form_question (question_code, prompt, "type", options)
+select 'onboarding_where_you_live', 'Where do you live?', 'text'::form_question_type, '[]'::jsonb
 union all
-select 'onboarding_prior_participation', id, 'Have you been apart of summerlunch+ before?', 'single_choice'::form_question_type, 2, '["yes","no"]'::jsonb from form_row
+select 'onboarding_prior_participation', 'Have you been apart of summerlunch+ before?', 'single_choice'::form_question_type, '["yes","no"]'::jsonb
 union all
-select 'onboarding_partner_program', id, 'Partner-Program', 'text'::form_question_type, 3, '[]'::jsonb from form_row
+select 'onboarding_partner_program', 'Partner-Program', 'text'::form_question_type, '[]'::jsonb
 on conflict (question_code) do update
   set prompt = excluded.prompt,
       "type" = excluded."type",
       options = excluded.options;
+
+insert into public.form_question_map (form_id, question_code, position)
+select id, 'onboarding_where_you_live', 1 from form_row
+union all
+select id, 'onboarding_prior_participation', 2 from form_row
+union all
+select id, 'onboarding_partner_program', 3 from form_row
+on conflict (form_id, question_code) do update
+  set position = excluded.position;
 
 insert into public.form_assignment (form_id, user_id, assigned_by)
 select fr.id, ur.user_id, null
@@ -31,5 +40,5 @@ values
   ('staff', 'site.read'),
   ('instructor', 'site.read'),
   ('student', 'site.read'),
-  ('parent', 'site.read')
+  ('guardian', 'site.read')
 on conflict (role, permission) do nothing;
