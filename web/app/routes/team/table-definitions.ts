@@ -23,9 +23,9 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     columns: ['email', 'raw_user_meta_data', 'created_at', 'updated_at'],
     order: 'created_at',
   },
-  person: {
-    label: 'Person',
-    table: 'person',
+  profile: {
+    label: 'Profiles',
+    table: 'profile',
     select: 'id, user_id, partner_program, role, email, firstname, surname, phone, postcode, password_set',
     columns: ['partner_program', 'user_email', 'role', 'email', 'firstname', 'surname', 'phone', 'postcode', 'password_set'],
     lookupMappings: [
@@ -38,26 +38,26 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     ],
     order: 'id',
   },
-  'person-parent': {
-    label: 'Person Parent Connections',
-    table: 'person_parent',
-    select: 'person_id, parent_id',
-    columns: ['person_id', 'parent_id'],
-    order: 'person_id',
-  },
-  profiles: {
-    label: 'Profiles',
-    table: 'profiles',
-    select: 'email, full_name, avatar_url, created_at',
-    columns: ['email', 'full_name', 'avatar_url', 'created_at'],
-    order: 'created_at',
+  'person-guardian-child': {
+    label: 'Guardian Child Links',
+    table: 'person_guardian_child',
+    select: 'guardian_profile_id, child_profile_id, primary_child',
+    columns: ['guardian_profile_id', 'child_profile_id', 'primary_child'],
+    order: 'guardian_profile_id',
   },
   workshop: {
     label: 'Workshops',
     table: 'workshop',
-    select: 'id, description, enrollment_open_at, enrollment_close_at, capacity',
-    columns: ['description', 'enrollment_open_at', 'enrollment_close_at', 'capacity'],
+    select: 'id, semester_id, description, enrollment_open_at, enrollment_close_at, capacity',
+    columns: ['semester_id', 'description', 'enrollment_open_at', 'enrollment_close_at', 'capacity'],
     order: 'enrollment_open_at',
+  },
+  semester: {
+    label: 'Semesters',
+    table: 'semester',
+    select: 'id, starts_at, ends_at, enrollment_open_at, enrollment_close_at',
+    columns: ['starts_at', 'ends_at', 'enrollment_open_at', 'enrollment_close_at'],
+    order: 'starts_at',
   },
   session: {
     label: 'Sessions',
@@ -72,12 +72,23 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'class-enrollment': {
     label: 'Workshop Enrollments',
     table: 'workshop_enrollment',
-    select: 'id, workshop_id, user_id, decided_by, status, requested_at',
-    columns: ['workshop_id', 'user_email', 'status', 'requested_at', 'decided_by_email'],
+    select: 'id, workshop_id, semester_id, profile_id, decided_by, status, requested_at',
+    columns: ['semester_id', 'workshop_id', 'profile_email', 'status', 'requested_at', 'decided_by_email'],
     order: 'requested_at',
     lookupMappings: [
-      { keyColumn: 'user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'user_email' },
+      { keyColumn: 'profile_id', table: 'profile', valueColumn: 'email', resultColumn: 'profile_email' },
       { keyColumn: 'decided_by', table: 'auth.users', valueColumn: 'email', resultColumn: 'decided_by_email' },
+    ],
+  },
+  'session-attendance': {
+    label: 'Session Attendance',
+    table: 'session_attendance',
+    select: 'id, session_id, profile_id, status, recorded_by, created_at',
+    columns: ['session_id', 'profile_email', 'status', 'recorded_by_email', 'created_at'],
+    order: 'created_at',
+    lookupMappings: [
+      { keyColumn: 'profile_id', table: 'profile', valueColumn: 'email', resultColumn: 'profile_email' },
+      { keyColumn: 'recorded_by', table: 'auth.users', valueColumn: 'email', resultColumn: 'recorded_by_email' },
     ],
   },
   form: {
@@ -90,8 +101,15 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'form-question': {
     label: 'Form Questions',
     table: 'form_question',
-    select: 'question_code, form_id, prompt, type, position',
-    columns: ['question_code', 'form_id', 'prompt', 'type', 'position'],
+    select: 'question_code, prompt, type, options',
+    columns: ['question_code', 'prompt', 'type', 'options'],
+    order: 'question_code',
+  },
+  'form-question-map': {
+    label: 'Form Question Map',
+    table: 'form_question_map',
+    select: 'form_id, question_code, position, prompt_override, options_override',
+    columns: ['form_id', 'question_code', 'position', 'prompt_override', 'options_override'],
     order: 'form_id',
   },
   'form-assignment': {
