@@ -23,11 +23,6 @@
 supabase gen types typescript --local > web/app/lib/database.types.ts
 
 
-## Tests
-- Playwright API tests: `cd web && npx playwright test web/tests/api`.
-- Playwright E2E tests: `cd web && npx playwright test web/tests/e2e`.
-- Required envs for tests: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and optional `ONBOARDING_MODE` (default `role`).
-
 Open docker desktop
 
 ```bash

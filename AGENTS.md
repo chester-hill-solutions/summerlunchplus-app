@@ -7,7 +7,7 @@ Update it when you add commands, tests, or conventions that agents need to know.
 1. Workspace & Git Hygiene
 - Assume the working tree might already have user edits; do not reset, revert, or drop any files you did not author.
 - Never amend commits or force push unless explicitly directed; keep history linear.
-- Run commands from `web/` whenever possible; this folder contains Vite, Tailwind, Supabase helpers, and Playwright tests.
+- Run commands from `web/` whenever possible; this folder contains Vite, Tailwind, and Supabase helpers.
 - Prefer `Read`, `Glob`, and `Grep` instead of ad-hoc shell searches; keep file formatting intact while you edit.
 - Keep changes ASCII unless the file already uses Unicode; limit comments to non-obvious logic.
 - Treat `supabase/migrations/` as generated output; add schema changes to `supabase/schemas/` and seeding to `supabase/seeds/` before migrating.
@@ -28,12 +28,9 @@ supabase gen types typescript --local > web/app/lib/database.types.ts
 3. Commands (run inside `web/` unless noted)
 - `npm install`: install dependencies.
 - `npm run dev`: start SSR dev server with HMR on port 5173.
-- `npm run typecheck`: runs `react-router typegen` then `tsc --noEmit`; rerun whenever routes/loaders/actions change.
+- `npm run typecheck`: runs `react-router typegen` then `tsc`; rerun whenever routes/loaders/actions change.
 - `npm run build`: produce SSR client/server bundles under `web/build`.
 - `npm run start`: serve the built app via `react-router-serve ./build/server/index.js`.
-- `npx playwright test`: run the full Playwright suite (set `SUPABASE_SERVICE_ROLE_KEY` when specs touch the DB).
-- `npx playwright test path/to/test.spec.ts`: execute a single spec file; always pass the full relative path.
-- `npx playwright test --grep "pattern"`: target specs by title when you do not want to run an entire file.
 - `supabase start --debug`: bring up local Supabase; use `supabase status -o json` afterward to see credentials.
 - Supabase workflow: edit SQL in `supabase/schemas/`, run `supabase db diff -f <name>`, `supabase migration up`, and regenerate types with the command noted above.
 - Docker (optional): from `web/`, `docker build -t summerlunchplus .` and `docker run -p 3000:3000 summerlunchplus`.
@@ -79,14 +76,9 @@ supabase gen types typescript --local > web/app/lib/database.types.ts
 - When importing SVGs, keep them small; large assets should remain in `public/` and load via `<img src="/logo.svg" />` where feasible.
 
 8. Testing & QA
-- Playwright tests live under `web/tests`. Run a focused spec via `npx playwright test path/to/test.spec.ts` and mention the relative path in this doc when you add new specs.
-- Use `--grep` with quotes to filter by test descriptions if you do not want to repeat the entire file.
+- There is no automated test suite right now; rely on `npm run typecheck` and manual QA.
 - When editing auth routes, start `npm run dev` and manually exercise login, sign-up, password reset, and protected route gating.
-- If a test needs a custom env var (e.g., `SUPABASE_SERVICE_ROLE_KEY`), mention that in this file and in PR descriptions.
-- Keep Playwright configs close to the tests; avoid global fixtures unless shared across suites.
-- Record manual testing steps in PRs when you hit flows that are not covered by Playwright yet.
-- For long-running suites, run `npx playwright test --shard <shard>/<total>` when you need to split execution across runs.
-- Add snapshots (subtitle assertions) only when they provide clear regression coverage; update them with `npx playwright test --update-snapshots` when necessary.
+- Record manual testing steps in PRs, especially when you change permissions or onboarding flows.
 
 9. Deployment & Observability
 - Build the Docker image from `web/`: `docker build -t summerlunchplus .` and run with `docker run -p 3000:3000 summerlunchplus`.
@@ -126,27 +118,18 @@ supabase gen types typescript --local > web/app/lib/database.types.ts
 13. Maintenance & Documentation
 - Update this file whenever you introduce new commands, testing flows, or automation that future agents should know.
 - Mention auth or env changes clearly in PR descriptions so reviewers can validate the flows.
-- Document any new Playwright spec paths in this doc to make single-test runs easier.
 - Describe manual QA steps in PRs for flows that are difficult to automate (e.g., Supabase-triggered onboarding flows).
 - Keep the agent handbook under ~150 lines in future revisions; expand or contract content in place without duplicating points.
 - Before any PR, run `npm run typecheck`, verify `npm run build` if configs/deps changed, and ensure the handbook still reflects the new behavior.
 
-14. Observability & Logging
-- Prefer `console.error` over `console.log` for errors, and include contextual props to make logs actionable.
-- Use `console.warn` sparingly when configuration is missing but recoverable.
-- Keep browser logs focused; remove temporary debug statements before committing.
-- Document manual monitoring steps in PRs when you touch observability-sensitive flows.
-- When troubleshooting, collect relevant logs, run targeted Playwright specs, and note the commands in this file for future agents.
-
-15. Routing Gotchas
+14. Routing Gotchas
 - Avoid dynamic `import()` inside route modules unless lazy-loading a heavy child component; React Router handles code splitting.
 - Keep loader helpers collocated with the route they serve unless they are shared across multiple routes.
 - Do not export server-only helpers to the client; use `app/lib` abstractions instead.
 - Always import the generated `Route` type from `./+types/...` for loader/action signatures to stay in sync with the router.
 - Test new or modified routes in `npm run dev` before pushing; the dev server warns about missing route files early.
 
-16. Suggested Next Steps
-- When you add tests, document the command you used (e.g., `npx playwright test web/tests/auth-login.spec.ts`).
+15. Suggested Next Steps
 - Run `npm run typecheck` after touching routes and loaders, and mention the result in your PR description.
 - If you make styling or UX changes, manually verify on both desktop and mobile viewports via the dev server.
 - Keep this handbook updated with any future tooling or workflow additions so future agents can ramp quickly.

@@ -6,10 +6,7 @@
     "build": "react-router build",
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
-    "typecheck": "react-router typegen && tsc",
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed",
-    "test:stack": "supabase stop --no-backup && supabase start --debug && npm run test:e2e"
+    "typecheck": "react-router typegen && tsc"
   },
   "dependencies": {
     "@react-router/fs-routes": "^7.13.0",
@@ -30,7 +27,6 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.48.2",
     "@react-router/dev": "^7.13.0",
     "@tailwindcss/vite": "^4.1.13",
     "@types/node": "^22",
