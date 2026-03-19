@@ -15,3 +15,6 @@ create table if not exists public.invites (
   updated_at timestamptz not null default now(),
   confirmed_at timestamptz
 );
+
+create unique index if not exists invites_invitee_email_key
+  on public.invites (invitee_email);

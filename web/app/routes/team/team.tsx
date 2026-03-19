@@ -1,15 +1,16 @@
 import { NavLink, Outlet, redirect, useLoaderData } from 'react-router'
-import type { Route } from './+types/team'
-import { requireAuth } from '@/lib/auth.server'
-import { cn } from '@/lib/utils'
-import { teamPages } from './nav'
 
-const ADMIN_ROLES = new Set(['admin', 'manager'])
+import { requireAuth } from '@/lib/auth.server'
+import { isRoleAtLeast } from '@/lib/roles'
+import { cn } from '@/lib/utils'
+
+import type { Route } from './+types/team'
+import { teamPages } from './nav'
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
 
-  if (!ADMIN_ROLES.has(auth.claims.role)) {
+  if (!isRoleAtLeast(auth.claims.role, 'staff')) {
     throw redirect('/home', { headers: auth.headers })
   }
 

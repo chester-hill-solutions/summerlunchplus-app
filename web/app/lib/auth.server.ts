@@ -1,5 +1,8 @@
 import { redirect } from "react-router";
 
+import { adminClient } from "@/lib/supabase/adminClient";
+import { getSignUpDetailsStatus } from "@/lib/onboarding.server";
+import { isRoleAtLeast, rolesUpTo } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 
 function getOnboardingMode() {
@@ -22,9 +25,21 @@ export async function requireAuth(request: Request) {
     | null
     | undefined;
   const role = typeof claims?.user_role === "string" ? claims.user_role : "unassigned";
-  const permissions = Array.isArray(claims?.permissions)
+  const claimPermissions = Array.isArray(claims?.permissions)
     ? claims.permissions.filter((p): p is string => typeof p === "string")
     : [];
+
+  let permissions = claimPermissions;
+  const roleScope = rolesUpTo(role);
+  if (roleScope.length) {
+    const { data: permissionRows, error: permissionsError } = await adminClient
+      .from("role_permission")
+      .select("permission")
+      .in("role", roleScope);
+    if (!permissionsError && permissionRows) {
+      permissions = Array.from(new Set(permissionRows.map((row) => row.permission)));
+    }
+  }
   const onboardingComplete = Boolean(claims?.onboarding_complete);
 
   return {
@@ -36,6 +51,22 @@ export async function requireAuth(request: Request) {
 
 export async function enforceOnboardingGuard(request: Request, opts?: { allowMyForms?: boolean }) {
   const auth = await requireAuth(request);
+  if (isRoleAtLeast(auth.claims.role, "staff")) {
+    return { ...auth, shouldRedirectToForms: false };
+  }
+
+  const { supabase } = createClient(request);
+  const signUpStatus = await getSignUpDetailsStatus(supabase, auth.user.id, auth.claims.role);
+  if (!signUpStatus.isComplete) {
+    if (!signUpStatus.profileId) {
+      throw redirect("/sign-up", { headers: auth.headers });
+    }
+    const roleParam = signUpStatus.role ?? auth.claims.role ?? "unassigned";
+    throw redirect(`/auth/sign-up-details?role=${roleParam}&pid=${signUpStatus.profileId}`, {
+      headers: auth.headers,
+    });
+  }
+
   const mode = getOnboardingMode();
   const isUnassigned = auth.claims.role === "unassigned";
   const hasSiteRead = auth.claims.permissions.includes("site.read");

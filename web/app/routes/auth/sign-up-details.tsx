@@ -551,21 +551,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         role: targetRole,
       },
     })
-    if (inviteError || !inviteData?.user?.id) {
-      return { error: inviteError?.message ?? 'Unable to send invite' }
+    let inviteeUserId = inviteData?.user?.id ?? null
+    if (inviteError) {
+      const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+        type: 'invite',
+        email: inviteEmail,
+        options: {
+          redirectTo,
+          data: {
+            inviter_profile_id: pid,
+            inviter_role: role,
+            inviter_email: inviterEmail,
+            role: targetRole,
+          },
+        },
+      })
+      if (linkError) {
+        return { error: inviteError.message ?? linkError.message ?? 'Unable to send invite' }
+      }
+      inviteeUserId = linkData?.user?.id ?? inviteeUserId
     }
 
-    const inviteeUserId = inviteData.user.id
+    const inviteeProfilePayload = {
+      email: inviteEmail,
+      role: targetRole,
+      ...(inviteeUserId ? { user_id: inviteeUserId } : {}),
+    }
     const { data: inviteeRow, error: inviteeError } = await supabase
       .from('profile')
-      .upsert(
-        {
-          user_id: inviteeUserId,
-          email: inviteEmail,
-          role: targetRole,
-        },
-        { onConflict: 'email' }
-      )
+      .upsert(inviteeProfilePayload, { onConflict: 'email' })
       .select('id')
       .single()
     if (inviteeError || !inviteeRow?.id) {

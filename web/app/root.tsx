@@ -16,6 +16,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     "/sign-up",
     "/sign-up/invite",
     "/forgot-password",
+    "/auth/sign-up-details",
     "/auth.confirm",
     "/auth.error",
     "/",

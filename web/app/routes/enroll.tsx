@@ -3,8 +3,9 @@ import { useLoaderData, useFetcher } from 'react-router'
 import type { Route } from './+types/enroll'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth.server'
+import { resolveFamilyGraph } from '@/lib/family.server'
+import { createClient } from '@/lib/supabase/server'
 
 type WorkshopRow = {
   id: string
@@ -27,6 +28,7 @@ type EnrollmentRow = {
   id: string
   workshop_id: string
   semester_id: string
+  profile_id: string | null
   status: string
 }
 
@@ -41,14 +43,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   const { supabase, headers } = createClient(request)
 
-  const { data: profile } = await supabase
-    .from('profile')
-    .select('id')
-    .eq('user_id', auth.user.id)
-    .single()
-
-  if (!profile?.id) {
-    throw new Response('Profile not found', { status: 404 })
+  let family
+  try {
+    family = await resolveFamilyGraph(supabase, auth.user.id)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Profile not found'
+    throw new Response(message, { status: 404 })
   }
 
   const [{ data: semesterData }, { data: enrollmentsData }] = await Promise.all([
@@ -58,8 +58,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       .order('starts_at', { ascending: true }),
     supabase
       .from('workshop_enrollment')
-      .select('id, workshop_id, semester_id, status')
-      .eq('profile_id', profile.id)
+      .select('id, workshop_id, semester_id, profile_id, status')
+      .in('profile_id', family.familyProfileIds)
       .order('requested_at', { ascending: false }),
   ])
 
@@ -86,6 +86,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     id: String(e.id),
     workshop_id: String(e.workshop_id),
     semester_id: String(e.semester_id),
+    profile_id: e.profile_id ? String(e.profile_id) : null,
     status: String(e.status),
   }))
 
@@ -99,22 +100,58 @@ export async function action({ request }: Route.ActionArgs) {
   const auth = await requireAuth(request)
   const { supabase, headers } = createClient(request)
 
-  const { data: profile } = await supabase
-    .from('profile')
-    .select('id')
-    .eq('user_id', auth.user.id)
-    .single()
-
-  if (!profile?.id) {
-    return new Response(JSON.stringify({ ok: false, error: 'Profile not found' } satisfies ActionResult), {
+  let family
+  try {
+    family = await resolveFamilyGraph(supabase, auth.user.id)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Profile not found'
+    return new Response(JSON.stringify({ ok: false, error: message } satisfies ActionResult), {
       status: 404,
       headers,
     })
   }
 
+  const { data: workshopRow, error: workshopError } = await supabase
+    .from('workshop')
+    .select('id, semester_id')
+    .eq('id', workshop_id)
+    .single()
+
+  if (workshopError || !workshopRow?.semester_id) {
+    return new Response(JSON.stringify({ ok: false, error: 'Workshop not found' } satisfies ActionResult), {
+      status: 404,
+      headers,
+    })
+  }
+
+  const { data: existingEnrollment } = await supabase
+    .from('workshop_enrollment')
+    .select('id')
+    .eq('semester_id', workshopRow.semester_id)
+    .in('profile_id', family.familyProfileIds)
+    .limit(1)
+    .maybeSingle()
+
+  if (existingEnrollment?.id) {
+    return new Response(
+      JSON.stringify({ ok: false, error: 'Family already enrolled for this semester' } satisfies ActionResult),
+      { status: 400, headers }
+    )
+  }
+
+  const primaryChildId = family.primaryChildByGuardian.get(family.profileId)
+  if (family.profileRole === 'guardian' && !primaryChildId) {
+    return new Response(
+      JSON.stringify({ ok: false, error: 'Primary child not found for guardian' } satisfies ActionResult),
+      { status: 400, headers }
+    )
+  }
+
+  const targetProfileId = primaryChildId ?? family.profileId
+
   const { error } = await supabase.from('workshop_enrollment').insert({
     workshop_id,
-    profile_id: profile.id,
+    profile_id: targetProfileId,
     status: 'pending',
   })
 

@@ -2,8 +2,9 @@ import { useFetcher, useLoaderData } from 'react-router'
 
 import type { Route } from './+types/home'
 import { Button } from '@/components/ui/button'
-import { createClient } from '@/lib/supabase/server'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
+import { resolveFamilyGraph } from '@/lib/family.server'
+import { createClient } from '@/lib/supabase/server'
 import {
   Table,
   TableBody,
@@ -21,9 +22,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createClient(request)
   const now = new Date().toISOString()
 
+  const family = await resolveFamilyGraph(supabase, auth.user.id)
+
   const { data: workshops, error: workshopError } = await supabase
     .from('workshop')
-    .select('id, description, enrollment_open_at, enrollment_close_at')
+    .select('id, description, enrollment_open_at, enrollment_close_at, semester_id')
     .gte('enrollment_close_at', now)
     .order('enrollment_open_at', { ascending: true })
   if (workshopError) {
@@ -36,8 +39,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const { data: enrollments } = await supabase
     .from('workshop_enrollment')
-    .select('workshop_id, status')
-    .eq('user_id', auth.user.id)
+    .select('workshop_id, status, semester_id, profile_id')
+    .in('profile_id', family.familyProfileIds)
 
   const bounds = (sessions || []).reduce<Record<string, { start: string; end: string }>>((acc, session) => {
     if (!session?.workshop_id) return acc
@@ -55,6 +58,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     user: auth.user,
     role: auth.claims.role,
     now,
+    family,
     workshops: (workshops || []).map(workshop => ({
       ...workshop,
       workshop_start: bounds[workshop.id]?.start ?? '',
@@ -74,13 +78,44 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: 'Authentication required' }
   }
 
+  const family = await resolveFamilyGraph(supabase, currentUser.user.id)
+
+  const { data: workshopRow, error: workshopError } = await supabase
+    .from('workshop')
+    .select('id, semester_id')
+    .eq('id', workshopId)
+    .single()
+
+  if (workshopError || !workshopRow?.semester_id) {
+    return { error: workshopError?.message ?? 'Unable to find workshop' }
+  }
+
+  const { data: existingEnrollment } = await supabase
+    .from('workshop_enrollment')
+    .select('id')
+    .eq('semester_id', workshopRow.semester_id)
+    .in('profile_id', family.familyProfileIds)
+    .limit(1)
+    .maybeSingle()
+
+  if (existingEnrollment?.id) {
+    return { error: 'Family already enrolled for this semester' }
+  }
+
+  const primaryChildId = family.primaryChildByGuardian.get(family.profileId)
+  if (family.profileRole === 'guardian' && !primaryChildId) {
+    return { error: 'Primary child not found for guardian' }
+  }
+
+  const targetProfileId = primaryChildId ?? family.profileId
+
   const { error } = await supabase.from('workshop_enrollment').upsert(
     {
       workshop_id: workshopId,
-      user_id: currentUser.user.id,
+      profile_id: targetProfileId,
       status: 'pending',
     },
-    { onConflict: 'workshop_id,user_id' }
+    { onConflict: 'workshop_id,profile_id' }
   )
 
   if (error) {
@@ -95,6 +130,7 @@ type WorkshopRow = {
   description: string
   enrollment_open_at: string
   enrollment_close_at: string
+  semester_id: string
   workshop_start: string
   workshop_end: string
 }
@@ -103,14 +139,28 @@ type LoaderData = {
   user: Awaited<ReturnType<typeof enforceOnboardingGuard>>['user']
   role: string | null
   now: string
+  family: Awaited<ReturnType<typeof resolveFamilyGraph>>
   workshops: WorkshopRow[]
-  enrollments: { workshop_id: string; status: string }[]
+  enrollments: { workshop_id: string | null; status: string; semester_id: string; profile_id: string | null }[]
 }
 
 export default function Home() {
-  const { workshops, enrollments, now } = useLoaderData<LoaderData>()
+  const { workshops, enrollments, now, family } = useLoaderData<LoaderData>()
   const fetcher = useFetcher<typeof action>()
-  const statusByWorkshop = new Map(enrollments.map(enrollment => [enrollment.workshop_id, enrollment.status]))
+  const statusByWorkshop = new Map<string, string>()
+  const enrollmentBySemester = new Map<string, string>()
+  const childById = new Map(family.children.map(child => [child.id, child]))
+
+  for (const enrollment of enrollments) {
+    if (!enrollment.workshop_id) continue
+    const current = statusByWorkshop.get(enrollment.workshop_id)
+    if (current !== 'approved') {
+      statusByWorkshop.set(enrollment.workshop_id, enrollment.status)
+    }
+    if (enrollment.semester_id && !enrollmentBySemester.has(enrollment.semester_id)) {
+      enrollmentBySemester.set(enrollment.semester_id, enrollment.status)
+    }
+  }
 
   return (
     <main className="w-full px-6 py-12">
@@ -118,6 +168,50 @@ export default function Home() {
         <h1 className="text-3xl font-semibold">Summer Workshops</h1>
         <p className="text-sm text-muted-foreground">Choose a workshop and complete enrollment while the window is open.</p>
       </header>
+      <section className="mb-6 rounded-lg border bg-card p-4 shadow-sm">
+        <h2 className="text-lg font-semibold">Family</h2>
+        <div className="mt-2 grid gap-4 md:grid-cols-2">
+          <div>
+            <p className="text-sm font-medium text-slate-900">Guardians</p>
+            {family.guardians.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No guardians linked.</p>
+            ) : (
+              <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                {family.guardians.map(guardian => (
+                  <li key={guardian.id}>
+                    {guardian.firstname ?? 'Guardian'} {guardian.surname ?? ''}
+                    {guardian.primaryChildId && (
+                      <span className="text-xs text-muted-foreground">
+                        {' '}
+                        · Primary child:{' '}
+                        {(() => {
+                          const child = childById.get(guardian.primaryChildId)
+                          if (!child) return 'Assigned'
+                          return `${child.firstname ?? 'Child'} ${child.surname ?? ''}`.trim()
+                        })()}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <p className="text-sm font-medium text-slate-900">Children</p>
+            {family.children.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No children linked.</p>
+            ) : (
+              <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                {family.children.map(child => (
+                  <li key={child.id}>
+                    {child.firstname ?? 'Child'} {child.surname ?? ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </section>
       <Table>
         <TableHeader>
           <TableRow>
@@ -133,7 +227,13 @@ export default function Home() {
           {workshops.map(workshop => {
             const enrollmentStatus = statusByWorkshop.get(workshop.id)
             const isOpen = now >= workshop.enrollment_open_at && now <= workshop.enrollment_close_at
-            const disabled = !isOpen || enrollmentStatus === 'pending' || enrollmentStatus === 'approved'
+            const semesterStatus = enrollmentBySemester.get(workshop.semester_id)
+            const familyEnrolledThisSemester = Boolean(semesterStatus)
+            const disabled =
+              !isOpen ||
+              enrollmentStatus === 'pending' ||
+              enrollmentStatus === 'approved' ||
+              familyEnrolledThisSemester
             return (
               <TableRow key={workshop.id}>
                 <TableCell>
@@ -151,12 +251,16 @@ export default function Home() {
                         ? 'Enrolled'
                         : enrollmentStatus === 'pending'
                         ? 'Pending'
+                        : familyEnrolledThisSemester
+                        ? 'Family enrolled'
                         : isOpen
                         ? 'Enroll'
                         : 'Closed'}
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                      Status: {enrollmentStatus ?? 'not enrolled'}
+                      {familyEnrolledThisSemester
+                        ? 'Family already enrolled this semester'
+                        : `Status: ${enrollmentStatus ?? 'not enrolled'}`}
                     </p>
                   </fetcher.Form>
                 </TableCell>
@@ -165,6 +269,9 @@ export default function Home() {
           })}
         </TableBody>
       </Table>
+      {fetcher.data?.error ? (
+        <p className="pt-3 text-sm text-destructive">{fetcher.data.error}</p>
+      ) : null}
     </main>
   )
 }
