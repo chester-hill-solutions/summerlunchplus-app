@@ -52,6 +52,11 @@ create policy profile_read_self
   for select
   using (user_id = auth.uid());
 
+create policy profile_read_admin
+  on public.profile
+  for select
+  using (public.authorize('profiles.read'));
+
 create policy profile_update_self
   on public.profile
   for update

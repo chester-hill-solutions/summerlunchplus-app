@@ -11,12 +11,18 @@ const formatTimestamp = (value: string) => {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
-const getCellValue = (column: string, row: Record<string, unknown>) => {
+const formatDateOnly = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
+}
+
+const getCellValue = (column: string, row: Record<string, unknown>, tableName?: string) => {
   const value = row[column]
   if (value && typeof value === 'object') {
     if ('start' in value && 'end' in value) {
-      const start = typeof value.start === 'string' ? formatTimestamp(value.start) : ''
-      const end = typeof value.end === 'string' ? formatTimestamp(value.end) : ''
+      const start = typeof value.start === 'string' ? formatDateOnly(value.start) : ''
+      const end = typeof value.end === 'string' ? formatDateOnly(value.end) : ''
       return [start, end].filter(Boolean).join(' - ')
     }
     if ('timestamp' in value && 'label' in value) {
@@ -30,6 +36,9 @@ const getCellValue = (column: string, row: Record<string, unknown>) => {
     return JSON.stringify(value)
   }
   if (typeof value === 'string' && isTimestampColumn(column)) {
+    if (tableName === 'semester' && (column === 'starts_at' || column === 'ends_at')) {
+      return formatDateOnly(value)
+    }
     return formatTimestamp(value)
   }
   return (value ?? '').toString()
@@ -89,7 +98,7 @@ export default function TableDisplay() {
           .map(token => token.trim())
           .filter(Boolean)
         if (!tokens.length) return true
-        const cellValue = getCellValue(column, row).toLowerCase()
+        const cellValue = getCellValue(column, row, tableName).toLowerCase()
         return tokens.some(token => cellValue.includes(token.toLowerCase()))
       })
     )
@@ -169,7 +178,7 @@ export default function TableDisplay() {
         <p className="text-sm text-muted-foreground">Showing live entries from the {label.toLowerCase()} table ({derivedRows.length} rows).</p>
       </div>
       <div className="overflow-hidden rounded-lg border">
-        <table className="w-full table-fixed text-sm">
+        <table className="w-full table-auto text-sm">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground">
             <tr>
               {columns.map((column: string) => (
@@ -209,7 +218,7 @@ export default function TableDisplay() {
                       <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2 font-mono">
                         <select
                           value={statusValue}
-                          onChange={event => updateAttendanceStatus(row, event.target.value)}
+                      onChange={event => updateAttendanceStatus(row, event.target.value)}
                           className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
                         >
                           <option value="">(none)</option>
@@ -224,10 +233,10 @@ export default function TableDisplay() {
                   return (
                     <td
                       key={`cell-${rowIndex}-${column}`}
-                      className="px-4 py-2 font-mono hover:bg-muted/30 cursor-pointer"
-                      onClick={() => appendFilter(column, getCellValue(column, row))}
+                      className="max-w-xs truncate px-4 py-2 font-mono hover:bg-muted/30 cursor-pointer"
+                      onClick={() => appendFilter(column, getCellValue(column, row, tableName))}
                     >
-                      {getCellValue(column, row)}
+                      {getCellValue(column, row, tableName)}
                     </td>
                   )
                 })}

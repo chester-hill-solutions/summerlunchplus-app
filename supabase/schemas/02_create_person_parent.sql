@@ -21,6 +21,11 @@ create policy person_guardian_child_read_guardian
     or child_profile_id = public.current_profile_id()
   );
 
+create policy person_guardian_child_read_admin
+  on public.person_guardian_child
+  for select
+  using (public.authorize('profiles.read'));
+
 create policy person_guardian_child_insert_guardian
   on public.person_guardian_child
   for insert
