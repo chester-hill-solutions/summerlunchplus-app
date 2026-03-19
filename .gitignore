@@ -10,3 +10,5 @@ _**
 # React Router
 /.react-router/
 /build/
+/web/test-results/
+/web/playwright-report/

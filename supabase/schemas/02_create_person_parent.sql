@@ -17,38 +17,25 @@ create policy person_guardian_child_read_guardian
   on public.person_guardian_child
   for select
   using (
-    guardian_profile_id in (
-      select p.id from public.profile p where p.user_id = auth.uid()
-    )
-    or child_profile_id in (
-      select pgc.child_profile_id
-      from public.person_guardian_child pgc
-      join public.profile p on p.id = pgc.guardian_profile_id
-      where p.user_id = auth.uid()
-    )
+    guardian_profile_id = public.current_profile_id()
+    or child_profile_id = public.current_profile_id()
   );
 
 create policy person_guardian_child_insert_guardian
   on public.person_guardian_child
   for insert
   with check (
-    guardian_profile_id in (
-      select p.id from public.profile p where p.user_id = auth.uid()
-    )
+    guardian_profile_id = public.current_profile_id()
   );
 
 create policy person_guardian_child_update_guardian
   on public.person_guardian_child
   for update
   using (
-    guardian_profile_id in (
-      select p.id from public.profile p where p.user_id = auth.uid()
-    )
+    guardian_profile_id = public.current_profile_id()
   )
   with check (
-    guardian_profile_id in (
-      select p.id from public.profile p where p.user_id = auth.uid()
-    )
+    guardian_profile_id = public.current_profile_id()
   );
 
 create policy person_guardian_child_read_auth_admin
@@ -64,8 +51,7 @@ create policy profile_read_guardian_child
     id in (
       select pgc.child_profile_id
       from public.person_guardian_child pgc
-      join public.profile p on p.id = pgc.guardian_profile_id
-      where p.user_id = auth.uid()
+      where pgc.guardian_profile_id = public.current_profile_id()
     )
   );
 

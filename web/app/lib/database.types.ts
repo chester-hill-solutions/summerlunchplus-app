@@ -36,6 +36,7 @@ export type Database = {
     Tables: {
       form: {
         Row: {
+          auto_assign: Database["public"]["Enums"]["app_role"][]
           created_at: string
           due_at: string | null
           id: string
@@ -44,6 +45,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          auto_assign?: Database["public"]["Enums"]["app_role"][]
           created_at?: string
           due_at?: string | null
           id?: string
@@ -52,6 +54,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          auto_assign?: Database["public"]["Enums"]["app_role"][]
           created_at?: string
           due_at?: string | null
           id?: string
@@ -480,6 +483,7 @@ export type Database = {
           created_at: string
           form_id: string
           id: string
+          roles: Database["public"]["Enums"]["app_role"][]
           slug: string
           step_order: number
           updated_at: string
@@ -488,6 +492,7 @@ export type Database = {
           created_at?: string
           form_id: string
           id?: string
+          roles: Database["public"]["Enums"]["app_role"][]
           slug: string
           step_order: number
           updated_at?: string
@@ -496,6 +501,7 @@ export type Database = {
           created_at?: string
           form_id?: string
           id?: string
+          roles?: Database["public"]["Enums"]["app_role"][]
           slug?: string
           step_order?: number
           updated_at?: string
@@ -648,6 +654,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      current_profile_id: { Args: never; Returns: string }
       current_user_role: {
         Args: never
         Returns: Database["public"]["Enums"]["app_role"]

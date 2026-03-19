@@ -17,6 +17,19 @@ create table public.profile (
 
 alter table public.profile enable row level security;
 
+create or replace function public.current_profile_id()
+returns uuid
+language sql
+security definer
+set search_path = public
+set row_security = off
+as $$
+  select id
+  from public.profile
+  where user_id = auth.uid()
+  limit 1
+$$;
+
 create or replace function public.touch_profile_updated_at()
 returns trigger
 language plpgsql

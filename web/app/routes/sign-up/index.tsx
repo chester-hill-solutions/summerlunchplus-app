@@ -66,7 +66,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { user_id: userId, role, email: invitedEmail, password_set: true },
       { onConflict: 'email' }
     )
-    .select('id')
+    .select()
     .single()
   if (profileError || !profileRow?.id) {
     return { error: profileError?.message ?? 'Profile creation failed' }

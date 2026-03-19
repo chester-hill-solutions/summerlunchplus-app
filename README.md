@@ -125,3 +125,7 @@ This template comes with [Tailwind CSS](https://tailwindcss.com/) already config
 ---
 
 Built with ❤️ using React Router.
+## Tests
+- Playwright E2E tests: `cd web && npm run test:e2e`.
+- Run a single spec: `cd web && npm run test:e2e -- path/to/test.spec.ts`.
+- Required envs for tests: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and optional `ONBOARDING_MODE` (default `role`).

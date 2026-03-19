@@ -7,7 +7,7 @@ Update it when you add commands, tests, or conventions that agents need to know.
 1. Workspace & Git Hygiene
 - Assume the working tree might already have user edits; do not reset, revert, or drop any files you did not author.
 - Never amend commits or force push unless explicitly directed; keep history linear.
-- Run commands from `web/` whenever possible; this folder contains Vite, Tailwind, and Supabase helpers.
+- Run commands from `web/` whenever possible; this folder contains Vite, Tailwind, Supabase helpers, and Playwright tests.
 - Prefer `Read`, `Glob`, and `Grep` instead of ad-hoc shell searches; keep file formatting intact while you edit.
 - Keep changes ASCII unless the file already uses Unicode; limit comments to non-obvious logic.
 - Treat `supabase/migrations/` as generated output; add schema changes to `supabase/schemas/` and seeding to `supabase/seeds/` before migrating.
@@ -31,6 +31,10 @@ supabase gen types typescript --local > web/app/lib/database.types.ts
 - `npm run typecheck`: runs `react-router typegen` then `tsc`; rerun whenever routes/loaders/actions change.
 - `npm run build`: produce SSR client/server bundles under `web/build`.
 - `npm run start`: serve the built app via `react-router-serve ./build/server/index.js`.
+- `npm run test:e2e`: run the full Playwright suite (requires Supabase running and local env vars).
+- `npm run test:e2e -- path/to/test.spec.ts`: execute a single spec file; always pass the full relative path.
+- `npm run test:e2e -- --grep "pattern"`: target specs by title when you do not want to run an entire file.
+- `npm run test:e2e:headed`: run Playwright with a visible browser.
 - `supabase start --debug`: bring up local Supabase; use `supabase status -o json` afterward to see credentials.
 - Supabase workflow: edit SQL in `supabase/schemas/`, run `supabase db diff -f <name>`, `supabase migration up`, and regenerate types with the command noted above.
 - Docker (optional): from `web/`, `docker build -t summerlunchplus .` and `docker run -p 3000:3000 summerlunchplus`.
@@ -76,9 +80,12 @@ supabase gen types typescript --local > web/app/lib/database.types.ts
 - When importing SVGs, keep them small; large assets should remain in `public/` and load via `<img src="/logo.svg" />` where feasible.
 
 8. Testing & QA
-- There is no automated test suite right now; rely on `npm run typecheck` and manual QA.
+- Playwright tests live under `web/tests` and assume Supabase is running with local env vars loaded.
+- Run a focused spec via `npm run test:e2e -- path/to/test.spec.ts` and mention the relative path in this doc when you add new specs.
+- Use `--grep` with quotes to filter by test descriptions if you do not want to repeat the entire file.
 - When editing auth routes, start `npm run dev` and manually exercise login, sign-up, password reset, and protected route gating.
-- Record manual testing steps in PRs, especially when you change permissions or onboarding flows.
+- If a test needs a custom env var (e.g., `SUPABASE_SERVICE_ROLE_KEY`), mention that in this file and in PR descriptions.
+- Record manual testing steps in PRs when you hit flows that are not covered by Playwright yet.
 
 9. Deployment & Observability
 - Build the Docker image from `web/`: `docker build -t summerlunchplus .` and run with `docker run -p 3000:3000 summerlunchplus`.
@@ -118,6 +125,7 @@ supabase gen types typescript --local > web/app/lib/database.types.ts
 13. Maintenance & Documentation
 - Update this file whenever you introduce new commands, testing flows, or automation that future agents should know.
 - Mention auth or env changes clearly in PR descriptions so reviewers can validate the flows.
+- Document any new Playwright spec paths in this doc to make single-test runs easier.
 - Describe manual QA steps in PRs for flows that are difficult to automate (e.g., Supabase-triggered onboarding flows).
 - Keep the agent handbook under ~150 lines in future revisions; expand or contract content in place without duplicating points.
 - Before any PR, run `npm run typecheck`, verify `npm run build` if configs/deps changed, and ensure the handbook still reflects the new behavior.
@@ -130,6 +138,7 @@ supabase gen types typescript --local > web/app/lib/database.types.ts
 - Test new or modified routes in `npm run dev` before pushing; the dev server warns about missing route files early.
 
 15. Suggested Next Steps
+- When you add tests, document the command you used (e.g., `npm run test:e2e -- web/tests/e2e/create-parent.spec.ts`).
 - Run `npm run typecheck` after touching routes and loaders, and mention the result in your PR description.
 - If you make styling or UX changes, manually verify on both desktop and mobile viewports via the dev server.
 - Keep this handbook updated with any future tooling or workflow additions so future agents can ramp quickly.
