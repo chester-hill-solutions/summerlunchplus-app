@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLoaderData, useSearchParams } from 'react-router'
+import { useFetcher, useLoaderData, useSearchParams } from 'react-router'
 
 const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
 
@@ -42,7 +42,8 @@ const getDirectionIndicator = (stage: 0 | 1 | 2) => {
 }
 
 export default function TableDisplay() {
-  const { columns, rows, label } = useLoaderData()
+  const { columns, rows, label, tableName, canEditStatus } = useLoaderData()
+  const fetcher = useFetcher()
   const [searchParams, setSearchParams] = useSearchParams()
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortStage, setSortStage] = useState<0 | 1 | 2>(0)
@@ -146,6 +147,21 @@ export default function TableDisplay() {
     })
   }
 
+  const isClassAttendance = tableName === 'class-attendance'
+
+  const updateAttendanceStatus = (row: Record<string, unknown>, value: string) => {
+    if (!isClassAttendance || !canEditStatus) return
+    const classId = typeof row.class_id === 'string' ? row.class_id : ''
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!classId || !profileId) return
+    const formData = new FormData()
+    formData.set('intent', 'update-status')
+    formData.set('class_id', classId)
+    formData.set('profile_id', profileId)
+    formData.set('status', value)
+    fetcher.submit(formData, { method: 'post' })
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -186,15 +202,35 @@ export default function TableDisplay() {
           <tbody>
             {derivedRows.map((row, rowIndex) => (
               <tr key={`row-${rowIndex}`} className={rowIndex % 2 === 0 ? 'bg-card' : ''}>
-                {columns.map((column: string) => (
-                  <td
-                    key={`cell-${rowIndex}-${column}`}
-                    className="px-4 py-2 font-mono hover:bg-muted/30 cursor-pointer"
-                    onClick={() => appendFilter(column, getCellValue(column, row))}
-                  >
-                    {getCellValue(column, row)}
-                  </td>
-                ))}
+                {columns.map((column: string) => {
+                  if (isClassAttendance && column === 'status' && canEditStatus) {
+                    const statusValue = typeof row.status === 'string' ? row.status : ''
+                    return (
+                      <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2 font-mono">
+                        <select
+                          value={statusValue}
+                          onChange={event => updateAttendanceStatus(row, event.target.value)}
+                          className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
+                        >
+                          <option value="">(none)</option>
+                          <option value="unknown">unknown</option>
+                          <option value="present">present</option>
+                          <option value="absent">absent</option>
+                        </select>
+                      </td>
+                    )
+                  }
+
+                  return (
+                    <td
+                      key={`cell-${rowIndex}-${column}`}
+                      className="px-4 py-2 font-mono hover:bg-muted/30 cursor-pointer"
+                      onClick={() => appendFilter(column, getCellValue(column, row))}
+                    >
+                      {getCellValue(column, row)}
+                    </td>
+                  )
+                })}
               </tr>
             ))}
           </tbody>

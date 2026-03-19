@@ -80,7 +80,7 @@ export type Database = {
           notes: string | null
           profile_id: string
           recorded_by: string | null
-          status: Database["public"]["Enums"]["class_attendance_status"]
+          status: Database["public"]["Enums"]["class_attendance_status"] | null
           updated_at: string
         }
         Insert: {
@@ -90,7 +90,7 @@ export type Database = {
           notes?: string | null
           profile_id: string
           recorded_by?: string | null
-          status?: Database["public"]["Enums"]["class_attendance_status"]
+          status?: Database["public"]["Enums"]["class_attendance_status"] | null
           updated_at?: string
         }
         Update: {
@@ -100,7 +100,7 @@ export type Database = {
           notes?: string | null
           profile_id?: string
           recorded_by?: string | null
-          status?: Database["public"]["Enums"]["class_attendance_status"]
+          status?: Database["public"]["Enums"]["class_attendance_status"] | null
           updated_at?: string
         }
         Relationships: [
@@ -667,6 +667,7 @@ export type Database = {
         Returns: Database["public"]["Enums"]["app_role"]
       }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
+      ensure_class_attendance_rows: { Args: never; Returns: undefined }
       has_completed_required_forms: {
         Args: { p_user_id: string }
         Returns: boolean
@@ -736,7 +737,7 @@ export type Database = {
         | "instructor"
         | "student"
         | "guardian"
-      class_attendance_status: "present" | "absent" | "excused"
+      class_attendance_status: "unknown" | "present" | "absent"
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
@@ -934,7 +935,7 @@ export const Constants = {
         "student",
         "guardian",
       ],
-      class_attendance_status: ["present", "absent", "excused"],
+      class_attendance_status: ["unknown", "present", "absent"],
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",

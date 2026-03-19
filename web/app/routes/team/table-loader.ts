@@ -124,6 +124,6 @@ export function createTableLoader(tableName: string) {
       }
     }
 
-    return { columns: definition.columns, rows, label: definition.label }
+    return { columns: definition.columns, rows, label: definition.label, tableName }
   }
 }

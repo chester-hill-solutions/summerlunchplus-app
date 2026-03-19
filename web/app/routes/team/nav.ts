@@ -1,12 +1,13 @@
 export const teamPages = [
   { to: '/team', label: 'Overview', description: 'Admin workspace and quick links.' },
+  { to: '/team/workshop-enrollment', label: 'Workshop enrollments', description: 'Pending and approved workshop enrollments.' },
+  { to: '/team/class-attendance', label: 'Class attendance', description: 'Attendance by class and student.' },
+  { to: '/team/workshop', label: 'Workshops', description: 'Current workshop sections and limits.' },
+  { to: '/team/invites', label: 'Invites', description: 'Pending/confirmed invitations.' },
   { to: '/team/profile', label: 'Profiles', description: 'Guardian and student profiles.' },
   { to: '/team/person-guardian-child', label: 'Guardian child links', description: 'Guardian/child relationships.' },
   { to: '/team/semester', label: 'Semesters', description: 'Program semesters and enrollment windows.' },
-  { to: '/team/workshop', label: 'Workshops', description: 'Current workshop sections and limits.' },
   { to: '/team/class', label: 'Classes', description: 'Individual class schedule entries.' },
-  { to: '/team/class-attendance', label: 'Class attendance', description: 'Attendance by class and student.' },
-  { to: '/team/workshop-enrollment', label: 'Workshop enrollments', description: 'Pending and approved workshop enrollments.' },
   { to: '/team/form', label: 'Forms', description: 'Onboarding forms configuration.' },
   { to: '/team/form-question', label: 'Form questions', description: 'Questions tied to forms.' },
   { to: '/team/form-question-map', label: 'Form question map', description: 'Questions mapped to forms and ordering.' },
@@ -15,5 +16,4 @@ export const teamPages = [
   { to: '/team/form-answer', label: 'Form answers', description: 'Individual answers with JSON value.' },
   { to: '/team/role-permission', label: 'Role permissions', description: 'Permissions assigned to each role.' },
   { to: '/team/user-roles', label: 'User roles', description: 'The role each user currently holds.' },
-  { to: '/team/invites', label: 'Invites', description: 'Pending/confirmed invitations.' },
 ]

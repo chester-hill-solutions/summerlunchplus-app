@@ -18,3 +18,13 @@ cross join (
       ('class_attendance.update'::public.app_permissions)
 ) as p(permission)
 on conflict do nothing;
+
+insert into public.role_permission (role, permission)
+select r.role, p.permission
+from (values ('staff'::public.app_role)) as r(role)
+cross join (
+    values
+      ('class_attendance.read'::public.app_permissions),
+      ('class_attendance.update'::public.app_permissions)
+) as p(permission)
+on conflict do nothing;

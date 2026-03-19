@@ -7,9 +7,9 @@ create type public.workshop_enrollment_status as enum (
 );
 
 create type public.class_attendance_status as enum (
+  'unknown',
   'present',
-  'absent',
-  'excused'
+  'absent'
 );
 
 create table public.semester (
@@ -62,7 +62,7 @@ create table public.class_attendance (
   id uuid primary key default gen_random_uuid(),
   class_id uuid not null references public.class (id) on update cascade on delete cascade,
   profile_id uuid not null references public.profile (id) on update cascade on delete cascade,
-  status public.class_attendance_status not null default 'present',
+  status public.class_attendance_status,
   recorded_by uuid references auth.users (id) on update cascade on delete set null,
   notes text,
   created_at timestamptz not null default now(),
@@ -207,6 +207,36 @@ drop trigger if exists on_workshop_enrollment_set_decision_fields on public.work
 create trigger on_workshop_enrollment_set_decision_fields
 before update on public.workshop_enrollment
 for each row execute function public.set_workshop_enrollment_decision_fields();
+
+create or replace function public.ensure_class_attendance_rows()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.class_attendance (class_id, profile_id, status)
+  select c.id, we.profile_id, null
+  from public.class c
+  join public.workshop_enrollment we on we.workshop_id = c.workshop_id
+  where c.ends_at < now()
+    and we.status = 'approved'
+  on conflict (class_id, profile_id) do nothing;
+end;
+$$;
+
+create extension if not exists pg_cron with schema extensions;
+
+do $$
+begin
+  if not exists (select 1 from cron.job where jobname = 'class_attendance_hourly') then
+    perform cron.schedule(
+      'class_attendance_hourly',
+      '0 * * * *',
+      $cron$select public.ensure_class_attendance_rows();$cron$
+    );
+  end if;
+end $$;
 
 -- RLS
 alter table public.workshop enable row level security;
