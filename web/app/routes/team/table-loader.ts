@@ -1,3 +1,4 @@
+import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import { TABLE_DEFINITIONS } from './table-definitions'
 import type { LoaderFunctionArgs } from 'react-router'
@@ -59,7 +60,7 @@ export function createTableLoader(tableName: string) {
         const selectColumns = mapping.select
           ? mapping.select
           : [keyColumn, ...(mapping.valueColumns ?? (mapping.valueColumn ? [mapping.valueColumn] : []))].join(', ')
-        const { data: lookupRowsRaw } = await supabase
+        const { data: lookupRowsRaw } = await adminClient
           .from(mapping.table)
           .select(selectColumns)
           .in(keyColumn, Array.from(ids))
