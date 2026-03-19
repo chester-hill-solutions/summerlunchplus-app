@@ -22,7 +22,7 @@ create type app_permissions as enum (
   'semester.create', 'semester.read', 'semester.update', 'semester.delete',
   'workshop.create', 'workshop.read', 'workshop.update', 'workshop.delete',
   'workshop_enrollment.create', 'workshop_enrollment.read', 'workshop_enrollment.update', 'workshop_enrollment.update_status',
-  'session_attendance.create', 'session_attendance.read', 'session_attendance.update', 'session_attendance.delete',
+  'class_attendance.create', 'class_attendance.read', 'class_attendance.update', 'class_attendance.delete',
   'user_roles.manage', 'role_permission.manage',
   'profiles.read', 'profiles.update'
 );

@@ -47,12 +47,21 @@ export async function loader({ request }: Route.LoaderArgs) {
     .eq("user_id", auth.user.id)
     .order("assigned_at", { ascending: true });
 
+  const { data: profile } = await supabase
+    .from("profile")
+    .select("id")
+    .eq("user_id", auth.user.id)
+    .single();
+  if (!profile?.id) {
+    throw new Response("Profile not found", { status: 404 });
+  }
+
   const assignmentsRaw = assignmentsData ?? [];
 
   const { data: submissionsData } = await supabase
     .from("form_submission")
     .select("id, form_id, submitted_at")
-    .eq("user_id", auth.user.id);
+    .eq("profile_id", profile.id);
   const submissions = submissionsData ?? [];
 
   const assignments: Assignment[] = assignmentsRaw.map((a: any) => {

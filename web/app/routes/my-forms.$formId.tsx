@@ -49,6 +49,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const auth = await enforceOnboardingGuard(request, { allowMyForms: true });
   const { supabase, headers } = createClient(request);
 
+  const { data: profile } = await supabase
+    .from("profile")
+    .select("id")
+    .eq("user_id", auth.user.id)
+    .single();
+  if (!profile?.id) {
+    throw redirect("/my-forms", { headers });
+  }
+
   const { data: assignmentRow, error: assignmentError } = await supabase
     .from("form_assignment")
     .select("id, status, due_at, form_id, user_id, form:form_id ( id, name, is_required, due_at )")
@@ -84,7 +93,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     .from("form_submission")
     .select("id, form_id, submitted_at")
     .eq("form_id", formId)
-    .eq("user_id", auth.user.id)
+    .eq("profile_id", profile.id)
     .maybeSingle();
   assignment.submission = submission ? { ...submission, submitted_at: submission.submitted_at ?? "" } : null;
 
@@ -135,6 +144,18 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   const { supabase, headers } = createClient(request);
 
+  const { data: profile } = await supabase
+    .from("profile")
+    .select("id")
+    .eq("user_id", auth.user.id)
+    .single();
+  if (!profile?.id) {
+    return new Response(JSON.stringify({ error: "Profile not found" }), {
+      status: 404,
+      headers,
+    });
+  }
+
   const { data: assignment } = await supabase
     .from("form_assignment")
     .select("id")
@@ -168,7 +189,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   const { data: submissionRows, error: submissionError } = await supabase
     .from("form_submission")
-    .upsert({ form_id: formId, user_id: auth.user.id })
+    .upsert({ form_id: formId, profile_id: profile.id }, { onConflict: "form_id,profile_id" })
     .select("id")
     .maybeSingle();
 

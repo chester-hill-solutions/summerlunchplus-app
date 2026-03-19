@@ -1,8 +1,8 @@
 import TableDisplay from './table-display'
 import { createTableLoader } from './table-loader'
 
-export const loader = createTableLoader('session-attendance')
+export const loader = createTableLoader('class-attendance')
 
-export default function SessionAttendanceTablePage() {
+export default function ClassAttendanceTablePage() {
   return <TableDisplay />
 }

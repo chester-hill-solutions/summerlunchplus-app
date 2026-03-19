@@ -1,10 +1,36 @@
-import { useMemo, useState } from 'react'
-import { useLoaderData } from 'react-router'
+import { useEffect, useMemo, useState } from 'react'
+import { useLoaderData, useSearchParams } from 'react-router'
+
+const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
+
+const isTimestampColumn = (column: string) => column.endsWith('_at') || timestampColumns.has(column)
+
+const formatTimestamp = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+}
 
 const getCellValue = (column: string, row: Record<string, unknown>) => {
   const value = row[column]
-  if (typeof value === 'object' && value !== null) {
+  if (value && typeof value === 'object') {
+    if ('start' in value && 'end' in value) {
+      const start = typeof value.start === 'string' ? formatTimestamp(value.start) : ''
+      const end = typeof value.end === 'string' ? formatTimestamp(value.end) : ''
+      return [start, end].filter(Boolean).join(' - ')
+    }
+    if ('timestamp' in value && 'label' in value) {
+      const timestamp = typeof value.timestamp === 'string' ? formatTimestamp(value.timestamp) : ''
+      const label = typeof value.label === 'string' ? value.label : ''
+      const order = typeof value.order === 'string' ? value.order : 'timestamp_first'
+      return order === 'label_first'
+        ? [label, timestamp].filter(Boolean).join(' ')
+        : [timestamp, label].filter(Boolean).join(' ')
+    }
     return JSON.stringify(value)
+  }
+  if (typeof value === 'string' && isTimestampColumn(column)) {
+    return formatTimestamp(value)
   }
   return (value ?? '').toString()
 }
@@ -17,9 +43,39 @@ const getDirectionIndicator = (stage: 0 | 1 | 2) => {
 
 export default function TableDisplay() {
   const { columns, rows, label } = useLoaderData()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortStage, setSortStage] = useState<0 | 1 | 2>(0)
   const [filters, setFilters] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const nextSort = searchParams.get('sort')
+    const nextDir = searchParams.get('dir')
+    const nextFilters = Array.from(searchParams.entries()).reduce<Record<string, string>>((acc, [key, value]) => {
+      if (key.startsWith('f_')) {
+        acc[key.slice(2)] = value
+      }
+      return acc
+    }, {})
+
+    setSortColumn(nextSort)
+    setSortStage(nextSort ? (nextDir === 'asc' ? 2 : 1) : 0)
+    setFilters(nextFilters)
+  }, [searchParams])
+
+  const syncSearch = (nextFilters: Record<string, string>, nextSortColumn: string | null, nextSortStage: 0 | 1 | 2) => {
+    const next = new URLSearchParams()
+    if (nextSortColumn && nextSortStage > 0) {
+      next.set('sort', nextSortColumn)
+      next.set('dir', nextSortStage === 2 ? 'asc' : 'desc')
+    }
+    for (const [column, value] of Object.entries(nextFilters)) {
+      if (value) {
+        next.set(`f_${column}`, value)
+      }
+    }
+    setSearchParams(next, { replace: true })
+  }
 
   const derivedRows = useMemo(() => {
     let adjustedRows = [...(rows as Record<string, unknown>[])]
@@ -27,7 +83,13 @@ export default function TableDisplay() {
       columns.every((column: string) => {
         const filter = filters[column]
         if (!filter) return true
-        return getCellValue(column, row).toLowerCase().includes(filter.toLowerCase())
+        const tokens = filter
+          .split(',')
+          .map(token => token.trim())
+          .filter(Boolean)
+        if (!tokens.length) return true
+        const cellValue = getCellValue(column, row).toLowerCase()
+        return tokens.some(token => cellValue.includes(token.toLowerCase()))
       })
     )
     if (sortColumn && sortStage > 0) {
@@ -44,22 +106,44 @@ export default function TableDisplay() {
 
   const updateSort = (column: string) => {
     if (sortColumn !== column) {
+      const nextStage: 0 | 1 | 2 = 1
       setSortColumn(column)
-      setSortStage(1)
+      setSortStage(nextStage)
+      syncSearch(filters, column, nextStage)
       return
     }
     setSortStage(prev => {
       const next = prev + 1
       if (next > 2) {
         setSortColumn(null)
+        syncSearch(filters, null, 0)
         return 0
       }
+      syncSearch(filters, column, next as 0 | 1 | 2)
       return next as 0 | 1 | 2
     })
   }
 
   const updateFilter = (column: string, value: string) => {
-    setFilters(prev => ({ ...prev, [column]: value }))
+    setFilters(prev => {
+      const next = { ...prev, [column]: value }
+      syncSearch(next, sortColumn, sortStage)
+      return next
+    })
+  }
+
+  const appendFilter = (column: string, value: string) => {
+    if (!value) return
+    setFilters(prev => {
+      const current = prev[column] ?? ''
+      if (current.toLowerCase().includes(value.toLowerCase())) {
+        return prev
+      }
+      const nextValue = current ? `${current}, ${value}` : value
+      const next = { ...prev, [column]: nextValue }
+      syncSearch(next, sortColumn, sortStage)
+      return next
+    })
   }
 
   return (
@@ -102,8 +186,14 @@ export default function TableDisplay() {
           <tbody>
             {derivedRows.map((row, rowIndex) => (
               <tr key={`row-${rowIndex}`} className={rowIndex % 2 === 0 ? 'bg-card' : ''}>
-              {columns.map((column: string) => (
-                  <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2 font-mono">{getCellValue(column, row)}</td>
+                {columns.map((column: string) => (
+                  <td
+                    key={`cell-${rowIndex}-${column}`}
+                    className="px-4 py-2 font-mono hover:bg-muted/30 cursor-pointer"
+                    onClick={() => appendFilter(column, getCellValue(column, row))}
+                  >
+                    {getCellValue(column, row)}
+                  </td>
                 ))}
               </tr>
             ))}

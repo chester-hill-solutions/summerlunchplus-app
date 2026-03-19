@@ -33,8 +33,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Error(workshopError.message)
   }
 
-  const { data: sessions } = await supabase
-    .from('session')
+  const { data: classes } = await supabase
+    .from('class')
     .select('workshop_id, starts_at, ends_at')
 
   const { data: enrollments } = await supabase
@@ -42,14 +42,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     .select('workshop_id, status, semester_id, profile_id')
     .in('profile_id', family.familyProfileIds)
 
-  const bounds = (sessions || []).reduce<Record<string, { start: string; end: string }>>((acc, session) => {
-    if (!session?.workshop_id) return acc
-    const current = acc[session.workshop_id]
-    const start = current?.start ?? session.starts_at
-    const end = current?.end ?? session.ends_at
-      acc[session.workshop_id] = {
-      start: start && start < session.starts_at ? start : session.starts_at,
-      end: end && end > session.ends_at ? end : session.ends_at,
+  const bounds = (classes || []).reduce<Record<string, { start: string; end: string }>>((acc, classRow) => {
+    if (!classRow?.workshop_id) return acc
+    const current = acc[classRow.workshop_id]
+    const start = current?.start ?? classRow.starts_at
+    const end = current?.end ?? classRow.ends_at
+    acc[classRow.workshop_id] = {
+      start: start && start < classRow.starts_at ? start : classRow.starts_at,
+      end: end && end > classRow.ends_at ? end : classRow.ends_at,
     }
     return acc
   }, {})

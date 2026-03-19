@@ -57,9 +57,9 @@ create table public.form_assignment (
 create table public.form_submission (
   id uuid primary key default gen_random_uuid(),
   form_id uuid not null references public.form (id) on delete cascade,
-  user_id uuid not null references auth.users (id) on delete cascade,
+  profile_id uuid not null references public.profile (id) on delete cascade,
   submitted_at timestamptz not null default now(),
-  unique (form_id, user_id)
+  unique (form_id, profile_id)
 );
 
 create table public.form_answer (
@@ -143,9 +143,11 @@ begin
       where not (user_role = any (f.auto_assign))
     )
     and not exists (
-      select 1 from public.form_submission fs
+      select 1
+      from public.form_submission fs
+      join public.profile p on p.id = fs.profile_id
       where fs.form_id = fa.form_id
-        and fs.user_id = fa.user_id
+        and p.user_id = fa.user_id
     );
 end;
 $$;
@@ -191,9 +193,11 @@ begin
         and ur.role = any (f.auto_assign)
     )
     and not exists (
-      select 1 from public.form_submission fs
+      select 1
+      from public.form_submission fs
+      join public.profile p on p.id = fs.profile_id
       where fs.form_id = fa.form_id
-        and fs.user_id = fa.user_id
+        and p.user_id = fa.user_id
     );
 end;
 $$;
@@ -228,11 +232,13 @@ security definer
 set search_path = public
 as $$
 begin
-  raise log '[mark_assignment_submitted] enter form % user %', new.form_id, new.user_id;
+  raise log '[mark_assignment_submitted] enter form % profile %', new.form_id, new.profile_id;
   update public.form_assignment
   set status = 'submitted'
   where form_id = new.form_id
-    and user_id = new.user_id;
+    and user_id in (
+      select p.user_id from public.profile p where p.id = new.profile_id
+    );
   raise log '[mark_assignment_submitted] updated assignment to submitted';
   return new;
 end;
@@ -304,11 +310,18 @@ as $$
 declare
   user_role_current app_role;
   has_completed boolean;
+  user_id_current uuid;
 begin
-  raise log '[promote_user_after_submission] enter user % form %', new.user_id, new.form_id;
+  select user_id into user_id_current from public.profile where id = new.profile_id;
+  raise log '[promote_user_after_submission] enter user % form %', user_id_current, new.form_id;
+
+  if user_id_current is null then
+    raise log '[promote_user_after_submission] skip: missing user for profile %', new.profile_id;
+    return new;
+  end if;
 
   if not public.should_auto_promote_onboarding() then
-    raise log '[promote_user_after_submission] skip: onboarding_mode=permission for user %', new.user_id;
+    raise log '[promote_user_after_submission] skip: onboarding_mode=permission for user %', user_id_current;
     return new;
   end if;
 
@@ -316,26 +329,26 @@ begin
   update public.form_assignment
   set status = 'submitted'
   where form_id = new.form_id
-    and user_id = new.user_id;
+    and user_id = user_id_current;
 
   select coalesce(role, 'unassigned'::app_role)
     into user_role_current
     from public.user_roles
-    where user_id = new.user_id;
+    where user_id = user_id_current;
 
   if user_role_current is distinct from 'unassigned' then
-    raise log '[promote_user_after_submission] skip: role is % for user %', user_role_current, new.user_id;
+    raise log '[promote_user_after_submission] skip: role is % for user %', user_role_current, user_id_current;
     return new;
   end if;
 
-  select coalesce(public.has_completed_required_forms(new.user_id), false) into has_completed;
-  raise log '[promote_user_after_submission] eval user %, current_role %, has_completed %', new.user_id, user_role_current, has_completed;
+  select coalesce(public.has_completed_required_forms(user_id_current), false) into has_completed;
+  raise log '[promote_user_after_submission] eval user %, current_role %, has_completed %', user_id_current, user_role_current, has_completed;
 
   if has_completed then
     update public.user_roles
     set role = 'student'
-    where user_id = new.user_id;
-    raise log '[promote_user_after_submission] promoted user % to student', new.user_id;
+    where user_id = user_id_current;
+    raise log '[promote_user_after_submission] promoted user % to student', user_id_current;
   end if;
 
   return new;
@@ -641,7 +654,9 @@ create policy form_submission_assignee_insert
   on public.form_submission
   for insert
   with check (
-    user_id = auth.uid()
+    profile_id in (
+      select p.id from public.profile p where p.user_id = auth.uid()
+    )
     and exists (
       select 1 from public.form_assignment fa
       where fa.form_id = form_submission.form_id
@@ -652,7 +667,11 @@ create policy form_submission_assignee_insert
 create policy form_submission_assignee_read
   on public.form_submission
   for select
-  using (user_id = auth.uid());
+  using (
+    profile_id in (
+      select p.id from public.profile p where p.user_id = auth.uid()
+    )
+  );
 
 create policy form_answer_assignee_insert
   on public.form_answer
@@ -661,7 +680,9 @@ create policy form_answer_assignee_insert
     exists (
       select 1 from public.form_submission fs
       where fs.id = form_answer.submission_id
-        and fs.user_id = auth.uid()
+        and fs.profile_id in (
+          select p.id from public.profile p where p.user_id = auth.uid()
+        )
     )
   );
 
@@ -671,7 +692,9 @@ create policy form_answer_assignee_read
   using (exists (
     select 1 from public.form_submission fs
     where fs.id = form_answer.submission_id
-      and fs.user_id = auth.uid()
+      and fs.profile_id in (
+        select p.id from public.profile p where p.user_id = auth.uid()
+      )
   ));
 
 create policy form_assignment_assignee_update_status

@@ -180,7 +180,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .from('form_submission')
       .select('id')
       .eq('form_id', currentForm.formId)
-      .eq('user_id', userData.user.id)
+      .eq('profile_id', pid)
       .maybeSingle()
     if (submission?.id) {
       const { data: answers } = await supabase
@@ -348,9 +348,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       .upsert(
         {
           form_id: formId,
-          user_id: userId,
+          profile_id: pid,
         },
-        { onConflict: 'form_id,user_id' }
+        { onConflict: 'form_id,profile_id' }
       )
       .select('id')
       .single()

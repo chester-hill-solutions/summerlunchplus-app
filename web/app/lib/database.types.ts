@@ -34,6 +34,92 @@ export type Database = {
   }
   public: {
     Tables: {
+      class: {
+        Row: {
+          created_at: string
+          ends_at: string
+          id: string
+          location: string | null
+          starts_at: string
+          updated_at: string
+          workshop_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          ends_at: string
+          id?: string
+          location?: string | null
+          starts_at: string
+          updated_at?: string
+          workshop_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          ends_at?: string
+          id?: string
+          location?: string | null
+          starts_at?: string
+          updated_at?: string
+          workshop_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_workshop_id_fkey"
+            columns: ["workshop_id"]
+            isOneToOne: false
+            referencedRelation: "workshop"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      class_attendance: {
+        Row: {
+          class_id: string
+          created_at: string
+          id: string
+          notes: string | null
+          profile_id: string
+          recorded_by: string | null
+          status: Database["public"]["Enums"]["class_attendance_status"]
+          updated_at: string
+        }
+        Insert: {
+          class_id: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          profile_id: string
+          recorded_by?: string | null
+          status?: Database["public"]["Enums"]["class_attendance_status"]
+          updated_at?: string
+        }
+        Update: {
+          class_id?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          profile_id?: string
+          recorded_by?: string | null
+          status?: Database["public"]["Enums"]["class_attendance_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_attendance_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_attendance_session_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       form: {
         Row: {
           auto_assign: Database["public"]["Enums"]["app_role"][]
@@ -202,20 +288,20 @@ export type Database = {
         Row: {
           form_id: string
           id: string
+          profile_id: string
           submitted_at: string
-          user_id: string
         }
         Insert: {
           form_id: string
           id?: string
+          profile_id: string
           submitted_at?: string
-          user_id: string
         }
         Update: {
           form_id?: string
           id?: string
+          profile_id?: string
           submitted_at?: string
-          user_id?: string
         }
         Relationships: [
           {
@@ -223,6 +309,13 @@ export type Database = {
             columns: ["form_id"]
             isOneToOne: false
             referencedRelation: "form"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_submission_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
             referencedColumns: ["id"]
           },
         ]
@@ -392,92 +485,6 @@ export type Database = {
         }
         Relationships: []
       }
-      session: {
-        Row: {
-          created_at: string
-          ends_at: string
-          id: string
-          location: string | null
-          starts_at: string
-          updated_at: string
-          workshop_id: string | null
-        }
-        Insert: {
-          created_at?: string
-          ends_at: string
-          id?: string
-          location?: string | null
-          starts_at: string
-          updated_at?: string
-          workshop_id?: string | null
-        }
-        Update: {
-          created_at?: string
-          ends_at?: string
-          id?: string
-          location?: string | null
-          starts_at?: string
-          updated_at?: string
-          workshop_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "session_workshop_id_fkey"
-            columns: ["workshop_id"]
-            isOneToOne: false
-            referencedRelation: "workshop"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      session_attendance: {
-        Row: {
-          created_at: string
-          id: string
-          notes: string | null
-          profile_id: string
-          recorded_by: string | null
-          session_id: string
-          status: Database["public"]["Enums"]["session_attendance_status"]
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          notes?: string | null
-          profile_id: string
-          recorded_by?: string | null
-          session_id: string
-          status?: Database["public"]["Enums"]["session_attendance_status"]
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          notes?: string | null
-          profile_id?: string
-          recorded_by?: string | null
-          session_id?: string
-          status?: Database["public"]["Enums"]["session_attendance_status"]
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "session_attendance_profile_id_fkey"
-            columns: ["profile_id"]
-            isOneToOne: false
-            referencedRelation: "profile"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "session_attendance_session_id_fkey"
-            columns: ["session_id"]
-            isOneToOne: false
-            referencedRelation: "session"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       sign_up_flow: {
         Row: {
           created_at: string
@@ -492,7 +499,7 @@ export type Database = {
           created_at?: string
           form_id: string
           id?: string
-          roles: Database["public"]["Enums"]["app_role"][]
+          roles?: Database["public"]["Enums"]["app_role"][]
           slug: string
           step_order: number
           updated_at?: string
@@ -713,10 +720,10 @@ export type Database = {
         | "workshop_enrollment.read"
         | "workshop_enrollment.update"
         | "workshop_enrollment.update_status"
-        | "session_attendance.create"
-        | "session_attendance.read"
-        | "session_attendance.update"
-        | "session_attendance.delete"
+        | "class_attendance.create"
+        | "class_attendance.read"
+        | "class_attendance.update"
+        | "class_attendance.delete"
         | "user_roles.manage"
         | "role_permission.manage"
         | "profiles.read"
@@ -729,6 +736,7 @@ export type Database = {
         | "instructor"
         | "student"
         | "guardian"
+      class_attendance_status: "present" | "absent" | "excused"
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
@@ -739,7 +747,6 @@ export type Database = {
         | "agreement"
         | "checkbox"
       invite_status: "pending" | "confirmed" | "revoked"
-      session_attendance_status: "present" | "absent" | "excused"
       workshop_enrollment_status: "pending" | "approved" | "rejected"
     }
     CompositeTypes: {
@@ -909,10 +916,10 @@ export const Constants = {
         "workshop_enrollment.read",
         "workshop_enrollment.update",
         "workshop_enrollment.update_status",
-        "session_attendance.create",
-        "session_attendance.read",
-        "session_attendance.update",
-        "session_attendance.delete",
+        "class_attendance.create",
+        "class_attendance.read",
+        "class_attendance.update",
+        "class_attendance.delete",
         "user_roles.manage",
         "role_permission.manage",
         "profiles.read",
@@ -927,6 +934,7 @@ export const Constants = {
         "student",
         "guardian",
       ],
+      class_attendance_status: ["present", "absent", "excused"],
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
@@ -938,7 +946,6 @@ export const Constants = {
         "checkbox",
       ],
       invite_status: ["pending", "confirmed", "revoked"],
-      session_attendance_status: ["present", "absent", "excused"],
       workshop_enrollment_status: ["pending", "approved", "rejected"],
     },
   },

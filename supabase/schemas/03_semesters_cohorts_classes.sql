@@ -1,4 +1,4 @@
--- Workshop groups and sessions for the summer program.
+-- Workshop groups and classes for the summer program.
 
 create type public.workshop_enrollment_status as enum (
   'pending',
@@ -6,7 +6,7 @@ create type public.workshop_enrollment_status as enum (
   'rejected'
 );
 
-create type public.session_attendance_status as enum (
+create type public.class_attendance_status as enum (
   'present',
   'absent',
   'excused'
@@ -47,7 +47,7 @@ create table public.workshop (
   check (wait_list_capacity >= 0)
 );
 
-create table public.session (
+create table public.class (
   id uuid primary key default gen_random_uuid(),
   workshop_id uuid references public.workshop (id) on update cascade on delete set null,
   starts_at timestamptz not null,
@@ -58,16 +58,16 @@ create table public.session (
   check (starts_at < ends_at)
 );
 
-create table public.session_attendance (
+create table public.class_attendance (
   id uuid primary key default gen_random_uuid(),
-  session_id uuid not null references public.session (id) on update cascade on delete cascade,
+  class_id uuid not null references public.class (id) on update cascade on delete cascade,
   profile_id uuid not null references public.profile (id) on update cascade on delete cascade,
-  status public.session_attendance_status not null default 'present',
+  status public.class_attendance_status not null default 'present',
   recorded_by uuid references auth.users (id) on update cascade on delete set null,
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (session_id, profile_id)
+  unique (class_id, profile_id)
 );
 
 create table public.workshop_enrollment (
@@ -119,7 +119,7 @@ create trigger on_semester_updated_set_timestamp
 before update on public.semester
 for each row execute function public.touch_semester_updated_at();
 
-create or replace function public.touch_session_updated_at()
+create or replace function public.touch_class_updated_at()
 returns trigger
 language plpgsql
 security definer
@@ -131,7 +131,7 @@ begin
 end;
 $$;
 
-create or replace function public.touch_session_attendance_updated_at()
+create or replace function public.touch_class_attendance_updated_at()
 returns trigger
 language plpgsql
 security definer
@@ -177,10 +177,10 @@ create trigger on_workshop_enrollment_updated_set_timestamp
 before update on public.workshop_enrollment
 for each row execute function public.touch_workshop_enrollment_updated_at();
 
-drop trigger if exists on_session_attendance_updated_set_timestamp on public.session_attendance;
-create trigger on_session_attendance_updated_set_timestamp
-before update on public.session_attendance
-for each row execute function public.touch_session_attendance_updated_at();
+drop trigger if exists on_class_attendance_updated_set_timestamp on public.class_attendance;
+create trigger on_class_attendance_updated_set_timestamp
+before update on public.class_attendance
+for each row execute function public.touch_class_attendance_updated_at();
 
 drop trigger if exists on_workshop_enrollment_set_semester_id on public.workshop_enrollment;
 create trigger on_workshop_enrollment_set_semester_id
@@ -211,8 +211,8 @@ for each row execute function public.set_workshop_enrollment_decision_fields();
 -- RLS
 alter table public.workshop enable row level security;
 alter table public.semester enable row level security;
-alter table public.session enable row level security;
-alter table public.session_attendance enable row level security;
+alter table public.class enable row level security;
+alter table public.class_attendance enable row level security;
 alter table public.workshop_enrollment enable row level security;
 
 -- Semesters
@@ -271,57 +271,57 @@ create policy workshop_read_auth_admin
   to supabase_auth_admin
   using (true);
 
--- Sessions
-create policy session_select_all
-  on public.session
+-- Classes
+create policy class_select_all
+  on public.class
   for select
   using (true);
 
-create policy session_attendance_select_admin
-  on public.session_attendance
+create policy class_attendance_select_admin
+  on public.class_attendance
   for select
-  using (public.authorize('session_attendance.read'));
+  using (public.authorize('class_attendance.read'));
 
-create policy session_attendance_insert_admin
-  on public.session_attendance
+create policy class_attendance_insert_admin
+  on public.class_attendance
   for insert
-  with check (public.authorize('session_attendance.create'));
+  with check (public.authorize('class_attendance.create'));
 
-create policy session_attendance_update_admin
-  on public.session_attendance
+create policy class_attendance_update_admin
+  on public.class_attendance
   for update
-  using (public.authorize('session_attendance.update'))
-  with check (public.authorize('session_attendance.update'));
+  using (public.authorize('class_attendance.update'))
+  with check (public.authorize('class_attendance.update'));
 
-create policy session_attendance_delete_admin
-  on public.session_attendance
+create policy class_attendance_delete_admin
+  on public.class_attendance
   for delete
-  using (public.authorize('session_attendance.delete'));
+  using (public.authorize('class_attendance.delete'));
 
-create policy session_attendance_read_auth_admin
-  on public.session_attendance
+create policy class_attendance_read_auth_admin
+  on public.class_attendance
   for select
   to supabase_auth_admin
   using (true);
 
-create policy session_insert_admin
-  on public.session
+create policy class_insert_admin
+  on public.class
   for insert
   with check (public.authorize('workshop.create'));
 
-create policy session_update_admin
-  on public.session
+create policy class_update_admin
+  on public.class
   for update
   using (public.authorize('workshop.update'))
   with check (public.authorize('workshop.update'));
 
-create policy session_delete_admin
-  on public.session
+create policy class_delete_admin
+  on public.class
   for delete
   using (public.authorize('workshop.delete'));
 
-create policy session_read_auth_admin
-  on public.session
+create policy class_read_auth_admin
+  on public.class
   for select
   to supabase_auth_admin
   using (true);
@@ -371,23 +371,23 @@ create policy workshop_enrollment_read_auth_admin
 
 -- Grants
 grant usage on type public.workshop_enrollment_status to authenticated, supabase_auth_admin;
-grant usage on type public.session_attendance_status to authenticated, supabase_auth_admin;
+grant usage on type public.class_attendance_status to authenticated, supabase_auth_admin;
 
 grant all on table public.semester to supabase_auth_admin;
 
 grant all on table public.workshop to supabase_auth_admin;
-grant all on table public.session to supabase_auth_admin;
-grant all on table public.session_attendance to supabase_auth_admin;
+grant all on table public.class to supabase_auth_admin;
+grant all on table public.class_attendance to supabase_auth_admin;
 grant all on table public.workshop_enrollment to supabase_auth_admin;
 
 revoke all on table public.semester from authenticated, anon, public;
 revoke all on table public.workshop from authenticated, anon, public;
-revoke all on table public.session from authenticated, anon, public;
-revoke all on table public.session_attendance from authenticated, anon, public;
+revoke all on table public.class from authenticated, anon, public;
+revoke all on table public.class_attendance from authenticated, anon, public;
 revoke all on table public.workshop_enrollment from authenticated, anon, public;
 
 grant all on table public.semester to authenticated;
 grant all on table public.workshop to authenticated;
-grant all on table public.session to authenticated;
-grant all on table public.session_attendance to authenticated;
+grant all on table public.class to authenticated;
+grant all on table public.class_attendance to authenticated;
 grant all on table public.workshop_enrollment to authenticated;

@@ -39,7 +39,7 @@ section as (
         wait_list_capacity = excluded.wait_list_capacity
   returning id
 )
-insert into public.session (id, workshop_id, starts_at, ends_at, location)
+insert into public.class (id, workshop_id, starts_at, ends_at, location)
 values
   (
     '22222222-2222-2222-2222-222222222222'::uuid,
@@ -70,8 +70,8 @@ on conflict (id) do update
       firstname = excluded.firstname,
       surname = excluded.surname;
 
-insert into public.session_attendance (session_id, profile_id, status)
+insert into public.class_attendance (class_id, profile_id, status)
 values
   ('22222222-2222-2222-2222-222222222222'::uuid, '22222222-bbbb-bbbb-bbbb-222222222222'::uuid, 'present')
-on conflict (session_id, profile_id) do update
+on conflict (class_id, profile_id) do update
   set status = excluded.status;
