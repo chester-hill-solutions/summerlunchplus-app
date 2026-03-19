@@ -26,11 +26,11 @@ export default [
   route("protected", "routes/protected.tsx"),
   route("auth/confirm", "routes/auth/confirm.tsx"),
   route("auth/error", "routes/auth/error.tsx"),
-  route("team", "routes/team/team.tsx", [
+  route("manage", "routes/team/team.tsx", [
     index("routes/team/index.tsx"),
-    route("profile", "routes/team/profile.tsx"),
+    route("participants", "routes/team/participants.tsx"),
+    route("team", "routes/team/team-members.tsx"),
     route("person-guardian-child", "routes/team/person-guardian-child.tsx"),
-    route("semester", "routes/team/semester.tsx"),
     route("workshop", "routes/team/workshop.tsx"),
     route("class", "routes/team/class.tsx"),
     route("class-attendance", "routes/team/class-attendance.tsx"),
@@ -44,5 +44,6 @@ export default [
     route("role-permission", "routes/team/role-permission.tsx"),
     route("user-roles", "routes/team/user-roles.tsx"),
     route("invites", "routes/team/invites.tsx"),
+    route("semester", "routes/team/semester.tsx"),
   ]),
 ] satisfies RouteConfig;

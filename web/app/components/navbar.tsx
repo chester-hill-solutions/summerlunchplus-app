@@ -49,7 +49,7 @@ function AuthenticatedNav({ role }: { role: string | null }) {
       )}
       {(role === 'admin' || role === 'manager') && (
         <Button variant="ghost" asChild>
-          <Link to="/team">Team</Link>
+          <Link to="/manage">Manage</Link>
         </Button>
       )}
       <IconButton to="/profile" label="Profile">

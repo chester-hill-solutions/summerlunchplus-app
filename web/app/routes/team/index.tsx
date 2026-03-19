@@ -7,7 +7,7 @@ export default function TeamOverviewPage() {
   return (
     <div className="space-y-6">
       <header>
-        <p className="text-sm uppercase tracking-wide text-muted-foreground">Team</p>
+        <p className="text-sm uppercase tracking-wide text-muted-foreground">Manage</p>
         <h1 className="text-2xl font-semibold leading-tight">Admin workspace</h1>
         <p className="text-muted-foreground">Manage every table in the app from a single hub.</p>
       </header>
