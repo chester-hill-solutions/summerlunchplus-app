@@ -24,6 +24,18 @@ guardian_form as (
         auto_assign = excluded.auto_assign
   returning id
 ),
+guardian_info_form as (
+  insert into public.form (name, is_required, auto_assign)
+  values (
+    'Guardian Information',
+    false,
+    array[]::app_role[]
+  )
+  on conflict (name) do update
+    set is_required = excluded.is_required,
+        auto_assign = excluded.auto_assign
+  returning id
+),
 student_form as (
   insert into public.form (name, is_required, auto_assign)
   values (
@@ -71,6 +83,14 @@ select 'program_background_whole_grains_frequency', 'How often do you eat whole 
 union all
 select 'program_background_sugary_frequency', 'How often do you drink sugary beverages (e.g. juice, pop, soda, ice-tea, energy drinks, sports drinks, etc.)', 'single_choice'::form_question_type, '["More than 2 times per day","A few times per week","Once a week","Less than once a week","Never"]'::jsonb
 union all
+select 'guardian_info_firstname', 'First name', 'text'::form_question_type, '[]'::jsonb
+union all
+select 'guardian_info_surname', 'Surname', 'text'::form_question_type, '[]'::jsonb
+union all
+select 'guardian_info_phone', 'Phone number', 'text'::form_question_type, '[]'::jsonb
+union all
+select 'guardian_info_postcode', 'Postal code', 'text'::form_question_type, '[]'::jsonb
+union all
 select 'guardian_consent_privacy', 'I understand that summerlunch+ is dedicated to protecting my privacy and will only use my personal data for the administration of the virtual summer cooking program and for communicating pertinent program-related information.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_consent_presence', 'I understand that a guardian/caregiver or elder sibling must be present during live cooking classes to ensure the safety of the summerlunch+ participant.', 'checkbox'::form_question_type, '[]'::jsonb
@@ -93,6 +113,8 @@ with program_form as (
   select id from public.form where name = 'Program Background'
 ), guardian_form as (
   select id from public.form where name = 'Guardian Consent'
+), guardian_info_form as (
+  select id from public.form where name = 'Guardian Information'
 ), student_form as (
   select id from public.form where name = 'Student Consent'
 )
@@ -131,6 +153,14 @@ select id, 'program_background_whole_grains_frequency', 16 from program_form
 union all
 select id, 'program_background_sugary_frequency', 17 from program_form
 union all
+select id, 'guardian_info_firstname', 1 from guardian_info_form
+union all
+select id, 'guardian_info_surname', 2 from guardian_info_form
+union all
+select id, 'guardian_info_phone', 3 from guardian_info_form
+union all
+select id, 'guardian_info_postcode', 4 from guardian_info_form
+union all
 select id, 'guardian_consent_privacy', 18 from guardian_form
 union all
 select id, 'guardian_consent_presence', 19 from guardian_form
@@ -146,6 +176,16 @@ union all
 select id, 'student_consent_interview', 24 from student_form
 on conflict (form_id, question_code) do update
   set position = excluded.position;
+
+update public.form_question_map
+set prompt_override = case question_code
+  when 'guardian_info_firstname' then 'Guardian First Name'
+  when 'guardian_info_surname' then 'Guardian Surname'
+  when 'guardian_info_phone' then 'Guardian Phone Number'
+  when 'guardian_info_postcode' then 'Guardian Postal Code'
+  else prompt_override
+end
+where form_id in (select id from public.form where name = 'Guardian Information');
 
 insert into public.sign_up_flow (form_id, slug, step_order, roles)
 select id, 'program_background', 1, array['student']::app_role[]

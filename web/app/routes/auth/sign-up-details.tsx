@@ -24,7 +24,7 @@ type FormStep = {
   status: Database['public']['Enums']['form_assignment_status']
 }
 
-type LoaderStep = 'details' | 'forms' | 'invite'
+type LoaderStep = 'guardian' | 'child' | 'details' | 'forms' | 'invite'
 
 type LoaderData = {
   role: 'guardian' | 'student' | null
@@ -38,6 +38,7 @@ type LoaderData = {
   inviterPid: string | null
   inviterRole: 'guardian' | 'student' | null
   hasRelationship: boolean
+  childEmailChoice: 'yes' | 'no' | null
   formSteps: FormStep[]
   currentForm: FormStep | null
   currentFormQuestions: FormQuestionData[]
@@ -73,7 +74,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!userData.user) throw redirect('/auth/sign-up', { headers })
 
   const url = new URL(request.url)
-  const requestedStep = (url.searchParams.get('step') as LoaderStep) || 'details'
+  const childEmailChoiceParam = url.searchParams.get('child_email')
+  const childEmailChoice =
+    childEmailChoiceParam === 'yes' || childEmailChoiceParam === 'no' ? childEmailChoiceParam : null
   const requestedFormId = url.searchParams.get('form_id')
   const roleParam = url.searchParams.get('role') as 'guardian' | 'student' | null
   const pidParam = url.searchParams.get('pid')
@@ -98,8 +101,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!profile) throw redirect('/auth/sign-up', { headers })
 
   const resolvedRole = (roleParam ?? (profile.role as 'guardian' | 'student') ?? 'student') as 'guardian' | 'student'
-  const detailsComplete =
-    Boolean(profile.firstname && profile.surname && profile.phone && profile.postcode && profile.partner_program)
+  const isGuardian = resolvedRole === 'guardian'
+  const requestedStep = ((url.searchParams.get('step') as LoaderStep) ||
+    (isGuardian ? 'guardian' : 'details')) as LoaderStep
+  const guardianComplete = Boolean(
+    profile.firstname && profile.surname && profile.phone && profile.postcode && profile.partner_program
+  )
+  const detailsComplete = isGuardian
+    ? guardianComplete
+    : Boolean(profile.firstname && profile.surname && profile.phone && profile.postcode && profile.partner_program)
 
   const { data: relationship } = await supabase
     .from('person_guardian_child')
@@ -185,32 +195,55 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const formsComplete = formSteps.length === 0 || formSteps.every(step => step.status === 'submitted')
 
-  if (formsComplete && detailsComplete && inviteEnabled && requestedStep !== 'invite') {
-    const nextUrl = new URL(request.url)
-    nextUrl.searchParams.set('step', 'invite')
-    nextUrl.searchParams.delete('form_id')
-    return redirect(nextUrl.toString(), { headers })
+  if (!isGuardian) {
+    if (formsComplete && detailsComplete && inviteEnabled && requestedStep !== 'invite') {
+      const nextUrl = new URL(request.url)
+      nextUrl.searchParams.set('step', 'invite')
+      nextUrl.searchParams.delete('form_id')
+      return redirect(nextUrl.toString(), { headers })
+    }
+
+    if (formsComplete && detailsComplete && !inviteEnabled) {
+      return redirect('/home', { headers })
+    }
   }
 
-  if (formsComplete && detailsComplete && !inviteEnabled) {
+  if (isGuardian && formsComplete && guardianComplete && hasRelationship) {
     return redirect('/home', { headers })
   }
 
   let effectiveStep: LoaderStep = requestedStep
-  if (effectiveStep === 'forms' && !detailsComplete) {
-    effectiveStep = 'details'
-  }
-  if (effectiveStep === 'forms' && (!formSteps.length || formsComplete)) {
-    effectiveStep = inviteEnabled ? 'invite' : 'details'
-  }
-  if (effectiveStep === 'invite' && !detailsComplete) {
-    effectiveStep = 'details'
-  }
-  if (effectiveStep === 'invite' && !inviteEnabled) {
-    effectiveStep = 'details'
-  }
-  if (effectiveStep === 'forms' && currentForm == null && formSteps.length > 0) {
-    effectiveStep = detailsComplete ? (inviteEnabled ? 'invite' : 'details') : 'details'
+  if (isGuardian) {
+    if (!guardianComplete) {
+      effectiveStep = 'guardian'
+    } else if (!hasRelationship && effectiveStep !== 'invite') {
+      effectiveStep = effectiveStep === 'forms' || effectiveStep === 'guardian' ? 'child' : effectiveStep
+    }
+    if (effectiveStep === 'invite' && childEmailChoice !== 'yes' && !hasRelationship) {
+      effectiveStep = 'child'
+    }
+    if (effectiveStep === 'forms' && (!formSteps.length || formsComplete)) {
+      effectiveStep = hasRelationship ? 'forms' : 'child'
+    }
+    if (effectiveStep === 'child' && hasRelationship) {
+      effectiveStep = 'forms'
+    }
+  } else {
+    if (effectiveStep === 'forms' && !detailsComplete) {
+      effectiveStep = 'details'
+    }
+    if (effectiveStep === 'forms' && (!formSteps.length || formsComplete)) {
+      effectiveStep = inviteEnabled ? 'invite' : 'details'
+    }
+    if (effectiveStep === 'invite' && !detailsComplete) {
+      effectiveStep = 'details'
+    }
+    if (effectiveStep === 'invite' && !inviteEnabled) {
+      effectiveStep = 'details'
+    }
+    if (effectiveStep === 'forms' && currentForm == null && formSteps.length > 0) {
+      effectiveStep = detailsComplete ? (inviteEnabled ? 'invite' : 'details') : 'details'
+    }
   }
 
   return {
@@ -225,6 +258,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     inviterPid: url.searchParams.get('inviter_pid'),
     inviterRole: (url.searchParams.get('inviter_role') as 'guardian' | 'student') ?? null,
     hasRelationship,
+    childEmailChoice,
     formSteps,
     currentForm,
     currentFormQuestions,
@@ -252,6 +286,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const dateOfBirth = (formData.get('date_of_birth') as string)?.trim()
   const childFirstname = (formData.get('child_firstname') as string)?.trim()
   const childSurname = (formData.get('child_surname') as string)?.trim()
+  const childEmailChoice = (formData.get('child_email') as string)?.trim()
   const inviteEmail = (formData.get('invite-email') as string)?.trim()
   const postalRe = /^[A-Z]\d[A-Z] \d[A-Z]\d$/
   const { data: currentUser } = await supabase.auth.getUser()
@@ -340,6 +375,107 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
   }
 
+  if (step === 'guardian') {
+    if (!firstname || !surname || !phone || !postcode) {
+      return { error: 'All fields are required' }
+    }
+    if (!postalRe.test(postcode)) {
+      return { error: 'Postal code must match A1A 1A1 format' }
+    }
+    if (!partnerProgramValue) {
+      return { error: 'Please select which site you are attending from' }
+    }
+
+    const userId = currentUser?.user?.id
+    if (!userId) {
+      return { error: 'Unable to identify user' }
+    }
+
+    const profilePayload: Record<string, unknown> = {
+      id: pid,
+      user_id: userId,
+      firstname,
+      surname,
+      phone,
+      postcode,
+      email: inviterEmail,
+      partner_program: partnerProgramValue,
+      role,
+    }
+
+    const { data: updatedProfile, error: updateError } = await supabase
+      .from('profile')
+      .update(profilePayload)
+      .eq('id', pid)
+      .select('id')
+      .single()
+    if (updateError) {
+      console.error('profile update failed', updateError.message, { pid, profilePayload })
+    }
+
+    if (!updatedProfile?.id) {
+      const { data: insertedProfile, error: insertError } = await supabase
+        .from('profile')
+        .insert(profilePayload)
+        .select('id')
+        .single()
+      if (insertError) {
+        console.error('profile insert fallback failed', insertError.message, { pid, profilePayload })
+      }
+      if (insertError || !insertedProfile?.id) {
+        return { error: insertError?.message ?? 'Unable to save profile' }
+      }
+    }
+
+    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=child`, { headers })
+  }
+
+  if (step === 'child') {
+    if (childEmailChoice !== 'yes' && childEmailChoice !== 'no') {
+      return { error: 'Please select whether your child will use their own email' }
+    }
+
+    if (childEmailChoice === 'yes') {
+      return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=invite&child_email=yes`, { headers })
+    }
+
+    if (!childFirstname || !childSurname) {
+      return { error: 'Child first and last name are required' }
+    }
+
+    const { data: existingLink } = await supabase
+      .from('person_guardian_child')
+      .select('id')
+      .eq('guardian_profile_id', pid)
+      .eq('primary_child', true)
+      .maybeSingle()
+    if (!existingLink?.id) {
+      const { data: childProfile, error: childError } = await adminClient
+        .from('profile')
+        .insert({
+          role: 'student',
+          firstname: childFirstname,
+          surname: childSurname,
+        })
+        .select('id')
+        .single()
+      if (childError || !childProfile?.id) {
+        return { error: childError?.message ?? 'Unable to create child profile' }
+      }
+
+      const { error: linkError } = await adminClient.from('person_guardian_child').insert({
+        guardian_profile_id: pid,
+        child_profile_id: childProfile.id,
+        primary_child: true,
+      })
+      if (linkError) {
+        return { error: linkError.message }
+      }
+    }
+
+    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
+  }
+
   if (step === 'details') {
     if (!firstname || !surname || !phone || !postcode) {
       return { error: 'All fields are required' }
@@ -350,10 +486,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!partnerProgramValue) {
       return { error: 'Please select which site you are attending from' }
     }
-    if (role === 'guardian' && (!childFirstname || !childSurname)) {
-      return { error: 'Child first and last name are required' }
-    }
-
     const userId = currentUser?.user?.id
     console.log('sign-up-details action start', { pid, userId })
     if (!userId) {
@@ -400,46 +532,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    if (role === 'guardian' && childFirstname && childSurname) {
-      const { data: existingLink } = await supabase
-        .from('person_guardian_child')
-        .select('id')
-        .eq('guardian_profile_id', pid)
-        .eq('primary_child', true)
-        .maybeSingle()
-      if (!existingLink?.id) {
-        const { data: childProfile, error: childError } = await supabase
-          .from('profile')
-          .insert({
-            role: 'student',
-            firstname: childFirstname,
-            surname: childSurname,
-          })
-          .select('id')
-          .single()
-        if (childError || !childProfile?.id) {
-          return { error: childError?.message ?? 'Unable to create child profile' }
-        }
-
-        const { error: linkError } = await supabase
-          .from('person_guardian_child')
-          .insert({
-            guardian_profile_id: pid,
-            child_profile_id: childProfile.id,
-            primary_child: true,
-          })
-        if (linkError) {
-          return { error: linkError.message }
-        }
-      }
-    }
-
     return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
   }
 
   if (step === 'invite') {
     if (!inviteEmail) {
-      return redirect('/home', { headers })
+      return { error: 'Invite email is required' }
     }
 
     const targetRole = role === 'student' ? 'guardian' : 'student'
@@ -499,7 +597,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         )
     }
 
-    return redirect('/home', { headers })
+    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
   }
 }
 
@@ -510,6 +608,7 @@ export default function SignUpDetails() {
     role,
     pid,
     step,
+    childEmailChoice,
     firstname,
     surname,
     phone,
@@ -527,6 +626,9 @@ export default function SignUpDetails() {
   const error = fetcher.data?.error
   const loading = fetcher.state === 'submitting'
   const inviteLabel = role === 'student' ? "Guardian's email" : "Student's email"
+  const [childEmailChoiceState, setChildEmailChoiceState] = useState<'' | 'yes' | 'no'>(
+    childEmailChoice ?? ''
+  )
 
   const formatPC = (val: string) => {
     const raw = val.toUpperCase().replace(/[^A-Z0-9]/g, '')
@@ -535,12 +637,16 @@ export default function SignUpDetails() {
   }
 
   const stageTitles: Record<LoaderStep, string> = {
+    guardian: 'Guardian information',
+    child: 'Child details',
     details: 'Complete your profile',
     forms: currentForm?.name ?? 'Required form',
     invite: 'Invite a Guardian/Student',
   }
 
   const stageDescriptions: Record<LoaderStep, string> = {
+    guardian: 'Tell us about the guardian',
+    child: 'Tell us about your child',
     details: 'One more step before you can continue',
     forms: 'Share the requested information to finish your sign-up',
     invite: 'Send an invite to your counterpart',
@@ -575,7 +681,109 @@ export default function SignUpDetails() {
                 ))}
               </div>
             )}
-            {step === 'details' ? (
+            {step === 'guardian' ? (
+              <fetcher.Form method="post" className="flex flex-col gap-6">
+                <input type="hidden" name="role" value={role ?? 'student'} />
+                <input type="hidden" name="pid" value={pid} />
+                <input type="hidden" name="step" value="guardian" />
+                <div className="grid gap-2">
+                  <Label htmlFor="firstname">Guardian First Name</Label>
+                  <Input id="firstname" name="firstname" defaultValue={firstname ?? ''} required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="surname">Guardian Surname</Label>
+                  <Input id="surname" name="surname" defaultValue={surname ?? ''} required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="phone">Guardian Phone Number</Label>
+                  <Input id="phone" name="phone" type="tel" defaultValue={phone ?? ''} required />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="partner-program">Please select which site you are attending from</Label>
+                  <select
+                    id="partner-program"
+                    name="partner-program"
+                    value={partnerProgram}
+                    onChange={e => setPartnerProgram(e.target.value)}
+                    className={formControlClasses}
+                    required
+                  >
+                    <option value="" disabled>
+                      Select a site
+                    </option>
+                    {PARTNER_SITE_OPTIONS.map(option => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="postcode">Guardian Postal Code</Label>
+                  <Input
+                    id="postcode"
+                    name="postcode"
+                    value={postcode}
+                    onChange={e => setPostcode(formatPC(e.target.value))}
+                    placeholder="A1A 1A1"
+                    required
+                  />
+                </div>
+                {error && <p className="text-sm text-red-500">{error}</p>}
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? 'Saving...' : 'Next'}
+                </Button>
+              </fetcher.Form>
+            ) : step === 'child' ? (
+              <fetcher.Form method="post" className="flex flex-col gap-6">
+                <input type="hidden" name="role" value={role ?? 'student'} />
+                <input type="hidden" name="pid" value={pid} />
+                <input type="hidden" name="step" value="child" />
+                <fieldset className="grid gap-3">
+                  <legend className="text-sm font-medium text-slate-900">
+                    Will your child attend using their own email address?
+                  </legend>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="child_email"
+                      value="yes"
+                      checked={childEmailChoiceState === 'yes'}
+                      onChange={() => setChildEmailChoiceState('yes')}
+                      className="h-4 w-4"
+                    />
+                    Yes, they have their own email
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="child_email"
+                      value="no"
+                      checked={childEmailChoiceState === 'no'}
+                      onChange={() => setChildEmailChoiceState('no')}
+                      className="h-4 w-4"
+                    />
+                    No, they do not have their own email
+                  </label>
+                </fieldset>
+                {childEmailChoiceState === 'no' && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label htmlFor="child_firstname">Child first name</Label>
+                      <Input id="child_firstname" name="child_firstname" required />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="child_surname">Child surname</Label>
+                      <Input id="child_surname" name="child_surname" required />
+                    </div>
+                  </div>
+                )}
+                {error && <p className="text-sm text-red-500">{error}</p>}
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? 'Saving...' : 'Next'}
+                </Button>
+              </fetcher.Form>
+            ) : step === 'details' ? (
               <fetcher.Form method="post" className="flex flex-col gap-6">
                 <input type="hidden" name="role" value={role ?? 'student'} />
                 <input type="hidden" name="pid" value={pid} />
@@ -588,18 +796,6 @@ export default function SignUpDetails() {
                   <Label htmlFor="surname">Surname</Label>
                   <Input id="surname" name="surname" defaultValue={surname ?? ''} required />
                 </div>
-                {role === 'guardian' && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="child_firstname">Child first name</Label>
-                      <Input id="child_firstname" name="child_firstname" required />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="child_surname">Child surname</Label>
-                      <Input id="child_surname" name="child_surname" required />
-                    </div>
-                  </div>
-                )}
                 <div className="grid gap-2">
                   <Label htmlFor="phone">Phone</Label>
                   <Input id="phone" name="phone" type="tel" defaultValue={phone ?? ''} required />

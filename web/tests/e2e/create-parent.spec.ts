@@ -1,5 +1,18 @@
 import { expect, test } from '@playwright/test'
 
+const assertNoErrorAfterSubmit = async (page: import('@playwright/test').Page) => {
+  const errorBanner = page.locator('form').locator('p.text-red-500')
+  const result = await Promise.race([
+    errorBanner.waitFor({ state: 'visible', timeout: 10000 }).then(() => 'error'),
+    page.waitForTimeout(1000).then(() => 'idle'),
+  ])
+
+  if (result === 'error') {
+    const message = (await errorBanner.textContent())?.trim() || 'Unknown error'
+    throw new Error(`Sign-up flow error: ${message}`)
+  }
+}
+
 test('guardian sign-up creates a parent profile', async ({ page }) => {
   const now = new Date()
   const stamp = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(
@@ -18,17 +31,32 @@ test('guardian sign-up creates a parent profile', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Next' }).click()
 
-  const errorBanner = page.locator('form').locator('p.text-red-500')
+  await assertNoErrorAfterSubmit(page)
+  await expect(page.getByLabel('Guardian First Name')).toBeVisible()
 
-  const result = await Promise.race([
-    page.waitForURL(/\/auth\/sign-up-details/, { timeout: 10000 }).then(() => 'success'),
-    errorBanner.waitFor({ state: 'visible', timeout: 10000 }).then(() => 'error'),
-  ])
+  await page.getByLabel('Guardian First Name').fill('Alex')
+  await page.getByLabel('Guardian Surname').fill('Rivera')
+  await page.getByLabel('Guardian Phone Number').fill('4165550109')
+  await page
+    .getByLabel('Please select which site you are attending from')
+    .selectOption('Thorncliffe Park -TNO')
+  await page.getByLabel('Guardian Postal Code').fill('A1A 1A1')
 
-  if (result === 'error') {
-    const message = (await errorBanner.textContent())?.trim() || 'Unknown error'
-    throw new Error(`Sign-up flow error: ${message}`)
-  }
+  await page.getByRole('button', { name: 'Next' }).click()
 
-  await expect(page).toHaveURL(/\/auth\/sign-up-details/)
+  await assertNoErrorAfterSubmit(page)
+
+  await expect(
+    page.getByText('Will your child attend using their own email address?')
+  ).toBeVisible()
+
+  await page.getByLabel('No, they do not have their own email').check()
+  await page.getByLabel('Child first name').fill('Jamie')
+  await page.getByLabel('Child surname').fill('Rivera')
+
+  await page.getByRole('button', { name: 'Next' }).click()
+
+  await assertNoErrorAfterSubmit(page)
+
+  await expect(page).toHaveURL(/step=forms/)
 })
