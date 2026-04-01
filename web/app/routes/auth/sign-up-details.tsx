@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/card'
 import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import type { Database, Json } from '@/lib/database.types'
+import { getProfileSignUpCompletion } from '@/lib/onboarding.server'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { redirect, useFetcher, useLoaderData } from 'react-router'
 import { type FormEventHandler, useEffect, useMemo, useState } from 'react'
@@ -33,6 +34,14 @@ type LoaderData = {
   currentFormIndex: number | null
   totalFormSteps: number
   formsComplete: boolean
+  guardianStatus?: {
+    id: string
+    firstname: string | null
+    surname: string | null
+    email: string | null
+    isComplete: boolean
+  }[]
+  waitingOnGuardians?: boolean
 }
 
 type Condition = {
@@ -233,7 +242,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const formsComplete = formSteps.length === 0 || formSteps.every(step => step.status === 'submitted')
-  if (formsComplete) {
+
+  let guardianStatus: LoaderData['guardianStatus']
+  let waitingOnGuardians = false
+
+  if (resolvedRole === 'student') {
+    const { data: guardianLinks } = await supabase
+      .from('person_guardian_child')
+      .select('guardian_profile_id')
+      .eq('child_profile_id', pid)
+
+    const guardianIds = (guardianLinks ?? []).map(link => link.guardian_profile_id).filter(Boolean)
+    if (guardianIds.length) {
+      const { data: guardians } = await supabase
+        .from('profile')
+        .select('id, firstname, surname, email')
+        .in('id', guardianIds)
+
+      guardianStatus = await Promise.all(
+        (guardians ?? []).map(async guardian => ({
+          ...guardian,
+          isComplete: await getProfileSignUpCompletion(supabase, guardian.id, 'guardian'),
+        }))
+      )
+      waitingOnGuardians = guardianStatus.some(guardian => !guardian.isComplete)
+    } else {
+      waitingOnGuardians = true
+    }
+  }
+
+  if (formsComplete && !(resolvedRole === 'student' && waitingOnGuardians)) {
     return redirect('/home', { headers })
   }
 
@@ -248,6 +286,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     currentFormIndex,
     totalFormSteps: formSteps.length,
     formsComplete,
+    guardianStatus,
+    waitingOnGuardians,
   }
 }
 
@@ -747,6 +787,8 @@ export default function SignUpDetails() {
     allAnswers,
     currentFormIndex,
     totalFormSteps,
+    guardianStatus,
+    waitingOnGuardians,
   } = data
 
   const error = fetcher.data?.error
@@ -861,7 +903,50 @@ export default function SignUpDetails() {
                 </Button>
               </fetcher.Form>
             ) : (
-              <p className="text-sm text-slate-500">No required steps right now.</p>
+              <div className="space-y-4">
+                {waitingOnGuardians ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-slate-700">
+                      Your sign-up details are complete. We still need at least one guardian to finish
+                      their sign-up details and consent.
+                    </p>
+                    {guardianStatus && guardianStatus.length > 0 ? (
+                      <div className="rounded-md border border-slate-200">
+                        {guardianStatus.map(guardian => (
+                          <div
+                            key={guardian.id}
+                            className="flex items-center justify-between border-b border-slate-200 px-4 py-3 last:border-b-0"
+                          >
+                            <div>
+                              <p className="text-sm font-medium text-slate-900">
+                                {[guardian.firstname, guardian.surname].filter(Boolean).join(' ') ||
+                                  guardian.email ||
+                                  'Guardian'}
+                              </p>
+                              {guardian.email && (
+                                <p className="text-xs text-slate-500">{guardian.email}</p>
+                              )}
+                            </div>
+                            <span
+                              className={`text-xs uppercase tracking-wide ${
+                                guardian.isComplete ? 'text-emerald-600' : 'text-slate-400'
+                              }`}
+                            >
+                              {guardian.isComplete ? 'Complete' : 'Pending'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">
+                        No guardians are linked yet. Please invite a guardian to continue.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">No required steps right now.</p>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>

@@ -62,6 +62,52 @@ const buildAnswerMapFromSubmissions = (
   return answers
 }
 
+export const getProfileSignUpCompletion = async (
+  supabase: SupabaseClient<Database>,
+  profileId: string,
+  role: Database['public']['Enums']['app_role']
+): Promise<boolean> => {
+  const { data: submissions } = await supabase
+    .from('form_submission')
+    .select('form_id, form_answer ( question_code, value )')
+    .eq('profile_id', profileId)
+
+  const answers = buildAnswerMapFromSubmissions(submissions ?? [])
+  const submittedFormIds = new Set((submissions ?? []).map(submission => submission.form_id).filter(Boolean))
+
+  const { data: flowEntries } = await supabase
+    .from('sign_up_flow')
+    .select('form_id, roles, condition')
+    .order('step_order')
+
+  const relevantForms = (flowEntries ?? [])
+    .filter(entry => entry.roles?.includes(role))
+    .filter(entry => isConditionMet(entry.condition as Json, answers))
+    .map(entry => entry.form_id)
+    .filter(Boolean)
+
+  if (!relevantForms.length) {
+    return false
+  }
+
+  const formsComplete = relevantForms.every(formId => submittedFormIds.has(formId))
+  if (!formsComplete) {
+    return false
+  }
+
+  if (role === 'guardian') {
+    const { data: relationship } = await supabase
+      .from('person_guardian_child')
+      .select('id')
+      .eq('guardian_profile_id', profileId)
+      .limit(1)
+      .maybeSingle()
+    return Boolean(relationship?.id)
+  }
+
+  return true
+}
+
 export async function getSignUpDetailsStatus(
   supabase: SupabaseClient<Database>,
   userId: string,
@@ -81,37 +127,30 @@ export async function getSignUpDetailsStatus(
   if (!role || role === 'unassigned') {
     return { isComplete: false, profileId: profile.id, role }
   }
+  const formsComplete = await getProfileSignUpCompletion(
+    supabase,
+    profile.id,
+    role as Database['public']['Enums']['app_role']
+  )
 
-  const { data: submissions } = await supabase
-    .from('form_submission')
-    .select('form_id, form_answer ( question_code, value )')
-    .eq('profile_id', profile.id)
-
-  const answers = buildAnswerMapFromSubmissions(submissions ?? [])
-  const submittedFormIds = new Set((submissions ?? []).map(submission => submission.form_id).filter(Boolean))
-
-  const { data: flowEntries } = await supabase
-    .from('sign_up_flow')
-    .select('form_id, roles, condition')
-    .order('step_order')
-
-  const relevantForms = (flowEntries ?? [])
-    .filter(entry => entry.roles?.includes(role as Database['public']['Enums']['app_role']))
-    .filter(entry => isConditionMet(entry.condition as Json, answers))
-    .map(entry => entry.form_id)
-    .filter(Boolean)
-
-  const formsComplete = relevantForms.length > 0 && relevantForms.every(formId => submittedFormIds.has(formId))
-
-  if (role === 'guardian') {
-    const { data: relationship } = await supabase
+  if (role === 'student') {
+    const { data: guardians } = await supabase
       .from('person_guardian_child')
-      .select('id')
-      .eq('guardian_profile_id', profile.id)
-      .limit(1)
-      .maybeSingle()
-    const hasChildLink = Boolean(relationship?.id)
-    return { isComplete: formsComplete && hasChildLink, profileId: profile.id, role }
+      .select('guardian_profile_id')
+      .eq('child_profile_id', profile.id)
+
+    const guardianIds = (guardians ?? []).map(row => row.guardian_profile_id).filter(Boolean)
+    if (!guardianIds.length) {
+      return { isComplete: false, profileId: profile.id, role }
+    }
+
+    const guardianCompletions = await Promise.all(
+      guardianIds.map(guardianId =>
+        getProfileSignUpCompletion(supabase, guardianId, 'guardian')
+      )
+    )
+    const hasCompleteGuardian = guardianCompletions.some(Boolean)
+    return { isComplete: formsComplete && hasCompleteGuardian, profileId: profile.id, role }
   }
 
   return { isComplete: formsComplete, profileId: profile.id, role }
