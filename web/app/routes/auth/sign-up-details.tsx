@@ -1,5 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
 import { adminClient } from '@/lib/supabase/adminClient'
+import { createClient } from '@/lib/supabase/server'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -8,13 +8,11 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import type { Database, Json } from '@/lib/database.types'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { redirect, useFetcher, useLoaderData } from 'react-router'
-import { useState } from 'react'
+import { type FormEventHandler, useEffect, useMemo, useState } from 'react'
 
 type FormStep = {
   formId: string
@@ -24,49 +22,113 @@ type FormStep = {
   status: Database['public']['Enums']['form_assignment_status']
 }
 
-type LoaderStep = 'guardian' | 'child' | 'details' | 'forms' | 'invite'
-
 type LoaderData = {
-  role: 'guardian' | 'student' | null
+  role: 'guardian' | 'student'
   pid: string
-  step: LoaderStep
-  firstname: string | null
-  surname: string | null
-  phone: string | null
-  postcode: string | null
-  partnerProgram: string | null
-  inviterPid: string | null
-  inviterRole: 'guardian' | 'student' | null
-  hasRelationship: boolean
-  childEmailChoice: 'yes' | 'no' | null
   formSteps: FormStep[]
   currentForm: FormStep | null
   currentFormQuestions: FormQuestionData[]
   currentFormAnswers: Record<string, Json>
+  allAnswers: Record<string, Json>
   currentFormIndex: number | null
   totalFormSteps: number
   formsComplete: boolean
 }
 
-const PARTNER_SITE_OPTIONS = [
-  'Thorncliffe Park -TNO',
-  'Taylor-Massey & Oakridge',
-  'Thorncliffe Park (TNO)',
-  'Milton Food for Life',
-  'Gloucester -GEFC',
-  'Orangeville Food Bank',
-  'Cresent Town Community',
-  'Eastview Community Centre',
-  'Greenest City',
-  'Partage Vanier',
-  'Parkdale Community Food Bank',
-  'Hamilton - Eva Rothwell Centre',
-  'Other',
-  'Corktown Community',
-]
+type Condition = {
+  all?: Condition[]
+  any?: Condition[]
+  question_code?: string
+  equals?: Json
+  not_equals?: Json
+  includes?: Json
+  truthy?: boolean
+}
 
-const formControlClasses =
-  'file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive'
+const isConditionMet = (condition: Json | null | undefined, answers: Record<string, Json>) => {
+  if (!condition || typeof condition !== 'object' || Array.isArray(condition)) return true
+  const normalized = condition as Condition
+
+  if (Array.isArray(normalized.all)) {
+    return normalized.all.every(entry => isConditionMet(entry as Json, answers))
+  }
+  if (Array.isArray(normalized.any)) {
+    return normalized.any.some(entry => isConditionMet(entry as Json, answers))
+  }
+
+  if (!normalized.question_code) return true
+  const value = answers[normalized.question_code]
+
+  if (Object.prototype.hasOwnProperty.call(normalized, 'equals')) {
+    return value === normalized.equals
+  }
+  if (Object.prototype.hasOwnProperty.call(normalized, 'not_equals')) {
+    return value !== normalized.not_equals
+  }
+  if (Object.prototype.hasOwnProperty.call(normalized, 'includes')) {
+    return Array.isArray(value) && value.includes(normalized.includes as string)
+  }
+  if (Object.prototype.hasOwnProperty.call(normalized, 'truthy')) {
+    return Boolean(value)
+  }
+  return true
+}
+
+const mergeAnswerMaps = (...maps: Array<Record<string, Json> | undefined>) =>
+  maps.reduce<Record<string, Json>>((acc, entry) => {
+    if (!entry) return acc
+    for (const [key, value] of Object.entries(entry)) {
+      acc[key] = value
+    }
+    return acc
+  }, {})
+
+const normalizeString = (value: Json) => (typeof value === 'string' ? value.trim() : '')
+
+const parseFormValue = (question: FormQuestionData, formData: FormData) => {
+  const metadata = (question.metadata ?? {}) as Record<string, Json>
+  const inputType = typeof metadata.input_type === 'string' ? metadata.input_type : null
+  const fieldName = `question_${question.question_code}`
+
+  if (question.type === 'multi_choice') {
+    const choices = formData
+      .getAll(fieldName)
+      .filter((value): value is string => typeof value === 'string')
+    return choices.length ? choices : null
+  }
+
+  if (question.type === 'checkbox') {
+    return formData.has(fieldName)
+  }
+
+  const rawValue = (formData.get(fieldName) as string | null)?.trim() ?? ''
+  if (!rawValue) return null
+
+  if (inputType === 'number') {
+    const parsed = Number(rawValue)
+    return Number.isNaN(parsed) ? null : parsed
+  }
+
+  return rawValue
+}
+
+const buildAnswerMapFromSubmissions = (submissions: Array<{ form_id: string | null; form_answer: Array<{ question_code: string | null; value: Json }> | null }>) => {
+  const answers: Record<string, Json> = {}
+  const byForm: Record<string, Record<string, Json>> = {}
+
+  for (const submission of submissions) {
+    if (!submission.form_id) continue
+    const formAnswers: Record<string, Json> = {}
+    for (const answer of submission.form_answer ?? []) {
+      if (!answer.question_code) continue
+      formAnswers[answer.question_code] = answer.value
+      answers[answer.question_code] = answer.value
+    }
+    byForm[submission.form_id] = formAnswers
+  }
+
+  return { answers, byForm }
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { supabase, headers } = createClient(request)
@@ -74,9 +136,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!userData.user) throw redirect('/auth/sign-up', { headers })
 
   const url = new URL(request.url)
-  const childEmailChoiceParam = url.searchParams.get('child_email')
-  const childEmailChoice =
-    childEmailChoiceParam === 'yes' || childEmailChoiceParam === 'no' ? childEmailChoiceParam : null
   const requestedFormId = url.searchParams.get('form_id')
   const roleParam = url.searchParams.get('role') as 'guardian' | 'student' | null
   const pidParam = url.searchParams.get('pid')
@@ -85,7 +144,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!pid) {
     const { data: profileCandidate } = await supabase
       .from('profile')
-      .select('id')
+      .select('id, role')
       .eq('user_id', userData.user.id)
       .single()
     if (!profileCandidate?.id) throw redirect('/auth/sign-up', { headers })
@@ -95,42 +154,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const { data: profile } = await supabase
     .from('profile')
-    .select('firstname, surname, phone, postcode, role, partner_program')
+    .select('role')
     .eq('id', pid)
     .single()
-  if (!profile) throw redirect('/auth/sign-up', { headers })
+  if (!profile?.role) throw redirect('/auth/sign-up', { headers })
 
-  const resolvedRole = (roleParam ?? (profile.role as 'guardian' | 'student') ?? 'student') as 'guardian' | 'student'
-  const isGuardian = resolvedRole === 'guardian'
-  const requestedStep = ((url.searchParams.get('step') as LoaderStep) ||
-    (isGuardian ? 'guardian' : 'details')) as LoaderStep
-  const guardianComplete = Boolean(
-    profile.firstname && profile.surname && profile.phone && profile.postcode && profile.partner_program
-  )
-  const detailsComplete = isGuardian
-    ? guardianComplete
-    : Boolean(profile.firstname && profile.surname && profile.phone && profile.postcode && profile.partner_program)
+  const resolvedRole = (roleParam ?? (profile.role as 'guardian' | 'student')) as 'guardian' | 'student'
 
-  const { data: relationship } = await supabase
-    .from('person_guardian_child')
-    .select('id')
-    .or(`child_profile_id.eq.${pid},guardian_profile_id.eq.${pid}`)
-    .limit(1)
-    .maybeSingle()
-  const hasRelationship = Boolean(relationship?.id)
-  const inviteEnabled = !hasRelationship
+  const { data: submissions } = await supabase
+    .from('form_submission')
+    .select('form_id, form_answer ( question_code, value )')
+    .eq('profile_id', pid)
+  const submissionData = buildAnswerMapFromSubmissions(submissions ?? [])
 
   const { data: flowEntries } = await supabase
     .from('sign_up_flow')
-    .select('slug, step_order, roles, form_id, form ( id, name )')
+    .select('slug, step_order, roles, form_id, condition, form ( id, name )')
     .order('step_order')
-  const normalizedFlowEntries = (flowEntries ?? []).map(entry => ({
-    ...entry,
-    form: Array.isArray(entry.form) ? entry.form[0] ?? null : entry.form,
-  }))
-  const relevantForms = normalizedFlowEntries.filter(entry => entry.roles?.includes(resolvedRole))
-  const formIds = relevantForms.map(entry => entry.form_id)
+  const normalizedFlowEntries = (flowEntries ?? [])
+    .map(entry => ({
+      ...entry,
+      form: Array.isArray(entry.form) ? entry.form[0] ?? null : entry.form,
+    }))
+    .filter(entry => entry.roles?.includes(resolvedRole))
+    .filter(entry => isConditionMet(entry.condition as Json, submissionData.answers))
 
+  const formIds = normalizedFlowEntries.map(entry => entry.form_id)
   const { data: assignments } = formIds.length
     ? await supabase
         .from('form_assignment')
@@ -142,7 +191,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     (assignments ?? []).map(assignment => [assignment.form_id, assignment.status ?? 'pending'])
   )
 
-  const formSteps: FormStep[] = relevantForms.map(entry => ({
+  const formSteps: FormStep[] = normalizedFlowEntries.map(entry => ({
     formId: entry.form_id,
     name: entry.form?.name ?? 'Required information',
     slug: entry.slug,
@@ -160,11 +209,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     : null
 
   let currentFormQuestions: FormQuestionData[] = []
-  const currentFormAnswers: Record<string, Json> = {}
+  let currentFormAnswers: Record<string, Json> = {}
   if (currentForm) {
     const { data: questions } = await supabase
       .from('form_question_map')
-      .select('question_code, position, prompt_override, options_override, form_question ( prompt, type, options )')
+      .select(
+        'question_code, position, prompt_override, options_override, metadata, visibility_condition, form_question ( prompt, type, options )'
+      )
       .eq('form_id', currentForm.formId)
       .order('position')
     currentFormQuestions = (questions ?? []).map(q => {
@@ -174,99 +225,128 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         prompt: q.prompt_override ?? base?.prompt ?? '',
         type: (base?.type ?? 'text') as Database['public']['Enums']['form_question_type'],
         options: (q.options_override ?? base?.options ?? []) as Json,
+        metadata: (q.metadata ?? {}) as Json,
+        visibility_condition: (q.visibility_condition ?? null) as Json,
       }
     })
-    const { data: submission } = await supabase
-      .from('form_submission')
-      .select('id')
-      .eq('form_id', currentForm.formId)
-      .eq('profile_id', pid)
-      .maybeSingle()
-    if (submission?.id) {
-      const { data: answers } = await supabase
-        .from('form_answer')
-        .select('question_code, value')
-        .eq('submission_id', submission.id)
-      for (const answer of answers ?? []) {
-        currentFormAnswers[answer.question_code] = answer.value
-      }
-    }
+    currentFormAnswers = submissionData.byForm[currentForm.formId] ?? {}
   }
 
   const formsComplete = formSteps.length === 0 || formSteps.every(step => step.status === 'submitted')
-
-  if (!isGuardian) {
-    if (formsComplete && detailsComplete && inviteEnabled && requestedStep !== 'invite') {
-      const nextUrl = new URL(request.url)
-      nextUrl.searchParams.set('step', 'invite')
-      nextUrl.searchParams.delete('form_id')
-      return redirect(nextUrl.toString(), { headers })
-    }
-
-    if (formsComplete && detailsComplete && !inviteEnabled) {
-      return redirect('/home', { headers })
-    }
-  }
-
-  if (isGuardian && formsComplete && guardianComplete && hasRelationship) {
+  if (formsComplete) {
     return redirect('/home', { headers })
-  }
-
-  let effectiveStep: LoaderStep = requestedStep
-  if (isGuardian) {
-    if (!guardianComplete) {
-      effectiveStep = 'guardian'
-    } else if (!hasRelationship && effectiveStep !== 'invite') {
-      effectiveStep = effectiveStep === 'forms' || effectiveStep === 'guardian' ? 'child' : effectiveStep
-    }
-    if (effectiveStep === 'invite' && childEmailChoice !== 'yes' && !hasRelationship) {
-      effectiveStep = 'child'
-    }
-    if (effectiveStep === 'forms' && (!formSteps.length || formsComplete)) {
-      effectiveStep = hasRelationship ? 'forms' : 'child'
-    }
-    if (effectiveStep === 'child' && hasRelationship) {
-      effectiveStep = 'forms'
-    }
-  } else {
-    if (effectiveStep === 'forms' && !detailsComplete) {
-      effectiveStep = 'details'
-    }
-    if (effectiveStep === 'forms' && (!formSteps.length || formsComplete)) {
-      effectiveStep = inviteEnabled ? 'invite' : 'details'
-    }
-    if (effectiveStep === 'invite' && !detailsComplete) {
-      effectiveStep = 'details'
-    }
-    if (effectiveStep === 'invite' && !inviteEnabled) {
-      effectiveStep = 'details'
-    }
-    if (effectiveStep === 'forms' && currentForm == null && formSteps.length > 0) {
-      effectiveStep = detailsComplete ? (inviteEnabled ? 'invite' : 'details') : 'details'
-    }
   }
 
   return {
     role: resolvedRole,
     pid,
-    step: effectiveStep,
-    firstname: profile.firstname,
-    surname: profile.surname,
-    phone: profile.phone,
-    postcode: profile.postcode,
-    partnerProgram: profile.partner_program ?? null,
-    inviterPid: url.searchParams.get('inviter_pid'),
-    inviterRole: (url.searchParams.get('inviter_role') as 'guardian' | 'student') ?? null,
-    hasRelationship,
-    childEmailChoice,
     formSteps,
     currentForm,
     currentFormQuestions,
     currentFormAnswers,
+    allAnswers: submissionData.answers,
     currentFormIndex,
     totalFormSteps: formSteps.length,
     formsComplete,
   }
+}
+
+const ensureGuardianChildLink = async (guardianId: string, childId: string, primaryChild: boolean) => {
+  await adminClient
+    .from('person_guardian_child')
+    .upsert(
+      {
+        guardian_profile_id: guardianId,
+        child_profile_id: childId,
+        primary_child: primaryChild,
+      },
+      { onConflict: 'guardian_profile_id,child_profile_id' }
+    )
+}
+
+const resolveRelationship = async (supabase: ReturnType<typeof createClient>['supabase'], role: 'guardian' | 'student', pid: string) => {
+  if (role === 'guardian') {
+    const { data } = await supabase
+      .from('person_guardian_child')
+      .select('child_profile_id')
+      .eq('guardian_profile_id', pid)
+      .eq('primary_child', true)
+      .maybeSingle()
+    return { guardianPid: pid, childPid: data?.child_profile_id ?? null }
+  }
+
+  const { data } = await supabase
+    .from('person_guardian_child')
+    .select('guardian_profile_id')
+    .eq('child_profile_id', pid)
+    .eq('primary_child', true)
+    .maybeSingle()
+  return { guardianPid: data?.guardian_profile_id ?? null, childPid: pid }
+}
+
+const sendInvite = async ({
+  email,
+  role,
+  origin,
+  inviterPid,
+  inviterRole,
+  inviterEmail,
+  inviterUserId,
+}: {
+  email: string
+  role: 'guardian' | 'student'
+  origin: string
+  inviterPid: string
+  inviterRole: 'guardian' | 'student'
+  inviterEmail: string
+  inviterUserId: string
+}) => {
+  const redirectTo = `${origin}/auth/sign-up-details?role=${role}`
+  const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
+    redirectTo,
+    data: {
+      inviter_profile_id: inviterPid,
+      inviter_role: inviterRole,
+      inviter_email: inviterEmail,
+      role,
+    },
+  })
+
+  let inviteeUserId = inviteData?.user?.id ?? null
+  if (inviteError) {
+    const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+      type: 'invite',
+      email,
+      options: {
+        redirectTo,
+        data: {
+          inviter_profile_id: inviterPid,
+          inviter_role: inviterRole,
+          inviter_email: inviterEmail,
+          role,
+        },
+      },
+    })
+    if (linkError) {
+      return { error: inviteError.message ?? linkError.message ?? 'Unable to send invite', inviteeUserId: null }
+    }
+    inviteeUserId = linkData?.user?.id ?? inviteeUserId
+  }
+
+  await adminClient
+    .from('invites')
+    .upsert(
+      {
+        inviter_user_id: inviterUserId,
+        invitee_user_id: inviteeUserId,
+        invitee_email: email,
+        role,
+        status: 'pending',
+      },
+      { onConflict: 'invitee_email' }
+    )
+
+  return { inviteeUserId, error: null }
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -274,92 +354,117 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const url = new URL(request.url)
   const origin = url.origin
 
+  const { data: currentUser } = await supabase.auth.getUser()
+  if (!currentUser.user) {
+    return { error: 'Session unavailable' }
+  }
+
   const formData = await request.formData()
   const role = formData.get('role') as 'guardian' | 'student'
   const pid = formData.get('pid') as string
-  const step = (formData.get('step') as LoaderStep) ?? 'details'
-  const firstname = (formData.get('firstname') as string)?.trim()
-  const surname = (formData.get('surname') as string)?.trim()
-  const phone = (formData.get('phone') as string)?.trim()
-  const postcode = (formData.get('postcode') as string)?.trim()
-  const partnerProgramValue = (formData.get('partner-program') as string)?.trim() ?? ''
-  const dateOfBirth = (formData.get('date_of_birth') as string)?.trim()
-  const childFirstname = (formData.get('child_firstname') as string)?.trim()
-  const childSurname = (formData.get('child_surname') as string)?.trim()
-  const childEmailChoice = (formData.get('child_email') as string)?.trim()
-  const inviteEmail = (formData.get('invite-email') as string)?.trim()
-  const postalRe = /^[A-Z]\d[A-Z] \d[A-Z]\d$/
-  const { data: currentUser } = await supabase.auth.getUser()
-  const inviterEmail = currentUser?.user?.email ?? ''
+  const formId = formData.get('form_id') as string
+  if (!formId) {
+    return { error: 'Form is missing' }
+  }
 
-  if (step === 'forms') {
-    const formId = formData.get('form_id') as string
-    if (!formId) {
-      return { error: 'Form is missing' }
+  const { data: flowEntry } = await supabase
+    .from('sign_up_flow')
+    .select('slug')
+    .eq('form_id', formId)
+    .maybeSingle()
+  const currentSlug = flowEntry?.slug ?? ''
+
+  const { data: questionRows } = await supabase
+    .from('form_question_map')
+    .select(
+      'question_code, prompt_override, options_override, metadata, visibility_condition, form_question ( prompt, type, options )'
+    )
+    .eq('form_id', formId)
+    .order('position')
+
+  const questions = (questionRows ?? []).map(row => {
+    const base = Array.isArray(row.form_question) ? row.form_question[0] : row.form_question
+    return {
+      question_code: row.question_code ?? '',
+      prompt: row.prompt_override ?? base?.prompt ?? '',
+      type: (base?.type ?? 'text') as Database['public']['Enums']['form_question_type'],
+      options: (row.options_override ?? base?.options ?? []) as Json,
+      metadata: (row.metadata ?? {}) as Json,
+      visibility_condition: (row.visibility_condition ?? null) as Json,
+    } satisfies FormQuestionData
+  })
+
+  if (!questions.length) {
+    return { error: 'Form is not configured' }
+  }
+
+  const { data: submissions } = await supabase
+    .from('form_submission')
+    .select('form_id, form_answer ( question_code, value )')
+    .eq('profile_id', pid)
+  const submissionData = buildAnswerMapFromSubmissions(submissions ?? [])
+
+  const submittedAnswers: Record<string, Json> = {}
+  for (const question of questions) {
+    const value = parseFormValue(question, formData)
+    if (value !== null) {
+      submittedAnswers[question.question_code] = value
+    }
+  }
+
+  const combinedAnswers = mergeAnswerMaps(submissionData.answers, submittedAnswers)
+  const answersToSave: { questionCode: string; value: Json }[] = []
+  const hiddenQuestionCodes: string[] = []
+
+  for (const question of questions) {
+    const isVisible = isConditionMet(question.visibility_condition as Json, combinedAnswers)
+    if (!isVisible) {
+      hiddenQuestionCodes.push(question.question_code)
+      continue
     }
 
-    const { data: questionRows } = await supabase
-      .from('form_question_map')
-      .select('question_code, prompt_override, options_override, form_question ( prompt, type, options )')
-      .eq('form_id', formId)
-      .order('position')
-    const questions = questionRows ?? []
-    if (!questions.length) {
-      return { error: 'Form is not configured' }
-    }
+    const metadata = (question.metadata ?? {}) as Record<string, Json>
+    const isOptional = metadata.optional === true
+    const isRequired = !isOptional
+    const value = submittedAnswers[question.question_code]
 
-    const userId = currentUser?.user?.id
-    if (!userId) {
-      return { error: 'Unable to identify user' }
-    }
-
-    const answers: { questionCode: string; value: Json }[] = []
-    for (const question of questions) {
-      const base = Array.isArray(question.form_question) ? question.form_question[0] : question.form_question
-      const prompt = question.prompt_override ?? base?.prompt ?? ''
-      const type = base?.type as Database['public']['Enums']['form_question_type']
-      const fieldName = `question_${question.question_code}`
-      if (type === 'multi_choice') {
-        const choices = formData
-          .getAll(fieldName)
-          .filter((value): value is string => typeof value === 'string')
-        if (!choices.length) {
-          return { error: `Please answer "${prompt}"` }
-        }
-        answers.push({ questionCode: question.question_code, value: choices })
-        continue
+    if (question.type === 'checkbox' && isRequired) {
+      if (value !== true) {
+        return { error: `Please answer "${question.prompt}"` }
       }
-
-      if (type === 'checkbox') {
-        const checked = formData.has(fieldName)
-        answers.push({ questionCode: question.question_code, value: checked })
-        continue
+    } else if (question.type === 'multi_choice' && isRequired) {
+      if (!Array.isArray(value) || value.length === 0) {
+        return { error: `Please answer "${question.prompt}"` }
       }
-
-      const rawValue = (formData.get(fieldName) as string | null)?.trim() ?? ''
-      if (!rawValue) {
-        return { error: `Please answer "${prompt}"` }
+    } else if (isRequired) {
+      if (value === undefined || value === null || value === '') {
+        return { error: `Please answer "${question.prompt}"` }
       }
-      answers.push({ questionCode: question.question_code, value: rawValue })
     }
 
-    const { data: submission, error: submissionError } = await supabase
-      .from('form_submission')
-      .upsert(
-        {
-          form_id: formId,
-          profile_id: pid,
-        },
-        { onConflict: 'form_id,profile_id' }
-      )
-      .select('id')
-      .single()
-    if (submissionError || !submission?.id) {
-      console.error('form submission failed', submissionError?.message, { pid, formId })
-      return { error: submissionError?.message ?? 'Unable to save responses' }
+    if (value !== undefined) {
+      answersToSave.push({ questionCode: question.question_code, value })
     }
+  }
 
-    const answerRows = answers.map(answer => ({
+  const { data: submission, error: submissionError } = await supabase
+    .from('form_submission')
+    .upsert(
+      {
+        form_id: formId,
+        profile_id: pid,
+      },
+      { onConflict: 'form_id,profile_id' }
+    )
+    .select('id')
+    .single()
+  if (submissionError || !submission?.id) {
+    console.error('form submission failed', submissionError?.message, { pid, formId })
+    return { error: submissionError?.message ?? 'Unable to save responses' }
+  }
+
+  if (answersToSave.length) {
+    const answerRows = answersToSave.map(answer => ({
       submission_id: submission.id,
       question_code: answer.questionCode,
       value: answer.value,
@@ -371,248 +476,262 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       console.error('form answers failed', answerError.message, { pid, formId })
       return { error: answerError.message ?? 'Unable to save responses' }
     }
-
-    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
   }
 
-  if (step === 'guardian') {
-    if (!firstname || !surname || !phone || !postcode) {
-      return { error: 'All fields are required' }
-    }
-    if (!postalRe.test(postcode)) {
-      return { error: 'Postal code must match A1A 1A1 format' }
-    }
-    if (!partnerProgramValue) {
-      return { error: 'Please select which site you are attending from' }
-    }
-
-    const userId = currentUser?.user?.id
-    if (!userId) {
-      return { error: 'Unable to identify user' }
-    }
-
-    const profilePayload: Record<string, unknown> = {
-      id: pid,
-      user_id: userId,
-      firstname,
-      surname,
-      phone,
-      postcode,
-      email: inviterEmail,
-      partner_program: partnerProgramValue,
-      role,
-    }
-
-    const { data: updatedProfile, error: updateError } = await supabase
-      .from('profile')
-      .update(profilePayload)
-      .eq('id', pid)
-      .select('id')
-      .single()
-    if (updateError) {
-      console.error('profile update failed', updateError.message, { pid, profilePayload })
-    }
-
-    if (!updatedProfile?.id) {
-      const { data: insertedProfile, error: insertError } = await supabase
-        .from('profile')
-        .insert(profilePayload)
-        .select('id')
-        .single()
-      if (insertError) {
-        console.error('profile insert fallback failed', insertError.message, { pid, profilePayload })
-      }
-      if (insertError || !insertedProfile?.id) {
-        return { error: insertError?.message ?? 'Unable to save profile' }
-      }
-    }
-
-    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=child`, { headers })
-  }
-
-  if (step === 'child') {
-    if (childEmailChoice !== 'yes' && childEmailChoice !== 'no') {
-      return { error: 'Please select whether your child will use their own email' }
-    }
-
-    if (childEmailChoice === 'yes') {
-      return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=invite&child_email=yes`, { headers })
-    }
-
-    if (!childFirstname || !childSurname) {
-      return { error: 'Child first and last name are required' }
-    }
-
-    const { data: existingLink } = await supabase
-      .from('person_guardian_child')
-      .select('id')
-      .eq('guardian_profile_id', pid)
-      .eq('primary_child', true)
-      .maybeSingle()
-    if (!existingLink?.id) {
-      const { data: childProfile, error: childError } = await adminClient
-        .from('profile')
-        .insert({
-          role: 'student',
-          firstname: childFirstname,
-          surname: childSurname,
-        })
-        .select('id')
-        .single()
-      if (childError || !childProfile?.id) {
-        return { error: childError?.message ?? 'Unable to create child profile' }
-      }
-
-      const { error: linkError } = await adminClient.from('person_guardian_child').insert({
-        guardian_profile_id: pid,
-        child_profile_id: childProfile.id,
-        primary_child: true,
-      })
-      if (linkError) {
-        return { error: linkError.message }
-      }
-    }
-
-    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
-  }
-
-  if (step === 'details') {
-    if (!firstname || !surname || !phone || !postcode) {
-      return { error: 'All fields are required' }
-    }
-    if (!postalRe.test(postcode)) {
-      return { error: 'Postal code must match A1A 1A1 format' }
-    }
-    if (!partnerProgramValue) {
-      return { error: 'Please select which site you are attending from' }
-    }
-    const userId = currentUser?.user?.id
-    console.log('sign-up-details action start', { pid, userId })
-    if (!userId) {
-      return { error: 'Unable to identify user' }
-    }
-
-    const profilePayload: Record<string, unknown> = {
-      id: pid,
-      user_id: userId,
-      firstname,
-      surname,
-      phone,
-      postcode,
-      email: inviterEmail,
-      partner_program: partnerProgramValue,
-      role,
-    }
-
-    if (role === 'student') {
-      profilePayload.date_of_birth = dateOfBirth || null
-    }
-
-    const { data: updatedProfile, error: updateError } = await supabase
-      .from('profile')
-      .update(profilePayload)
-      .eq('id', pid)
-      .select('id')
-      .single()
-    if (updateError) {
-      console.error('profile update failed', updateError.message, { pid, profilePayload })
-    }
-
-    if (!updatedProfile?.id) {
-      const { data: insertedProfile, error: insertError } = await supabase
-        .from('profile')
-        .insert(profilePayload)
-        .select('id')
-        .single()
-      if (insertError) {
-        console.error('profile insert fallback failed', insertError.message, { pid, profilePayload })
-      }
-      if (insertError || !insertedProfile?.id) {
-        return { error: insertError?.message ?? 'Unable to save profile' }
-      }
-    }
-
-    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
-  }
-
-  if (step === 'invite') {
-    if (!inviteEmail) {
-      return { error: 'Invite email is required' }
-    }
-
-    const targetRole = role === 'student' ? 'guardian' : 'student'
-    const redirectTo = `${origin}/auth/sign-up-details?role=${targetRole}`
-    const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(inviteEmail, {
-      redirectTo,
-      data: {
-        inviter_profile_id: pid,
-        inviter_role: role,
-        inviter_email: inviterEmail,
-        role: targetRole,
-      },
-    })
-    let inviteeUserId = inviteData?.user?.id ?? null
-    if (inviteError) {
-      const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
-        type: 'invite',
-        email: inviteEmail,
-        options: {
-          redirectTo,
-          data: {
-            inviter_profile_id: pid,
-            inviter_role: role,
-            inviter_email: inviterEmail,
-            role: targetRole,
-          },
-        },
-      })
-      if (linkError) {
-        return { error: inviteError.message ?? linkError.message ?? 'Unable to send invite' }
-      }
-      inviteeUserId = linkData?.user?.id ?? inviteeUserId
-    }
-
-    const inviteeProfilePayload = {
-      email: inviteEmail,
-      role: targetRole,
-      ...(inviteeUserId ? { user_id: inviteeUserId } : {}),
-    }
-    const { data: inviteeRow, error: inviteeError } = await supabase
-      .from('profile')
-      .upsert(inviteeProfilePayload, { onConflict: 'email' })
-      .select('id')
-      .single()
-    if (inviteeError || !inviteeRow?.id) {
-      return { error: inviteeError?.message ?? 'Unable to prepare invitee profile' }
-    }
-    const inviteePid = inviteeRow.id
-
-    const childId = role === 'guardian' ? inviteePid : pid
-    const guardianId = role === 'guardian' ? pid : inviteePid
+  if (hiddenQuestionCodes.length) {
     await supabase
-      .from('person_guardian_child')
-      .upsert(
-        { child_profile_id: childId, guardian_profile_id: guardianId, primary_child: true },
-        { onConflict: 'guardian_profile_id,child_profile_id' }
-      )
+      .from('form_answer')
+      .delete()
+      .in('question_code', hiddenQuestionCodes)
+      .eq('submission_id', submission.id)
+  }
 
-    const inviterId = currentUser?.user?.id ?? null
-    if (inviterId) {
-      await supabase
-        .from('invites')
-        .upsert(
-          {
-            inviter_user_id: inviterId,
-            invitee_email: inviteEmail,
-            role: targetRole,
-            status: 'pending',
-          },
-          { onConflict: 'invitee_email' }
-        )
+  const { guardianPid, childPid } = await resolveRelationship(supabase, role, pid)
+  const inviterEmail = currentUser.user.email ?? ''
+  const inviterUserId = currentUser.user.id
+
+  const profileUpdates: { guardian: Record<string, Json>; child: Record<string, Json> } = {
+    guardian: {},
+    child: {},
+  }
+
+  const additionalGuardian: Record<string, Json> = {}
+  let guardianInviteEmail: string | null = null
+
+  for (const question of questions) {
+    const isVisible = isConditionMet(question.visibility_condition as Json, combinedAnswers)
+    if (!isVisible) continue
+
+    const metadata = (question.metadata ?? {}) as Record<string, Json>
+    if (metadata.target === 'profile' && typeof metadata.field === 'string') {
+      const targetRole =
+        metadata.role === 'self'
+          ? role === 'guardian'
+            ? 'guardian'
+            : 'child'
+          : metadata.role === 'child'
+            ? 'child'
+            : 'guardian'
+      const value = submittedAnswers[question.question_code]
+      if (value !== undefined && value !== null && value !== '') {
+        profileUpdates[targetRole][metadata.field] = value
+      }
     }
 
-    return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&step=forms`, { headers })
+    if (metadata.target === 'additional_guardian' && typeof metadata.field === 'string') {
+      const value = submittedAnswers[question.question_code]
+      if (value !== undefined && value !== null && value !== '') {
+        additionalGuardian[metadata.field] = value
+      }
+    }
+
+    if (metadata.action === 'invite_guardian') {
+      const value = submittedAnswers[question.question_code]
+      if (typeof value === 'string' && value.trim()) {
+        guardianInviteEmail = value.trim()
+      }
+    }
   }
+
+  let resolvedGuardianPid = guardianPid
+  let resolvedChildPid = childPid
+
+  if (!resolvedGuardianPid && Object.keys(profileUpdates.guardian).length > 0) {
+    const guardianPayload = {
+      role: 'guardian',
+      ...profileUpdates.guardian,
+    }
+    const hasEmail = typeof guardianPayload.email === 'string' && guardianPayload.email.trim()
+    const guardianResponse = hasEmail
+      ? await adminClient
+          .from('profile')
+          .upsert(guardianPayload, { onConflict: 'email' })
+          .select('id')
+          .single()
+      : await adminClient.from('profile').insert(guardianPayload).select('id').single()
+    if (guardianResponse.error || !guardianResponse.data?.id) {
+      return { error: guardianResponse.error?.message ?? 'Unable to save guardian information' }
+    }
+    resolvedGuardianPid = guardianResponse.data.id
+  }
+
+  if (!resolvedChildPid && Object.keys(profileUpdates.child).length > 0) {
+    const childPayload = {
+      role: 'student',
+      ...profileUpdates.child,
+    }
+    const { data: childRow, error: childError } = await adminClient
+      .from('profile')
+      .insert(childPayload)
+      .select('id')
+      .single()
+    if (childError || !childRow?.id) {
+      return { error: childError?.message ?? 'Unable to save child information' }
+    }
+    resolvedChildPid = childRow.id
+  }
+
+  if (resolvedGuardianPid && resolvedChildPid) {
+    await ensureGuardianChildLink(resolvedGuardianPid, resolvedChildPid, true)
+  }
+
+  const updateProfile = async (targetPid: string, updates: Record<string, Json>) => {
+    const client = targetPid === pid ? supabase : adminClient
+    await client.from('profile').update(updates).eq('id', targetPid)
+  }
+
+  if (resolvedGuardianPid && Object.keys(profileUpdates.guardian).length > 0) {
+    await updateProfile(resolvedGuardianPid, profileUpdates.guardian)
+  }
+
+  if (resolvedChildPid && Object.keys(profileUpdates.child).length > 0) {
+    await updateProfile(resolvedChildPid, profileUpdates.child)
+  }
+
+  if (currentSlug === 'guardian_details' && role === 'student') {
+    if (!guardianInviteEmail) {
+      return { error: 'Guardian email is required' }
+    }
+
+    const { inviteeUserId, error: inviteError } = await sendInvite({
+      email: guardianInviteEmail,
+      role: 'guardian',
+      origin,
+      inviterPid: pid,
+      inviterRole: 'student',
+      inviterEmail,
+      inviterUserId,
+    })
+    if (inviteError) {
+      return { error: inviteError }
+    }
+
+    if (resolvedGuardianPid && inviteeUserId) {
+      await adminClient
+        .from('profile')
+        .update({ user_id: inviteeUserId })
+        .eq('id', resolvedGuardianPid)
+    }
+  }
+
+  if (currentSlug === 'child_email' && role === 'guardian') {
+    const childHasEmail = normalizeString(combinedAnswers.child_has_email) === 'Yes'
+    const childEmail = normalizeString(combinedAnswers.child_email)
+
+    if (childHasEmail && childEmail) {
+      if (role === 'guardian' && resolvedGuardianPid) {
+        const { inviteeUserId, error: inviteError } = await sendInvite({
+          email: childEmail,
+          role: 'student',
+          origin,
+          inviterPid: resolvedGuardianPid,
+          inviterRole: 'guardian',
+          inviterEmail,
+          inviterUserId,
+        })
+        if (inviteError) {
+          return { error: inviteError }
+        }
+
+        if (resolvedChildPid) {
+          await adminClient
+            .from('profile')
+            .update({
+              email: childEmail,
+              ...(inviteeUserId ? { user_id: inviteeUserId } : {}),
+            })
+            .eq('id', resolvedChildPid)
+          await ensureGuardianChildLink(resolvedGuardianPid, resolvedChildPid, true)
+        } else {
+          const inviteeProfilePayload = {
+            email: childEmail,
+            role: 'student',
+            ...(inviteeUserId ? { user_id: inviteeUserId } : {}),
+          }
+          const { data: inviteeRow, error: inviteeError } = await adminClient
+            .from('profile')
+            .upsert(inviteeProfilePayload, { onConflict: 'email' })
+            .select('id')
+            .single()
+          if (inviteeError || !inviteeRow?.id) {
+            return { error: inviteeError?.message ?? 'Unable to prepare child invite' }
+          }
+
+          await ensureGuardianChildLink(resolvedGuardianPid, inviteeRow.id, true)
+        }
+      }
+
+      if (role === 'student' && resolvedChildPid) {
+        await supabase.from('profile').update({ email: childEmail }).eq('id', resolvedChildPid)
+      }
+    }
+  }
+
+  if (currentSlug === 'additional_guardians') {
+    const guardianFirstname = normalizeString(additionalGuardian.firstname)
+    const guardianSurname = normalizeString(additionalGuardian.surname)
+    const guardianEmail = normalizeString(additionalGuardian.email)
+
+    if ((guardianFirstname || guardianSurname || guardianEmail) && resolvedChildPid) {
+      let additionalGuardianPid: string | null = null
+      let inviteeUserId: string | null = null
+
+      if (guardianEmail) {
+        const inviteResult = await sendInvite({
+          email: guardianEmail,
+          role: 'guardian',
+          origin,
+          inviterPid: pid,
+          inviterRole: role,
+          inviterEmail,
+          inviterUserId,
+        })
+        if (inviteResult.error) {
+          return { error: inviteResult.error }
+        }
+        inviteeUserId = inviteResult.inviteeUserId
+
+        const { data: guardianRow, error: guardianError } = await adminClient
+          .from('profile')
+          .upsert(
+            {
+              email: guardianEmail,
+              role: 'guardian',
+              firstname: guardianFirstname || null,
+              surname: guardianSurname || null,
+              ...(inviteeUserId ? { user_id: inviteeUserId } : {}),
+            },
+            { onConflict: 'email' }
+          )
+          .select('id')
+          .single()
+        if (guardianError || !guardianRow?.id) {
+          return { error: guardianError?.message ?? 'Unable to save additional guardian' }
+        }
+        additionalGuardianPid = guardianRow.id
+      } else {
+        const { data: guardianRow, error: guardianError } = await adminClient
+          .from('profile')
+          .insert({
+            role: 'guardian',
+            firstname: guardianFirstname || null,
+            surname: guardianSurname || null,
+          })
+          .select('id')
+          .single()
+        if (guardianError || !guardianRow?.id) {
+          return { error: guardianError?.message ?? 'Unable to save additional guardian' }
+        }
+        additionalGuardianPid = guardianRow.id
+      }
+
+      if (additionalGuardianPid) {
+        await ensureGuardianChildLink(additionalGuardianPid, resolvedChildPid, false)
+      }
+    }
+  }
+
+  return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&form_id=${formId}`, { headers })
 }
 
 export default function SignUpDetails() {
@@ -621,63 +740,84 @@ export default function SignUpDetails() {
   const {
     role,
     pid,
-    step,
-    childEmailChoice,
-    firstname,
-    surname,
-    phone,
-    postcode: loaderPostcode,
-    partnerProgram: loaderPartnerProgram,
     formSteps,
     currentForm,
     currentFormQuestions,
     currentFormAnswers,
+    allAnswers,
     currentFormIndex,
     totalFormSteps,
   } = data
-  const [postcode, setPostcode] = useState(loaderPostcode ?? '')
-  const [partnerProgram, setPartnerProgram] = useState(loaderPartnerProgram ?? '')
+
   const error = fetcher.data?.error
   const loading = fetcher.state === 'submitting'
-  const inviteLabel = role === 'student' ? "Guardian's email" : "Student's email"
-  const [childEmailChoiceState, setChildEmailChoiceState] = useState<'' | 'yes' | 'no'>(
-    childEmailChoice ?? ''
+
+  const [answerState, setAnswerState] = useState<Record<string, Json>>(
+    mergeAnswerMaps(allAnswers, currentFormAnswers)
   )
 
-  const formatPC = (val: string) => {
-    const raw = val.toUpperCase().replace(/[^A-Z0-9]/g, '')
-    if (raw.length <= 3) return raw
-    return raw.slice(0, 3) + ' ' + raw.slice(3, 6)
+  useEffect(() => {
+    setAnswerState(mergeAnswerMaps(allAnswers, currentFormAnswers))
+  }, [allAnswers, currentFormAnswers, currentForm?.formId])
+
+  const questionTypeMap = useMemo(() => {
+    return currentFormQuestions.reduce<Record<string, Database['public']['Enums']['form_question_type']>>(
+      (acc, question) => {
+        acc[question.question_code] = question.type
+        return acc
+      },
+      {}
+    )
+  }, [currentFormQuestions])
+
+  const handleChange: FormEventHandler<HTMLFormElement> = event => {
+    const target = event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    if (!target?.name?.startsWith('question_')) return
+    const questionCode = target.name.replace('question_', '')
+    const questionType = questionTypeMap[questionCode]
+
+    setAnswerState(current => {
+      const next = { ...current }
+      if (questionType === 'multi_choice') {
+        const existing = Array.isArray(next[questionCode]) ? [...(next[questionCode] as string[])] : []
+        if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+          if (target.checked) {
+            if (!existing.includes(target.value)) {
+              existing.push(target.value)
+            }
+          } else {
+            const index = existing.indexOf(target.value)
+            if (index >= 0) existing.splice(index, 1)
+          }
+          next[questionCode] = existing
+        }
+        return next
+      }
+
+      if (questionType === 'checkbox') {
+        next[questionCode] = target instanceof HTMLInputElement ? target.checked : Boolean(target.value)
+        return next
+      }
+
+      next[questionCode] = target.value
+      return next
+    })
   }
 
-  const stageTitles: Record<LoaderStep, string> = {
-    guardian: 'Guardian information',
-    child: 'Child details',
-    details: 'Complete your profile',
-    forms: currentForm?.name ?? 'Required form',
-    invite: 'Invite a Guardian/Student',
-  }
-
-  const stageDescriptions: Record<LoaderStep, string> = {
-    guardian: 'Tell us about the guardian',
-    child: 'Tell us about your child',
-    details: 'One more step before you can continue',
-    forms: 'Share the requested information to finish your sign-up',
-    invite: 'Send an invite to your counterpart',
-  }
-
-  const formSummary = formSteps.length
+  const visibleQuestions = currentFormQuestions.filter(question =>
+    isConditionMet(question.visibility_condition as Json, answerState)
+  )
 
   return (
     <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
       <div className="w-full max-w-3xl">
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl">{stageTitles[step]}</CardTitle>
-            <CardDescription>{stageDescriptions[step]}</CardDescription>
+            <CardTitle className="text-2xl">{currentForm?.name ?? 'Sign-up details'}</CardTitle>
+            <CardDescription>Complete each step to finish your registration.</CardDescription>
           </CardHeader>
           <CardContent>
-            {formSummary > 0 && (
+            {formSteps.length > 0 && (
               <div className="mb-4 space-y-2 text-sm text-slate-500">
                 {formSteps.map((form, index) => (
                   <div key={form.formId} className="flex items-center justify-between">
@@ -695,208 +835,33 @@ export default function SignUpDetails() {
                 ))}
               </div>
             )}
-            {step === 'guardian' ? (
-              <fetcher.Form method="post" className="flex flex-col gap-6">
-                <input type="hidden" name="role" value={role ?? 'student'} />
+            {currentForm ? (
+              <fetcher.Form method="post" className="flex flex-col gap-6" onChange={handleChange}>
+                <input type="hidden" name="role" value={role} />
                 <input type="hidden" name="pid" value={pid} />
-                <input type="hidden" name="step" value="guardian" />
-                <div className="grid gap-2">
-                  <Label htmlFor="firstname">Guardian First Name</Label>
-                  <Input id="firstname" name="firstname" defaultValue={firstname ?? ''} required />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="surname">Guardian Surname</Label>
-                  <Input id="surname" name="surname" defaultValue={surname ?? ''} required />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="phone">Guardian Phone Number</Label>
-                  <Input id="phone" name="phone" type="tel" defaultValue={phone ?? ''} required />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="partner-program">Please select which site you are attending from</Label>
-                  <select
-                    id="partner-program"
-                    name="partner-program"
-                    value={partnerProgram}
-                    onChange={e => setPartnerProgram(e.target.value)}
-                    className={formControlClasses}
-                    required
-                  >
-                    <option value="" disabled>
-                      Select a site
-                    </option>
-                    {PARTNER_SITE_OPTIONS.map(option => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="postcode">Guardian Postal Code</Label>
-                  <Input
-                    id="postcode"
-                    name="postcode"
-                    value={postcode}
-                    onChange={e => setPostcode(formatPC(e.target.value))}
-                    placeholder="A1A 1A1"
-                    required
-                  />
-                </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? 'Saving...' : 'Next'}
-                </Button>
-              </fetcher.Form>
-            ) : step === 'child' ? (
-              <fetcher.Form method="post" className="flex flex-col gap-6">
-                <input type="hidden" name="role" value={role ?? 'student'} />
-                <input type="hidden" name="pid" value={pid} />
-                <input type="hidden" name="step" value="child" />
-                <fieldset className="grid gap-3">
-                  <legend className="text-sm font-medium text-slate-900">
-                    Will your child attend using their own email address?
-                  </legend>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="radio"
-                      name="child_email"
-                      value="yes"
-                      checked={childEmailChoiceState === 'yes'}
-                      onChange={() => setChildEmailChoiceState('yes')}
-                      className="h-4 w-4"
-                    />
-                    Yes, they have their own email
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="radio"
-                      name="child_email"
-                      value="no"
-                      checked={childEmailChoiceState === 'no'}
-                      onChange={() => setChildEmailChoiceState('no')}
-                      className="h-4 w-4"
-                    />
-                    No, they do not have their own email
-                  </label>
-                </fieldset>
-                {childEmailChoiceState === 'no' && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="child_firstname">Child first name</Label>
-                      <Input id="child_firstname" name="child_firstname" required />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="child_surname">Child surname</Label>
-                      <Input id="child_surname" name="child_surname" required />
-                    </div>
-                  </div>
-                )}
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? 'Saving...' : 'Next'}
-                </Button>
-              </fetcher.Form>
-            ) : step === 'details' ? (
-              <fetcher.Form method="post" className="flex flex-col gap-6">
-                <input type="hidden" name="role" value={role ?? 'student'} />
-                <input type="hidden" name="pid" value={pid} />
-                <input type="hidden" name="step" value="details" />
-                <div className="grid gap-2">
-                  <Label htmlFor="firstname">First name</Label>
-                  <Input id="firstname" name="firstname" defaultValue={firstname ?? ''} required />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="surname">Surname</Label>
-                  <Input id="surname" name="surname" defaultValue={surname ?? ''} required />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="phone">Phone</Label>
-                  <Input id="phone" name="phone" type="tel" defaultValue={phone ?? ''} required />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="partner-program">Please select which site you are attending from</Label>
-                  <select
-                    id="partner-program"
-                    name="partner-program"
-                    value={partnerProgram}
-                    onChange={e => setPartnerProgram(e.target.value)}
-                    className={formControlClasses}
-                    required
-                  >
-                    <option value="" disabled>
-                      Select a site
-                    </option>
-                    {PARTNER_SITE_OPTIONS.map(option => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {role === 'student' && (
-                  <div className="grid gap-2">
-                    <Label htmlFor="date_of_birth">Date of birth</Label>
-                    <Input id="date_of_birth" name="date_of_birth" type="date" required />
-                  </div>
-                )}
-                <div className="grid gap-2">
-                  <Label htmlFor="postcode">Postal Code</Label>
-                  <Input
-                    id="postcode"
-                    name="postcode"
-                    value={postcode}
-                    onChange={e => setPostcode(formatPC(e.target.value))}
-                    placeholder="A1A 1A1"
-                    required
-                  />
-                </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? 'Saving...' : 'Next'}
-                </Button>
-              </fetcher.Form>
-            ) : step === 'forms' && currentForm ? (
-              <fetcher.Form method="post" className="flex flex-col gap-6">
-                <input type="hidden" name="role" value={role ?? 'student'} />
-                <input type="hidden" name="pid" value={pid} />
-                <input type="hidden" name="step" value="forms" />
                 <input type="hidden" name="form_id" value={currentForm.formId} />
                 <p className="text-sm text-slate-500">
-                  Form {currentFormIndex ?? 1} of {totalFormSteps}
+                  Step {currentFormIndex ?? 1} of {totalFormSteps}
                 </p>
-                {currentFormQuestions.map(question => (
-                  <FormQuestion
-                    key={question.question_code}
-                    question={question}
-                    value={currentFormAnswers[question.question_code]}
-                    required={question.type !== 'checkbox'}
-                  />
-                ))}
+                {visibleQuestions.map(question => {
+                  const metadata = (question.metadata ?? {}) as Record<string, Json>
+                  const isOptional = metadata.optional === true
+                  return (
+                    <FormQuestion
+                      key={question.question_code}
+                      question={question}
+                      value={currentFormAnswers[question.question_code]}
+                      required={!isOptional}
+                    />
+                  )
+                })}
                 {error && <p className="text-sm text-red-500">{error}</p>}
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? 'Saving...' : 'Save and continue'}
                 </Button>
               </fetcher.Form>
             ) : (
-              <fetcher.Form method="post" className="flex flex-col gap-6">
-                <input type="hidden" name="role" value={role ?? 'student'} />
-                <input type="hidden" name="pid" value={pid} />
-                <input type="hidden" name="step" value="invite" />
-                <input type="hidden" name="firstname" value={firstname ?? ''} />
-                <input type="hidden" name="surname" value={surname ?? ''} />
-                <input type="hidden" name="phone" value={phone ?? ''} />
-                <input type="hidden" name="partner-program" value={partnerProgram ?? ''} />
-                <input type="hidden" name="postcode" value={postcode ?? ''} />
-                <div className="grid gap-2">
-                  <Label htmlFor="invite-email">{inviteLabel}</Label>
-                  <Input id="invite-email" name="invite-email" type="email" />
-                </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? 'Sending invite...' : 'Send Invite'}
-                </Button>
-              </fetcher.Form>
+              <p className="text-sm text-slate-500">No required steps right now.</p>
             )}
           </CardContent>
         </Card>

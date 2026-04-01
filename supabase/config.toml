@@ -2,7 +2,7 @@
 # https://supabase.com/docs/guides/local-development/cli/config
 # A string used to distinguish different Supabase projects on the same host. Defaults to the
 # working directory name when running `supabase init`.
-project_id = "app"
+project_id = "supperlunchplus"
 
 [api]
 enabled = true
@@ -62,7 +62,7 @@ schema_paths = []
 enabled = true
 # Specifies an ordered list of seed files to load during db reset.
 # Supports glob patterns relative to supabase directory: "./seeds/*.sql"
-sql_paths = ["./seed.sql", "./seeds/*.sql"]
+sql_paths = ["./seed.sql", "./seeds/operational/*.sql", "./seeds/testing/*.sql"]
 
 [db.network_restrictions]
 # Enable management of network restrictions.

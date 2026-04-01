@@ -8,13 +8,22 @@ const PARTICIPANT_ROLES = new Set(['guardian', 'student', 'unassigned'])
 
 export async function loader({ request }: Route.LoaderArgs) {
   const base = await baseLoader({ request })
-  const rows = (base.rows as Record<string, unknown>[]).filter(row =>
+  const filteredRows = (base.rows as Record<string, unknown>[]).filter(row =>
     PARTICIPANT_ROLES.has(String(row.role ?? ''))
+  )
+  const rows = filteredRows.map(row => ({
+    ...row,
+    is_user: row.user_id ? 'TRUE' : 'FALSE',
+  }))
+
+  const columns = (base.columns as string[]).map(column =>
+    column === 'user_email' ? 'is_user' : column
   )
 
   return {
     ...base,
     label: 'Participants',
+    columns,
     rows,
   }
 }

@@ -18,3 +18,39 @@ create table if not exists public.invites (
 
 create unique index if not exists invites_invitee_email_key
   on public.invites (invitee_email);
+
+alter table public.invites enable row level security;
+
+create policy invites_read_auth_admin
+  on public.invites
+  for select
+  to supabase_auth_admin
+  using (true);
+
+create policy invites_insert_auth_admin
+  on public.invites
+  for insert
+  to supabase_auth_admin
+  with check (true);
+
+create policy invites_update_auth_admin
+  on public.invites
+  for update
+  to supabase_auth_admin
+  using (true)
+  with check (true);
+
+create policy invites_read_self
+  on public.invites
+  for select
+  using (inviter_user_id = auth.uid() or invitee_user_id = auth.uid() or invitee_email = auth.email());
+
+create policy invites_update_self
+  on public.invites
+  for update
+  using (inviter_user_id = auth.uid() or invitee_email = auth.email())
+  with check (inviter_user_id = auth.uid() or invitee_email = auth.email());
+
+grant all on table public.invites to supabase_auth_admin;
+revoke all on table public.invites from authenticated, anon, public;
+grant select, update on table public.invites to authenticated;

@@ -64,7 +64,7 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "session_workshop_id_fkey"
+            foreignKeyName: "class_workshop_id_fkey"
             columns: ["workshop_id"]
             isOneToOne: false
             referencedRelation: "workshop"
@@ -105,17 +105,17 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "session_attendance_profile_id_fkey"
-            columns: ["profile_id"]
-            isOneToOne: false
-            referencedRelation: "profile"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "session_attendance_session_id_fkey"
+            foreignKeyName: "class_attendance_class_id_fkey"
             columns: ["class_id"]
             isOneToOne: false
             referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_attendance_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
             referencedColumns: ["id"]
           },
         ]
@@ -248,24 +248,30 @@ export type Database = {
       form_question_map: {
         Row: {
           form_id: string
+          metadata: Json
           options_override: Json | null
           position: number
           prompt_override: string | null
           question_code: string
+          visibility_condition: Json | null
         }
         Insert: {
           form_id: string
+          metadata?: Json
           options_override?: Json | null
           position: number
           prompt_override?: string | null
           question_code: string
+          visibility_condition?: Json | null
         }
         Update: {
           form_id?: string
+          metadata?: Json
           options_override?: Json | null
           position?: number
           prompt_override?: string | null
           question_code?: string
+          visibility_condition?: Json | null
         }
         Relationships: [
           {
@@ -394,46 +400,61 @@ export type Database = {
       }
       profile: {
         Row: {
+          city: string | null
           created_at: string
           date_of_birth: string | null
           email: string | null
           firstname: string | null
+          household_children_count: number | null
+          household_size: number | null
           id: string
           partner_program: string | null
           password_set: boolean
           phone: string | null
           postcode: string | null
+          province: string | null
           role: Database["public"]["Enums"]["app_role"]
+          street_address: string | null
           surname: string | null
           updated_at: string
           user_id: string | null
         }
         Insert: {
+          city?: string | null
           created_at?: string
           date_of_birth?: string | null
           email?: string | null
           firstname?: string | null
+          household_children_count?: number | null
+          household_size?: number | null
           id?: string
           partner_program?: string | null
           password_set?: boolean
           phone?: string | null
           postcode?: string | null
+          province?: string | null
           role: Database["public"]["Enums"]["app_role"]
+          street_address?: string | null
           surname?: string | null
           updated_at?: string
           user_id?: string | null
         }
         Update: {
+          city?: string | null
           created_at?: string
           date_of_birth?: string | null
           email?: string | null
           firstname?: string | null
+          household_children_count?: number | null
+          household_size?: number | null
           id?: string
           partner_program?: string | null
           password_set?: boolean
           phone?: string | null
           postcode?: string | null
+          province?: string | null
           role?: Database["public"]["Enums"]["app_role"]
+          street_address?: string | null
           surname?: string | null
           updated_at?: string
           user_id?: string | null
@@ -487,6 +508,7 @@ export type Database = {
       }
       sign_up_flow: {
         Row: {
+          condition: Json | null
           created_at: string
           form_id: string
           id: string
@@ -496,15 +518,17 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          condition?: Json | null
           created_at?: string
           form_id: string
           id?: string
-          roles?: Database["public"]["Enums"]["app_role"][]
+          roles: Database["public"]["Enums"]["app_role"][]
           slug: string
           step_order: number
           updated_at?: string
         }
         Update: {
+          condition?: Json | null
           created_at?: string
           form_id?: string
           id?: string

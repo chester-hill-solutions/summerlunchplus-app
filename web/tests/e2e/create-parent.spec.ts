@@ -18,7 +18,7 @@ test('guardian sign-up creates a parent profile', async ({ page }) => {
   const stamp = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(
     now.getDate()
   ).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
-  const email = `sai+SlpE2eParent${stamp}@chsolutions.ca`
+  const email = `sai+SlpE2eGuardian${stamp}@chsolutions.ca`
 
   await page.goto('/')
 

@@ -39,6 +39,8 @@ create table public.form_question_map (
   position integer not null,
   prompt_override text,
   options_override jsonb,
+  metadata jsonb not null default '{}'::jsonb,
+  visibility_condition jsonb,
   unique (form_id, question_code),
   unique (form_id, position)
 );
@@ -76,6 +78,7 @@ create table public.sign_up_flow (
   slug text not null,
   step_order integer not null,
   roles app_role[] not null,
+  condition jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (form_id),

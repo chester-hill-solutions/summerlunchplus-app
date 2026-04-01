@@ -11,8 +11,8 @@ Update it when you add commands, tests, or conventions that agents need to know.
 - Prefer `Read`, `Glob`, and `Grep` instead of ad-hoc shell searches; keep file formatting intact while you edit.
 - Keep changes ASCII unless the file already uses Unicode; limit comments to non-obvious logic.
 - Treat `supabase/migrations/` as generated output; add schema changes to `supabase/schemas/` and seeding to `supabase/seeds/` before migrating.
-- After touching schema, regenerate Supabase types: `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
-supabase gen types typescript --local > web/app/lib/database.types.ts
+- After touching schema, regenerate Supabase types (remote ref): `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
+- After touching schema, regenerate Supabase types (local): `supabase gen types typescript --local > web/app/lib/database.types.ts`.
 - Never stage `.env.local`, Supabase service keys, or other secrets; `git status` should be clean of creds.
 - Cursor rules (`.cursor/`, `.cursorrules`) and Copilot instructions (`.github/copilot-instructions.md`) do not exist right now, so no extra AI-guidance applies.
 - Keep diffs tight; do not reformat entire files when making small logic changes.

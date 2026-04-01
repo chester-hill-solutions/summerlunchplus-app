@@ -11,7 +11,7 @@ const profileDisplay = (profileRow: Record<string, unknown> | null, fallbackId: 
   const firstname = typeof profileRow?.firstname === 'string' ? profileRow.firstname.trim() : ''
   const surname = typeof profileRow?.surname === 'string' ? profileRow.surname.trim() : ''
   const email = typeof profileRow?.email === 'string' ? profileRow.email.trim() : ''
-  if (firstname && surname) return `${firstname}-${surname}`
+  if (firstname && surname) return `${firstname} ${surname}`
   if (email) return email
   return fallbackId
 }
@@ -20,7 +20,7 @@ const submissionDisplay = (profileRow: Record<string, unknown> | null, fallbackI
   const firstname = typeof profileRow?.firstname === 'string' ? profileRow.firstname.trim() : ''
   const surname = typeof profileRow?.surname === 'string' ? profileRow.surname.trim() : ''
   const email = typeof profileRow?.email === 'string' ? profileRow.email.trim() : ''
-  if (firstname && surname) return `${firstname}-${surname}`
+  if (firstname && surname) return `${firstname} ${surname}`
   if (email) return email
   return fallbackId
 }
