@@ -2,7 +2,7 @@ import { PDFDocument } from 'pdf-lib'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import type { Database } from '@/lib/database.types'
+import type { Database, Json } from '@/lib/database.types'
 
 import { parseGiftCardCsv } from './parse-csv'
 
@@ -54,7 +54,7 @@ const storeAssets = async (
     asset_url: string
     page_count?: number | null
     source_index?: number | null
-    metadata?: Record<string, unknown>
+    metadata?: Json
   }>
 ) => {
   if (!assets.length) return null
@@ -120,7 +120,7 @@ const processPdfUpload = async (
     asset_url: string
     page_count: number
     source_index: number
-    metadata: Record<string, unknown>
+    metadata: Json
   }> = []
 
   for (let start = 0; start < totalPages; start += chunkSize) {

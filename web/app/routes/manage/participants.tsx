@@ -6,8 +6,8 @@ const baseLoader = createTableLoader('profile')
 
 const PARTICIPANT_ROLES = new Set(['guardian', 'student', 'unassigned'])
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const base = await baseLoader({ request })
+export async function loader(args: Route.LoaderArgs) {
+  const base = await baseLoader(args)
   const filteredRows = (base.rows as Record<string, unknown>[]).filter(row =>
     PARTICIPANT_ROLES.has(String(row.role ?? ''))
   )

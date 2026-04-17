@@ -7,9 +7,9 @@ import { createTableLoader } from './table-loader'
 
 const baseLoader = createTableLoader('class-attendance')
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const auth = await requireAuth(request)
-  const base = await baseLoader({ request })
+export async function loader(args: Route.LoaderArgs) {
+  const auth = await requireAuth(args.request)
+  const base = await baseLoader(args)
   return {
     ...base,
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),

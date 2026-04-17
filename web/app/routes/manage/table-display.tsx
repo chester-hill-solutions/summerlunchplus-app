@@ -17,6 +17,17 @@ const formatDateOnly = (value: string) => {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
 }
 
+type TimestampLabelValue = {
+  timestamp: unknown
+  label: unknown
+  order?: unknown
+}
+
+const isTimestampLabelValue = (value: unknown): value is TimestampLabelValue => {
+  if (!value || typeof value !== 'object') return false
+  return 'timestamp' in value && 'label' in value
+}
+
 const getCellValue = (column: string, row: Record<string, unknown>, tableName?: string) => {
   const value = row[column]
   if (value && typeof value === 'object') {
@@ -25,7 +36,7 @@ const getCellValue = (column: string, row: Record<string, unknown>, tableName?: 
       const end = typeof value.end === 'string' ? formatDateOnly(value.end) : ''
       return [start, end].filter(Boolean).join(' - ')
     }
-    if ('timestamp' in value && 'label' in value) {
+    if (isTimestampLabelValue(value)) {
       const timestamp = typeof value.timestamp === 'string' ? formatTimestamp(value.timestamp) : ''
       const label = typeof value.label === 'string' ? value.label : ''
       const order = typeof value.order === 'string' ? value.order : 'timestamp_first'
