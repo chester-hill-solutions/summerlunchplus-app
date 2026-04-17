@@ -5,10 +5,10 @@ with semester as (
   )
   values (
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid,
-    now() + interval '1 day',
-    now() + interval '8 weeks',
-    now(),
-    now() + interval '6 weeks'
+    now() - interval '20 weeks',
+    now() - interval '12 weeks',
+    now() - interval '24 weeks',
+    now() - interval '21 weeks'
   )
   on conflict (id) do update
     set starts_at = excluded.starts_at,
@@ -24,9 +24,9 @@ section as (
   values (
     '11111111-1111-1111-1111-111111111111'::uuid,
     (select id from semester),
-    'Partner program class section for summer launch',
-    now(),
-    now() + interval '6 weeks',
+    'Partner program class section sample (historical)',
+    now() - interval '24 weeks',
+    now() - interval '21 weeks',
     30,
     10
   )
@@ -44,15 +44,15 @@ values
   (
     '22222222-2222-2222-2222-222222222222'::uuid,
     (select id from section),
-    now() + interval '7 days',
-    now() + interval '7 days' + interval '90 minutes',
+    now() - interval '19 weeks',
+    now() - interval '19 weeks' + interval '90 minutes',
     'Cafeteria'
   ),
   (
     '33333333-3333-3333-3333-333333333333'::uuid,
     (select id from section),
-    now() + interval '14 days',
-    now() + interval '14 days' + interval '90 minutes',
+    now() - interval '18 weeks',
+    now() - interval '18 weeks' + interval '90 minutes',
     'Cafeteria'
   )
 on conflict (id) do update
