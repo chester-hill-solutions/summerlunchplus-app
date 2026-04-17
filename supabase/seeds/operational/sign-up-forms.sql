@@ -154,7 +154,6 @@ union all
 select 'partner_organization', 'Partner organization', 'single_choice'::form_question_type, $$[
   "Thorncliffe Park -TNO",
   "Taylor-Massey & Oakridge",
-  "Thorncliffe Park (TNO)",
   "Milton Food for Life",
   "Gloucester -GEFC",
   "Orangeville Food Bank",

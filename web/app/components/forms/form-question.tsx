@@ -37,6 +37,13 @@ type FormQuestionProps = {
   required?: boolean
 }
 
+const LabelWithRequired = ({ text, required }: { text: string; required?: boolean }) => (
+  <>
+    {text}
+    {required ? <span className="ml-1 text-destructive">*</span> : null}
+  </>
+)
+
 export function FormQuestion({ question, value, required }: FormQuestionProps) {
   const name = `question_${question.question_code}`
   const options = question.type === 'agreement' ? AGREEMENT_OPTIONS : normalizeOptions(question.options)
@@ -60,7 +67,9 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
 
   const renderRadioGroup = (items: string[]) => (
     <fieldset className="space-y-2">
-      <Label className="text-base">{question.prompt}</Label>
+      <Label className="text-base">
+        <LabelWithRequired text={question.prompt} required={required} />
+      </Label>
       <div className="grid gap-3">
         {items.map(option => {
           const optionId = `${name}-${slugify(option)}`
@@ -87,7 +96,9 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
     if (ui === 'select') {
       return (
         <div className="grid gap-2">
-          <Label htmlFor={name}>{question.prompt}</Label>
+          <Label htmlFor={name}>
+            <LabelWithRequired text={question.prompt} required={required} />
+          </Label>
           <select
             id={name}
             name={name}
@@ -113,7 +124,9 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
   if (question.type === 'multi_choice') {
     return (
       <fieldset className="space-y-2">
-        <Label className="text-base">{question.prompt}</Label>
+        <Label className="text-base">
+          <LabelWithRequired text={question.prompt} required={required} />
+        </Label>
         <div className="grid gap-2">
           {options.map(option => {
             const optionId = `${name}-${slugify(option)}`
@@ -148,7 +161,9 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
           defaultChecked={isChecked}
           className="h-4 w-4"
         />
-        <Label htmlFor={name}>{question.prompt}</Label>
+        <Label htmlFor={name}>
+          <LabelWithRequired text={question.prompt} required={required} />
+        </Label>
       </div>
     )
   }
@@ -156,7 +171,9 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
   const resolvedInputType = inputType ?? (question.type === 'date' ? 'date' : 'text')
   return (
     <div className="grid gap-2">
-      <Label htmlFor={name}>{question.prompt}</Label>
+      <Label htmlFor={name}>
+        <LabelWithRequired text={question.prompt} required={required} />
+      </Label>
       <Input
         id={name}
         name={name}

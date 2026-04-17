@@ -13,7 +13,7 @@ import type { Database, Json } from '@/lib/database.types'
 import { getProfileSignUpCompletion } from '@/lib/onboarding.server'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { redirect, useFetcher, useLoaderData } from 'react-router'
-import { type FormEventHandler, useEffect, useMemo, useState } from 'react'
+import { type FormEventHandler, useEffect, useMemo, useRef, useState } from 'react'
 
 type FormStep = {
   formId: string
@@ -770,8 +770,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const guardianFirstname = normalizeString(additionalGuardian.firstname)
     const guardianSurname = normalizeString(additionalGuardian.surname)
     const guardianEmail = normalizeString(additionalGuardian.email)
+    const hasAnyAdditionalGuardianValue = Boolean(
+      guardianFirstname || guardianSurname || guardianEmail
+    )
+    const hasAllAdditionalGuardianValues = Boolean(
+      guardianFirstname && guardianSurname && guardianEmail
+    )
 
-    if ((guardianFirstname || guardianSurname || guardianEmail) && resolvedChildPid) {
+    if (hasAnyAdditionalGuardianValue && !hasAllAdditionalGuardianValues) {
+      return {
+        error:
+          'To add an additional guardian, please provide first name, surname, and email. Leave all three blank to skip this optional step.',
+      }
+    }
+
+    if (hasAllAdditionalGuardianValues && resolvedChildPid) {
       let additionalGuardianPid: string | null = null
       let inviteeUserId: string | null = null
 
@@ -856,9 +869,19 @@ export default function SignUpDetails() {
   const [answerState, setAnswerState] = useState<Record<string, Json>>(
     mergeAnswerMaps(allAnswers, currentFormAnswers)
   )
+  const previousFormIdRef = useRef<string | null>(currentForm?.formId ?? null)
 
   useEffect(() => {
-    setAnswerState(mergeAnswerMaps(allAnswers, currentFormAnswers))
+    const nextFormId = currentForm?.formId ?? null
+    const didFormChange = previousFormIdRef.current !== nextFormId
+
+    if (didFormChange) {
+      setAnswerState(mergeAnswerMaps(allAnswers, currentFormAnswers))
+      previousFormIdRef.current = nextFormId
+      return
+    }
+
+    setAnswerState(current => mergeAnswerMaps(allAnswers, currentFormAnswers, current))
   }, [allAnswers, currentFormAnswers, currentForm?.formId])
 
   const questionTypeMap = useMemo(() => {
@@ -944,6 +967,12 @@ export default function SignUpDetails() {
                 <p className="text-sm text-slate-500">
                   Step {currentFormIndex ?? 1} of {totalFormSteps}
                 </p>
+                {currentForm.slug === 'additional_guardians' ? (
+                  <p className="text-sm text-slate-500">
+                    Optional step. Leave all fields blank to skip, or complete all fields to add an additional
+                    guardian.
+                  </p>
+                ) : null}
                 {visibleQuestions.map(question => {
                   const metadata = (question.metadata ?? {}) as Record<string, Json>
                   const isOptional = metadata.optional === true
@@ -951,7 +980,7 @@ export default function SignUpDetails() {
                     <FormQuestion
                       key={question.question_code}
                       question={question}
-                      value={currentFormAnswers[question.question_code]}
+                      value={answerState[question.question_code]}
                       required={!isOptional}
                     />
                   )
