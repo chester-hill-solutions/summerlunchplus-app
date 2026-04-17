@@ -310,7 +310,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const guardianIds = (guardianLinks ?? []).map(link => link.guardian_profile_id).filter(Boolean)
     if (guardianIds.length) {
-      const { data: guardians } = await supabase
+      const { data: guardians } = await adminClient
         .from('profile')
         .select('id, firstname, surname, email')
         .in('id', guardianIds)
@@ -318,7 +318,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       guardianStatus = await Promise.all(
         (guardians ?? []).map(async guardian => ({
           ...guardian,
-          isComplete: await getProfileSignUpCompletion(supabase, guardian.id, 'guardian'),
+          isComplete: await getProfileSignUpCompletion(adminClient, guardian.id, 'guardian'),
         }))
       )
       waitingOnGuardians = guardianStatus.some(guardian => !guardian.isComplete)

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database, Json } from '@/lib/database.types'
+import { adminClient } from '@/lib/supabase/adminClient'
 
 export type SignUpDetailsStatus = {
   isComplete: boolean
@@ -178,7 +179,7 @@ export async function getSignUpDetailsStatus(
 
     const guardianCompletions = await Promise.all(
       guardianIds.map(guardianId =>
-        getProfileSignUpCompletion(supabase, guardianId, 'guardian')
+        getProfileSignUpCompletion(adminClient, guardianId, 'guardian')
       )
     )
     const hasCompleteGuardian = guardianCompletions.some(Boolean)

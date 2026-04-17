@@ -175,7 +175,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const guardians = guardianIds.length
     ? (
-        await supabase
+        await adminClient
           .from('profile')
           .select('id, firstname, surname, email')
           .in('id', guardianIds)
@@ -188,7 +188,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       firstname: guardian.firstname,
       surname: guardian.surname,
       email: guardian.email,
-      isComplete: await getProfileSignUpCompletion(supabase, guardian.id, 'guardian'),
+      isComplete: await getProfileSignUpCompletion(adminClient, guardian.id, 'guardian'),
     }))
   )
 
