@@ -82,7 +82,7 @@ with profile_form as (
   values (
     'Partner Organization',
     true,
-    array['guardian','student','unassigned']::app_role[]
+    array['guardian','unassigned']::app_role[]
   )
   on conflict (name) do update
     set is_required = excluded.is_required,
@@ -180,6 +180,11 @@ select 'guardian_consent_photos', 'I give permission to summerlunch+ to use the 
 union all
 select 'guardian_consent_gift_card', 'I understand that if I will receive a $40 grocery gift card at the end of each week, it is as reimbursement for the grocery items that I purchased to participate in the cooking class.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
+select 'gift_card_store_preference', 'Which store would you like to receive the card from?', 'single_choice'::form_question_type, $$[
+  "Presidents Choice (ex, No Frills, Loblaws, Real Canadian Superstore, Zehrs, T&T, Fortinos)",
+  "Sobeys (ex. FreshCo, Sobeys, Safeway, Foodland, IGA, Thrifty Foods)"
+]$$::jsonb
+union all
 select 'guardian_consent_questionnaire', 'I agree to participate in the pre- and post-program questionnaires.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_consent_interview', 'May summerlunch+ contact you for an interview after the program has finished?', 'checkbox'::form_question_type, '[]'::jsonb
@@ -264,11 +269,46 @@ select id, 'guardian_consent_attendance', 4, '{}'::jsonb, null::jsonb from guard
 union all
 select id, 'guardian_consent_photos', 5, '{}'::jsonb, null::jsonb from guardian_form
 union all
-select id, 'guardian_consent_gift_card', 6, '{}'::jsonb, null::jsonb from guardian_form
+select id, 'guardian_consent_gift_card', 6, '{}'::jsonb, '{
+  "any": [
+    { "question_code": "partner_organization", "equals": "Taylor-Massey & Oakridge" },
+    { "question_code": "partner_organization", "equals": "Milton Food for Life" },
+    { "question_code": "partner_organization", "equals": "Gloucester -GEFC" },
+    { "question_code": "partner_organization", "equals": "Orangeville Food Bank" },
+    { "question_code": "partner_organization", "equals": "Cresent Town Community" },
+    { "question_code": "partner_organization", "equals": "Eastview Community Centre" },
+    { "question_code": "partner_organization", "equals": "Greenest City" },
+    { "question_code": "partner_organization", "equals": "Partage Vanier" },
+    { "question_code": "partner_organization", "equals": "Parkdale Community Food Bank" },
+    { "question_code": "partner_organization", "equals": "Hamilton - Eva Rothwell Centre" },
+    { "question_code": "partner_organization", "equals": "Corktown Community" }
+  ]
+}'::jsonb from guardian_form
 union all
-select id, 'guardian_consent_questionnaire', 7, '{}'::jsonb, null::jsonb from guardian_form
+select id, 'gift_card_store_preference', 7, '{}'::jsonb, '{
+  "all": [
+    {
+      "any": [
+        { "question_code": "partner_organization", "equals": "Taylor-Massey & Oakridge" },
+        { "question_code": "partner_organization", "equals": "Milton Food for Life" },
+        { "question_code": "partner_organization", "equals": "Gloucester -GEFC" },
+        { "question_code": "partner_organization", "equals": "Orangeville Food Bank" },
+        { "question_code": "partner_organization", "equals": "Cresent Town Community" },
+        { "question_code": "partner_organization", "equals": "Eastview Community Centre" },
+        { "question_code": "partner_organization", "equals": "Greenest City" },
+        { "question_code": "partner_organization", "equals": "Partage Vanier" },
+        { "question_code": "partner_organization", "equals": "Parkdale Community Food Bank" },
+        { "question_code": "partner_organization", "equals": "Hamilton - Eva Rothwell Centre" },
+        { "question_code": "partner_organization", "equals": "Corktown Community" }
+      ]
+    },
+    { "question_code": "guardian_consent_gift_card", "equals": true }
+  ]
+}'::jsonb from guardian_form
 union all
-select id, 'guardian_consent_interview', 8, '{}'::jsonb, null::jsonb from guardian_form
+select id, 'guardian_consent_questionnaire', 8, '{}'::jsonb, null::jsonb from guardian_form
+union all
+select id, 'guardian_consent_interview', 9, '{}'::jsonb, null::jsonb from guardian_form
 on conflict (form_id, question_code) do update
   set position = excluded.position,
       metadata = excluded.metadata,
@@ -303,7 +343,7 @@ select id, 'household_counts', 7, array['guardian','student']::app_role[]
 from public.form
 where name = 'Household Counts'
 union all
-select id, 'partner_organization', 8, array['guardian','student']::app_role[]
+select id, 'partner_organization', 8, array['guardian']::app_role[]
 from public.form
 where name = 'Partner Organization'
 union all
