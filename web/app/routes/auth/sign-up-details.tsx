@@ -94,6 +94,22 @@ const mergeAnswerMaps = (...maps: Array<Record<string, Json> | undefined>) =>
 
 const normalizeString = (value: Json) => (typeof value === 'string' ? value.trim() : '')
 
+const getProfileFieldValue = (profile: Record<string, unknown> | null | undefined, field: string): Json | undefined => {
+  if (!profile) return undefined
+  const value = profile[field]
+  if (value === null || value === undefined) return undefined
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value as Json
+  }
+  if (typeof value === 'object') {
+    return value as Json
+  }
+  return undefined
+}
+
 const parseFormValue = (question: FormQuestionData, formData: FormData) => {
   const metadata = (question.metadata ?? {}) as Record<string, Json>
   const inputType = typeof metadata.input_type === 'string' ? metadata.input_type : null
@@ -165,7 +181,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const { data: profile } = await supabase
     .from('profile')
-    .select('role, email')
+    .select(
+      'role, email, firstname, surname, phone, street_address, city, province, postcode, household_size, household_children_count, partner_program, date_of_birth'
+    )
     .eq('id', pid)
     .single()
   if (!profile?.role) throw redirect('/sign-up', { headers })
@@ -254,7 +272,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         visibility_condition: (q.visibility_condition ?? null) as Json,
       }
     })
-    currentFormAnswers = submissionData.byForm[currentForm.formId] ?? {}
+    currentFormAnswers = { ...(submissionData.byForm[currentForm.formId] ?? {}) }
+
+    for (const question of currentFormQuestions) {
+      const metadata = (question.metadata ?? {}) as Record<string, Json>
+      if (metadata.target !== 'profile') continue
+      if (metadata.role !== 'self') continue
+      if (typeof metadata.field !== 'string') continue
+      if (currentFormAnswers[question.question_code] !== undefined) continue
+
+      const prefillValue = getProfileFieldValue(profile as Record<string, unknown>, metadata.field)
+      if (prefillValue !== undefined) {
+        currentFormAnswers[question.question_code] = prefillValue
+      }
+    }
   }
 
   const formsComplete = formSteps.length === 0 || formSteps.every(step => step.status === 'submitted')
@@ -287,7 +318,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  if (formsComplete && !(resolvedRole === 'student' && waitingOnGuardians)) {
+  if (formsComplete) {
+    if (resolvedRole === 'student' && waitingOnGuardians) {
+      return redirect(`/auth/waiting-on-guardian?pid=${pid}`, { headers })
+    }
     return redirect('/home', { headers })
   }
 
@@ -676,6 +710,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await client.from('profile').update(updates).eq('id', targetPid)
   }
 
+  const upsertProfileByEmail = async (
+    email: string,
+    profileRole: 'guardian' | 'student',
+    updates: Record<string, Json> = {}
+  ) => {
+    const payload = {
+      email,
+      role: profileRole,
+      ...updates,
+    }
+    const { data, error } = await adminClient
+      .from('profile')
+      .upsert(payload, { onConflict: 'email' })
+      .select('id')
+      .single()
+
+    if (error || !data?.id) {
+      return { id: null, error: error?.message ?? 'Unable to save profile' }
+    }
+    return { id: data.id, error: null }
+  }
+
   if (resolvedGuardianPid && Object.keys(profileUpdates.guardian).length > 0) {
     await updateProfile(resolvedGuardianPid, profileUpdates.guardian)
   }
@@ -690,6 +746,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     if (!guardianInviteEmail) {
       return { error: 'Guardian email is required' }
+    }
+
+    if (!resolvedGuardianPid) {
+      const profileResult = await upsertProfileByEmail(
+        guardianInviteEmail,
+        'guardian',
+        profileUpdates.guardian
+      )
+      if (profileResult.error || !profileResult.id) {
+        return { error: profileResult.error ?? 'Unable to save guardian information' }
+      }
+      resolvedGuardianPid = profileResult.id
+    }
+
+    if (resolvedGuardianPid && resolvedChildPid) {
+      await ensureGuardianChildLink(resolvedGuardianPid, resolvedChildPid, true)
     }
 
     const { inviteeUserId, error: inviteError } = await sendInvite({
@@ -717,51 +789,48 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const childHasEmail = normalizeString(combinedAnswers.child_has_email) === 'Yes'
     const childEmail = normalizeString(combinedAnswers.child_email)
 
-    if (childHasEmail && childEmail) {
-      if (role === 'guardian' && resolvedGuardianPid) {
-        const { inviteeUserId, error: inviteError } = await sendInvite({
-          email: childEmail,
-          role: 'student',
-          origin,
-          inviterPid: resolvedGuardianPid,
-          inviterRole: 'guardian',
-          inviterEmail,
-          inviterUserId,
-        })
-        if (inviteError) {
-          return { error: inviteError }
-        }
-
-        if (resolvedChildPid) {
-          await adminClient
-            .from('profile')
-            .update({
-              email: childEmail,
-              ...(inviteeUserId ? { user_id: inviteeUserId } : {}),
-            })
-            .eq('id', resolvedChildPid)
-          await ensureGuardianChildLink(resolvedGuardianPid, resolvedChildPid, true)
-        } else {
-          const inviteeProfilePayload = {
+    if (childHasEmail && childEmail && resolvedGuardianPid) {
+      if (resolvedChildPid) {
+        await adminClient
+          .from('profile')
+          .update({
             email: childEmail,
-            role: 'student',
-            ...(inviteeUserId ? { user_id: inviteeUserId } : {}),
-          }
-          const { data: inviteeRow, error: inviteeError } = await adminClient
-            .from('profile')
-            .upsert(inviteeProfilePayload, { onConflict: 'email' })
-            .select('id')
-            .single()
-          if (inviteeError || !inviteeRow?.id) {
-            return { error: inviteeError?.message ?? 'Unable to prepare child invite' }
-          }
-
-          await ensureGuardianChildLink(resolvedGuardianPid, inviteeRow.id, true)
+          })
+          .eq('id', resolvedChildPid)
+      } else {
+        const childProfileResult = await upsertProfileByEmail(
+          childEmail,
+          'student',
+          profileUpdates.child
+        )
+        if (childProfileResult.error || !childProfileResult.id) {
+          return { error: childProfileResult.error ?? 'Unable to prepare child invite' }
         }
+        resolvedChildPid = childProfileResult.id
       }
 
-      if (role === 'student' && resolvedChildPid) {
-        await supabase.from('profile').update({ email: childEmail }).eq('id', resolvedChildPid)
+      if (resolvedChildPid) {
+        await ensureGuardianChildLink(resolvedGuardianPid, resolvedChildPid, true)
+      }
+
+      const { inviteeUserId, error: inviteError } = await sendInvite({
+        email: childEmail,
+        role: 'student',
+        origin,
+        inviterPid: resolvedGuardianPid,
+        inviterRole: 'guardian',
+        inviterEmail,
+        inviterUserId,
+      })
+      if (inviteError) {
+        return { error: inviteError }
+      }
+
+      if (resolvedChildPid && inviteeUserId) {
+        await adminClient
+          .from('profile')
+          .update({ user_id: inviteeUserId })
+          .eq('id', resolvedChildPid)
       }
     }
   }
@@ -789,6 +858,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let inviteeUserId: string | null = null
 
       if (guardianEmail) {
+        const profileResult = await upsertProfileByEmail(guardianEmail, 'guardian', {
+          firstname: guardianFirstname || null,
+          surname: guardianSurname || null,
+        })
+        if (profileResult.error || !profileResult.id) {
+          return { error: profileResult.error ?? 'Unable to save additional guardian' }
+        }
+        additionalGuardianPid = profileResult.id
+
+        if (additionalGuardianPid) {
+          await ensureGuardianChildLink(additionalGuardianPid, resolvedChildPid, false)
+        }
+
         const inviteResult = await sendInvite({
           email: guardianEmail,
           role: 'guardian',
@@ -803,24 +885,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
         inviteeUserId = inviteResult.inviteeUserId
 
-        const { data: guardianRow, error: guardianError } = await adminClient
-          .from('profile')
-          .upsert(
-            {
-              email: guardianEmail,
-              role: 'guardian',
-              firstname: guardianFirstname || null,
-              surname: guardianSurname || null,
-              ...(inviteeUserId ? { user_id: inviteeUserId } : {}),
-            },
-            { onConflict: 'email' }
-          )
-          .select('id')
-          .single()
-        if (guardianError || !guardianRow?.id) {
-          return { error: guardianError?.message ?? 'Unable to save additional guardian' }
+        if (inviteeUserId && additionalGuardianPid) {
+          await adminClient
+            .from('profile')
+            .update({ user_id: inviteeUserId })
+            .eq('id', additionalGuardianPid)
         }
-        additionalGuardianPid = guardianRow.id
       } else {
         const { data: guardianRow, error: guardianError } = await adminClient
           .from('profile')

@@ -19,6 +19,7 @@ export default [
   ),
   // Two-stage signup details step (must register to avoid 404)
   route("auth/sign-up-details", "routes/auth/sign-up-details.tsx"),
+  route("auth/waiting-on-guardian", "routes/auth/waiting-on-guardian.tsx"),
   route("logout", "routes/auth/logout.tsx"),
   route("forgot-password", "routes/forgot-password.tsx"),
   route("update-password", "routes/auth/update-password.tsx"),

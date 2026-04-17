@@ -6,6 +6,7 @@ export type SignUpDetailsStatus = {
   isComplete: boolean
   profileId: string | null
   role: string | null
+  waitingOnGuardians?: boolean
 }
 
 type Condition = {
@@ -122,12 +123,17 @@ export async function getSignUpDetailsStatus(
     .single()
 
   if (error || !profile?.id) {
-    return { isComplete: false, profileId: null, role: roleOverride ?? null }
+    return {
+      isComplete: false,
+      profileId: null,
+      role: roleOverride ?? null,
+      waitingOnGuardians: false,
+    }
   }
 
   const role = roleOverride && roleOverride !== 'unassigned' ? roleOverride : profile.role ?? roleOverride ?? null
   if (!role || role === 'unassigned') {
-    return { isComplete: false, profileId: profile.id, role }
+    return { isComplete: false, profileId: profile.id, role, waitingOnGuardians: false }
   }
   const invitedStudent =
     role === 'student' &&
@@ -157,7 +163,12 @@ export async function getSignUpDetailsStatus(
 
     const guardianIds = (guardians ?? []).map(row => row.guardian_profile_id).filter(Boolean)
     if (!guardianIds.length) {
-      return { isComplete: false, profileId: profile.id, role }
+      return {
+        isComplete: false,
+        profileId: profile.id,
+        role,
+        waitingOnGuardians: formsComplete,
+      }
     }
 
     const guardianCompletions = await Promise.all(
@@ -166,8 +177,18 @@ export async function getSignUpDetailsStatus(
       )
     )
     const hasCompleteGuardian = guardianCompletions.some(Boolean)
-    return { isComplete: formsComplete && hasCompleteGuardian, profileId: profile.id, role }
+    return {
+      isComplete: formsComplete && hasCompleteGuardian,
+      profileId: profile.id,
+      role,
+      waitingOnGuardians: formsComplete && !hasCompleteGuardian,
+    }
   }
 
-  return { isComplete: formsComplete, profileId: profile.id, role }
+  return {
+    isComplete: formsComplete,
+    profileId: profile.id,
+    role,
+    waitingOnGuardians: false,
+  }
 }

@@ -61,6 +61,11 @@ export async function enforceOnboardingGuard(request: Request, opts?: { allowMyF
     if (!signUpStatus.profileId) {
       throw redirect("/sign-up", { headers: auth.headers });
     }
+    if (signUpStatus.role === "student" && signUpStatus.waitingOnGuardians) {
+      throw redirect(`/auth/waiting-on-guardian?pid=${signUpStatus.profileId}`, {
+        headers: auth.headers,
+      });
+    }
     const roleParam = signUpStatus.role ?? auth.claims.role ?? "unassigned";
     throw redirect(`/auth/sign-up-details?role=${roleParam}&pid=${signUpStatus.profileId}`, {
       headers: auth.headers,

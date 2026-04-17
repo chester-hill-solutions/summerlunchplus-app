@@ -17,8 +17,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     "/sign-up/invite",
     "/forgot-password",
     "/auth/sign-up-details",
-    "/auth.confirm",
-    "/auth.error",
+    "/auth/waiting-on-guardian",
+    "/auth/confirm",
+    "/auth/error",
     "/",
   ]);
   const isMyFormsPath = pathname === "/my-forms" || pathname.startsWith("/my-forms/");
