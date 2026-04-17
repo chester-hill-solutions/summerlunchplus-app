@@ -41,6 +41,7 @@ export default [
     route("form-assignment", "routes/manage/form-assignment.tsx"),
     route("form-submission", "routes/manage/form-submission.tsx"),
     route("form-answer", "routes/manage/form-answer.tsx"),
+    route("gift-cards", "routes/manage/gift-cards.tsx"),
     route("role-permission", "routes/manage/role-permission.tsx"),
     route("user-roles", "routes/manage/user-roles.tsx"),
     route("invites", "routes/manage/invites.tsx"),

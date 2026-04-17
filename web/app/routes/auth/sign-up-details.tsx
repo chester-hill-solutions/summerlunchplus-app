@@ -142,7 +142,9 @@ const buildAnswerMapFromSubmissions = (submissions: Array<{ form_id: string | nu
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { supabase, headers } = createClient(request)
   const { data: userData } = await supabase.auth.getUser()
-  if (!userData.user) throw redirect('/auth/sign-up', { headers })
+  if (!userData.user) throw redirect('/sign-up', { headers })
+
+  await supabase.rpc('sync_auto_assigned_forms_for_user', { p_user_id: userData.user.id })
 
   const url = new URL(request.url)
   const requestedFormId = url.searchParams.get('form_id')
@@ -156,19 +158,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .select('id, role')
       .eq('user_id', userData.user.id)
       .single()
-    if (!profileCandidate?.id) throw redirect('/auth/sign-up', { headers })
+    if (!profileCandidate?.id) throw redirect('/sign-up', { headers })
     pid = profileCandidate.id
   }
-  if (!pid) throw redirect('/auth/sign-up', { headers })
+  if (!pid) throw redirect('/sign-up', { headers })
 
   const { data: profile } = await supabase
     .from('profile')
-    .select('role')
+    .select('role, email')
     .eq('id', pid)
     .single()
-  if (!profile?.role) throw redirect('/auth/sign-up', { headers })
+  if (!profile?.role) throw redirect('/sign-up', { headers })
 
   const resolvedRole = (roleParam ?? (profile.role as 'guardian' | 'student')) as 'guardian' | 'student'
+
+  const invitedStudent =
+    resolvedRole === 'student' &&
+    Boolean(
+      profile.email &&
+        (await supabase
+          .from('invites')
+          .select('id')
+          .eq('invitee_email', profile.email)
+          .eq('role', 'student')
+          .limit(1)
+          .maybeSingle())?.data?.id
+    )
 
   const { data: submissions } = await supabase
     .from('form_submission')
@@ -187,6 +202,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }))
     .filter(entry => entry.roles?.includes(resolvedRole))
     .filter(entry => isConditionMet(entry.condition as Json, submissionData.answers))
+    .filter(entry => !(invitedStudent && entry.slug === 'guardian_details'))
 
   const formIds = normalizedFlowEntries.map(entry => entry.form_id)
   const { data: assignments } = formIds.length
@@ -407,12 +423,52 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { error: 'Form is missing' }
   }
 
+  await supabase.rpc('sync_auto_assigned_forms_for_user', { p_user_id: currentUser.user.id })
+
+  const { data: assignment } = await supabase
+    .from('form_assignment')
+    .select('form_id')
+    .eq('form_id', formId)
+    .eq('user_id', currentUser.user.id)
+    .maybeSingle()
+  if (!assignment?.form_id) {
+    await supabase
+      .from('form_assignment')
+      .upsert(
+        {
+          form_id: formId,
+          user_id: currentUser.user.id,
+          assigned_by: null,
+        },
+        { onConflict: 'form_id,user_id' }
+      )
+  }
+
   const { data: flowEntry } = await supabase
     .from('sign_up_flow')
     .select('slug')
     .eq('form_id', formId)
     .maybeSingle()
   const currentSlug = flowEntry?.slug ?? ''
+
+  const { data: profile } = await supabase
+    .from('profile')
+    .select('email')
+    .eq('id', pid)
+    .single()
+
+  const invitedStudent =
+    role === 'student' &&
+    Boolean(
+      profile?.email &&
+        (await supabase
+          .from('invites')
+          .select('id')
+          .eq('invitee_email', profile.email)
+          .eq('role', 'student')
+          .limit(1)
+          .maybeSingle())?.data?.id
+    )
 
   const { data: questionRows } = await supabase
     .from('form_question_map')
@@ -629,6 +685,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (currentSlug === 'guardian_details' && role === 'student') {
+    if (invitedStudent) {
+      return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}`, { headers })
+    }
     if (!guardianInviteEmail) {
       return { error: 'Guardian email is required' }
     }

@@ -326,6 +326,101 @@ export type Database = {
           },
         ]
       }
+      gift_card_asset: {
+        Row: {
+          asset_url: string
+          created_at: string
+          id: string
+          metadata: Json
+          page_count: number | null
+          source_index: number | null
+          status: Database["public"]["Enums"]["gift_card_asset_status"]
+          updated_at: string
+          upload_id: string
+          value: number
+        }
+        Insert: {
+          asset_url: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          page_count?: number | null
+          source_index?: number | null
+          status?: Database["public"]["Enums"]["gift_card_asset_status"]
+          updated_at?: string
+          upload_id: string
+          value: number
+        }
+        Update: {
+          asset_url?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          page_count?: number | null
+          source_index?: number | null
+          status?: Database["public"]["Enums"]["gift_card_asset_status"]
+          updated_at?: string
+          upload_id?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gift_card_asset_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "gift_card_upload"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gift_card_upload: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          file_name: string | null
+          file_size: number | null
+          id: string
+          metadata: Json
+          processed_cards: number
+          provider: string | null
+          status: Database["public"]["Enums"]["gift_card_upload_status"]
+          total_cards: number
+          updated_at: string
+          upload_type: Database["public"]["Enums"]["gift_card_upload_type"]
+          uploaded_by: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          id?: string
+          metadata?: Json
+          processed_cards?: number
+          provider?: string | null
+          status?: Database["public"]["Enums"]["gift_card_upload_status"]
+          total_cards?: number
+          updated_at?: string
+          upload_type: Database["public"]["Enums"]["gift_card_upload_type"]
+          uploaded_by: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          id?: string
+          metadata?: Json
+          processed_cards?: number
+          provider?: string | null
+          status?: Database["public"]["Enums"]["gift_card_upload_status"]
+          total_cards?: number
+          updated_at?: string
+          upload_type?: Database["public"]["Enums"]["gift_card_upload_type"]
+          uploaded_by?: string
+        }
+        Relationships: []
+      }
       invites: {
         Row: {
           confirmed_at: string | null
@@ -771,6 +866,13 @@ export type Database = {
         | "address"
         | "agreement"
         | "checkbox"
+      gift_card_asset_status: "available" | "invalid"
+      gift_card_upload_status:
+        | "uploaded"
+        | "processing"
+        | "processed"
+        | "failed"
+      gift_card_upload_type: "pdf_per_page" | "pdf_per_4_pages" | "csv_link"
       invite_status: "pending" | "confirmed" | "revoked"
       workshop_enrollment_status: "pending" | "approved" | "rejected"
     }
@@ -970,6 +1072,14 @@ export const Constants = {
         "agreement",
         "checkbox",
       ],
+      gift_card_asset_status: ["available", "invalid"],
+      gift_card_upload_status: [
+        "uploaded",
+        "processing",
+        "processed",
+        "failed",
+      ],
+      gift_card_upload_type: ["pdf_per_page", "pdf_per_4_pages", "csv_link"],
       invite_status: ["pending", "confirmed", "revoked"],
       workshop_enrollment_status: ["pending", "approved", "rejected"],
     },

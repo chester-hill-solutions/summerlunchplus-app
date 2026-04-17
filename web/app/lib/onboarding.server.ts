@@ -65,7 +65,8 @@ const buildAnswerMapFromSubmissions = (
 export const getProfileSignUpCompletion = async (
   supabase: SupabaseClient<Database>,
   profileId: string,
-  role: Database['public']['Enums']['app_role']
+  role: Database['public']['Enums']['app_role'],
+  options: { skipSlugs?: string[] } = {}
 ): Promise<boolean> => {
   const { data: submissions } = await supabase
     .from('form_submission')
@@ -77,12 +78,13 @@ export const getProfileSignUpCompletion = async (
 
   const { data: flowEntries } = await supabase
     .from('sign_up_flow')
-    .select('form_id, roles, condition')
+    .select('form_id, roles, condition, slug')
     .order('step_order')
 
   const relevantForms = (flowEntries ?? [])
     .filter(entry => entry.roles?.includes(role))
     .filter(entry => isConditionMet(entry.condition as Json, answers))
+    .filter(entry => !(options.skipSlugs ?? []).includes(entry.slug ?? ''))
     .map(entry => entry.form_id)
     .filter(Boolean)
 
@@ -115,7 +117,7 @@ export async function getSignUpDetailsStatus(
 ): Promise<SignUpDetailsStatus> {
   const { data: profile, error } = await supabase
     .from('profile')
-    .select('id, role')
+    .select('id, role, email')
     .eq('user_id', userId)
     .single()
 
@@ -127,10 +129,24 @@ export async function getSignUpDetailsStatus(
   if (!role || role === 'unassigned') {
     return { isComplete: false, profileId: profile.id, role }
   }
+  const invitedStudent =
+    role === 'student' &&
+    Boolean(
+      profile.email &&
+        (await supabase
+          .from('invites')
+          .select('id')
+          .eq('invitee_email', profile.email)
+          .eq('role', 'student')
+          .limit(1)
+          .maybeSingle())?.data?.id
+    )
+
   const formsComplete = await getProfileSignUpCompletion(
     supabase,
     profile.id,
-    role as Database['public']['Enums']['app_role']
+    role as Database['public']['Enums']['app_role'],
+    invitedStudent ? { skipSlugs: ['guardian_details'] } : undefined
   )
 
   if (role === 'student') {

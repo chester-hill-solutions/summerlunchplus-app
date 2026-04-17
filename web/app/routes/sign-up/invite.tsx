@@ -86,6 +86,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .update({ password_set: true })
     .eq('user_id', userData.user.id)
 
+  await supabase.rpc('sync_auto_assigned_forms_for_user', { p_user_id: userData.user.id })
+
   if (inviteId) {
     await supabase
       .from('invites')
