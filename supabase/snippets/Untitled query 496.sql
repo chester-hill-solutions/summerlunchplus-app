@@ -1,1 +1,1 @@
-select user_id, role from public.user_roles where user_id = auth.uid();
+select public.custom_access_token_hook('{"user_id":"a40c1a34-01bb-4402-84e2-6773da6137fc"}');

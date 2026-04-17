@@ -1,4 +1,53 @@
-import { type RouteConfig } from '@react-router/dev/routes'
-import { flatRoutes } from '@react-router/fs-routes'
+import { type RouteConfig, route, index } from "@react-router/dev/routes";
 
-export default flatRoutes() satisfies RouteConfig
+export default [
+  index("routes/_index.tsx"),
+  route("home", "routes/home.tsx"),
+  route("info", "routes/info.tsx"),
+  route("forms", "routes/forms.tsx"),
+  route("enroll", "routes/enroll.tsx"),
+  route("my-forms", "routes/my-forms.tsx"),
+  route("my-forms/:formId", "routes/my-forms.$formId.tsx"),
+  route("semester-surveys/:semesterId/pre", "routes/semester-surveys.pre.tsx"),
+  route("login", "routes/auth/login.tsx"),
+  route(
+    "sign-up",
+    "routes/sign-up/layout.tsx",
+    [
+      index("routes/sign-up/index.tsx"),
+      route("invite", "routes/sign-up/invite.tsx"),
+    ]
+  ),
+  // Two-stage signup details step (must register to avoid 404)
+  route("auth/sign-up-details", "routes/auth/sign-up-details.tsx"),
+  route("auth/waiting-on-guardian", "routes/auth/waiting-on-guardian.tsx"),
+  route("logout", "routes/auth/logout.tsx"),
+  route("forgot-password", "routes/forgot-password.tsx"),
+  route("update-password", "routes/auth/update-password.tsx"),
+  route("profile", "routes/profile.tsx"),
+  route("protected", "routes/protected.tsx"),
+  route("auth/confirm", "routes/auth/confirm.tsx"),
+  route("auth/error", "routes/auth/error.tsx"),
+  route("manage", "routes/manage/team.tsx", [
+    index("routes/manage/index.tsx"),
+    route("participants", "routes/manage/participants.tsx"),
+    route("team", "routes/manage/team-members.tsx"),
+    route("person-guardian-child", "routes/manage/person-guardian-child.tsx"),
+    route("workshop", "routes/manage/workshop.tsx"),
+    route("class", "routes/manage/class.tsx"),
+    route("class-attendance", "routes/manage/class-attendance.tsx"),
+    route("workshop-enrollment", "routes/manage/workshop-enrollment.tsx"),
+    route("form", "routes/manage/form.tsx"),
+    route("form-question", "routes/manage/form-question.tsx"),
+    route("form-question-map", "routes/manage/form-question-map.tsx"),
+    route("form-assignment", "routes/manage/form-assignment.tsx"),
+    route("form-submission", "routes/manage/form-submission.tsx"),
+    route("login-event", "routes/manage/login-event.tsx"),
+    route("form-answer", "routes/manage/form-answer.tsx"),
+    route("gift-cards", "routes/manage/gift-cards.tsx"),
+    route("role-permission", "routes/manage/role-permission.tsx"),
+    route("user-roles", "routes/manage/user-roles.tsx"),
+    route("invites", "routes/manage/invites.tsx"),
+    route("semester", "routes/manage/semester.tsx"),
+  ]),
+] satisfies RouteConfig;

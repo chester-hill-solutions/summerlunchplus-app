@@ -26,8 +26,8 @@ export default function Profile() {
   const { user } = useLoaderData<typeof loader>()
 
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-4xl flex-col items-center justify-center px-6 py-10">
-      <Card className="w-full max-w-lg">
+    <main className="flex min-h-svh w-full flex-col items-center justify-center px-6 py-10">
+      <Card className="w-full">
         <CardHeader>
           <CardTitle>Profile</CardTitle>
         </CardHeader>

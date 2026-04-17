@@ -1,0 +1,755 @@
+-- Forms schema: questions, assignments, submissions, and helpers for auto-assign/onboarding.
+
+create type form_question_type as enum (
+  'text',
+  'single_choice',
+  'multi_choice',
+  'date',
+  'address',
+  'agreement',
+  'checkbox'
+);
+
+create type form_assignment_status as enum (
+  'pending',
+  'submitted'
+);
+
+create table public.form (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  due_at timestamptz,
+  is_required boolean not null default true,
+  auto_assign app_role[] not null default '{}'::app_role[],
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (name)
+);
+
+create table public.form_question (
+  question_code text primary key,
+  prompt text not null,
+  "type" form_question_type not null,
+  options jsonb not null default '[]'::jsonb
+);
+
+create table public.form_question_map (
+  form_id uuid not null references public.form (id) on delete cascade,
+  question_code text not null references public.form_question (question_code) on delete cascade,
+  position integer not null,
+  prompt_override text,
+  options_override jsonb,
+  metadata jsonb not null default '{}'::jsonb,
+  visibility_condition jsonb,
+  unique (form_id, question_code),
+  unique (form_id, position)
+);
+
+create table public.form_assignment (
+  id uuid primary key default gen_random_uuid(),
+  form_id uuid not null references public.form (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  assigned_by uuid references auth.users (id),
+  assigned_at timestamptz not null default now(),
+  due_at timestamptz,
+  status form_assignment_status not null default 'pending',
+  unique (form_id, user_id)
+);
+
+create table public.form_submission (
+  id uuid primary key default gen_random_uuid(),
+  form_id uuid not null references public.form (id) on delete cascade,
+  profile_id uuid not null references public.profile (id) on delete cascade,
+  user_id uuid references auth.users (id) on delete set null,
+  ip_address inet,
+  forwarded_for text,
+  user_agent text,
+  accept_language text,
+  referer text,
+  origin text,
+  submitted_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create index form_submission_profile_form_submitted_idx
+  on public.form_submission (profile_id, form_id, submitted_at desc);
+
+create index form_submission_user_submitted_idx
+  on public.form_submission (user_id, submitted_at desc);
+
+create table public.form_answer (
+  id uuid primary key default gen_random_uuid(),
+  submission_id uuid not null references public.form_submission (id) on delete cascade,
+  question_code text not null references public.form_question (question_code) on delete cascade,
+  value jsonb not null,
+  unique (submission_id, question_code)
+);
+
+create table public.sign_up_flow (
+  id uuid primary key default gen_random_uuid(),
+  form_id uuid not null references public.form (id) on delete cascade,
+  slug text not null,
+  step_order integer not null,
+  roles app_role[] not null,
+  condition jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (form_id),
+  unique (step_order)
+);
+
+-- Timestamps.
+create or replace function public.touch_form_updated_at()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists on_form_updated_set_timestamp on public.form;
+create trigger on_form_updated_set_timestamp
+before update on public.form
+for each row execute function public.touch_form_updated_at();
+
+create or replace function public.touch_sign_up_flow_updated_at()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+create trigger on_sign_up_flow_updated_set_timestamp
+before update on public.sign_up_flow
+for each row execute function public.touch_sign_up_flow_updated_at();
+
+-- Auto-assign sync helpers.
+create or replace function public.sync_auto_assigned_forms_for_user(p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  user_role app_role;
+begin
+  select role into user_role from public.user_roles where user_id = p_user_id;
+  user_role := coalesce(user_role, 'unassigned'::app_role);
+
+  insert into public.form_assignment (form_id, user_id, assigned_by)
+  select f.id, p_user_id, null
+  from public.form f
+  where user_role = any (f.auto_assign)
+  on conflict (form_id, user_id) do nothing;
+
+  delete from public.form_assignment fa
+  where fa.user_id = p_user_id
+    and fa.form_id in (
+      select f.id
+      from public.form f
+      where not (user_role = any (f.auto_assign))
+    )
+    and not exists (
+      select 1
+      from public.form_submission fs
+      join public.profile p on p.id = fs.profile_id
+      where fs.form_id = fa.form_id
+        and p.user_id = fa.user_id
+    );
+end;
+$$;
+
+create or replace function public.sync_auto_assigned_forms_for_user_trigger()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.sync_auto_assigned_forms_for_user(new.user_id);
+  return new;
+end;
+$$;
+
+drop trigger if exists on_user_role_changed_sync_forms on public.user_roles;
+create trigger on_user_role_changed_sync_forms
+after insert or update on public.user_roles
+for each row execute function public.sync_auto_assigned_forms_for_user_trigger();
+
+create or replace function public.sync_auto_assigned_forms_for_form(p_form_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.form_assignment (form_id, user_id, assigned_by)
+  select f.id, ur.user_id, null
+  from public.form f
+  join public.user_roles ur on ur.role = any (f.auto_assign)
+  where f.id = p_form_id
+  on conflict (form_id, user_id) do nothing;
+
+  delete from public.form_assignment fa
+  where fa.form_id = p_form_id
+    and not exists (
+      select 1
+      from public.form f
+      join public.user_roles ur on ur.user_id = fa.user_id
+      where f.id = fa.form_id
+        and ur.role = any (f.auto_assign)
+    )
+    and not exists (
+      select 1
+      from public.form_submission fs
+      join public.profile p on p.id = fs.profile_id
+      where fs.form_id = fa.form_id
+        and p.user_id = fa.user_id
+    );
+end;
+$$;
+
+create or replace function public.sync_auto_assigned_forms_for_form_trigger()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.sync_auto_assigned_forms_for_form(new.id);
+  return new;
+end;
+$$;
+
+drop trigger if exists on_form_auto_assign_changed_sync_assignments on public.form;
+create trigger on_form_auto_assign_changed_sync_assignments
+after update of auto_assign on public.form
+for each row execute function public.sync_auto_assigned_forms_for_form_trigger();
+
+drop trigger if exists on_form_created_sync_assignments on public.form;
+create trigger on_form_created_sync_assignments
+after insert on public.form
+for each row execute function public.sync_auto_assigned_forms_for_form_trigger();
+
+-- Mark assignments as submitted when a submission is created.
+create or replace function public.mark_assignment_submitted()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  raise log '[mark_assignment_submitted] enter form % profile %', new.form_id, new.profile_id;
+  update public.form_assignment
+  set status = 'submitted'
+  where form_id = new.form_id
+    and user_id in (
+      select p.user_id from public.profile p where p.id = new.profile_id
+    );
+  raise log '[mark_assignment_submitted] updated assignment to submitted';
+  return new;
+end;
+$$;
+
+drop trigger if exists on_form_submission_mark_assignment on public.form_submission;
+create trigger on_form_submission_mark_assignment
+after insert or update on public.form_submission
+for each row execute function public.mark_assignment_submitted();
+
+-- Onboarding completion helper used by role/permission claims and auto-promotion.
+create or replace function public.has_completed_required_forms(p_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  required_count int := 0;
+  incomplete_count int := 0;
+  result boolean := false;
+begin
+  select count(*)
+    into required_count
+    from public.form_assignment fa
+    join public.form f on f.id = fa.form_id
+    where fa.user_id = p_user_id
+      and f.is_required = true;
+
+  if required_count = 0 then
+    result := false;
+    raise log '[has_completed_required_forms] no required assignments for user %', p_user_id;
+    return result;
+  end if;
+
+  select count(*)
+    into incomplete_count
+    from public.form_assignment fa
+    join public.form f on f.id = fa.form_id
+    where fa.user_id = p_user_id
+      and f.is_required = true
+      and coalesce(fa.status, 'pending') is distinct from 'submitted';
+
+  result := (incomplete_count = 0);
+  raise log '[has_completed_required_forms] user % required_count %, incomplete_count %, result %',
+    p_user_id, required_count, incomplete_count, result;
+
+  return result;
+end;
+$$;
+
+create or replace function public.should_auto_promote_onboarding()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(nullif(current_setting('app.onboarding_mode', true), ''), 'role') <> 'permission';
+$$;
+
+-- Promote unassigned users after completing required forms (Option A default; guardable by ONBOARDING_MODE).
+create or replace function public.promote_user_after_submission()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  user_role_current app_role;
+  has_completed boolean;
+  user_id_current uuid;
+begin
+  select user_id into user_id_current from public.profile where id = new.profile_id;
+  raise log '[promote_user_after_submission] enter user % form %', user_id_current, new.form_id;
+
+  if user_id_current is null then
+    raise log '[promote_user_after_submission] skip: missing user for profile %', new.profile_id;
+    return new;
+  end if;
+
+  if not public.should_auto_promote_onboarding() then
+    raise log '[promote_user_after_submission] skip: onboarding_mode=permission for user %', user_id_current;
+    return new;
+  end if;
+
+  -- Mark assignment submitted first so completion check sees latest status.
+  update public.form_assignment
+  set status = 'submitted'
+  where form_id = new.form_id
+    and user_id = user_id_current;
+
+  select coalesce(role, 'unassigned'::app_role)
+    into user_role_current
+    from public.user_roles
+    where user_id = user_id_current;
+
+  if user_role_current is distinct from 'unassigned' then
+    raise log '[promote_user_after_submission] skip: role is % for user %', user_role_current, user_id_current;
+    return new;
+  end if;
+
+  select coalesce(public.has_completed_required_forms(user_id_current), false) into has_completed;
+  raise log '[promote_user_after_submission] eval user %, current_role %, has_completed %', user_id_current, user_role_current, has_completed;
+
+  if has_completed then
+    update public.user_roles
+    set role = 'student'
+    where user_id = user_id_current;
+    raise log '[promote_user_after_submission] promoted user % to student', user_id_current;
+  end if;
+
+  return new;
+end;
+$$;
+drop trigger if exists on_form_submission_auto_promote on public.form_submission;
+create trigger on_form_submission_auto_promote
+after insert or update on public.form_submission
+for each row execute function public.promote_user_after_submission();
+
+-- Access token hook (adds user_role, permissions, onboarding_complete claims).
+create or replace function public.custom_access_token_hook(event jsonb)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+  declare
+    claims jsonb;
+    user_role app_role;
+    permissions jsonb;
+    onboarding_complete boolean;
+  begin
+    select role into user_role from public.user_roles where user_id = (event->>'user_id')::uuid;
+    select coalesce(jsonb_agg(rp.permission order by rp.permission), '[]'::jsonb)
+      into permissions
+      from public.role_permission rp
+      where rp.role = coalesce(user_role, 'unassigned'::app_role);
+
+    select coalesce(public.has_completed_required_forms((event->>'user_id')::uuid), false)
+      into onboarding_complete;
+
+    claims := coalesce(event->'claims', '{}'::jsonb);
+    claims := jsonb_set(
+      claims,
+      '{user_role}',
+      to_jsonb(coalesce(user_role, 'unassigned'::app_role))
+    );
+    claims := jsonb_set(
+      claims,
+      '{permissions}',
+      permissions
+    );
+    claims := jsonb_set(
+      claims,
+      '{onboarding_complete}',
+      to_jsonb(onboarding_complete)
+    );
+    event := jsonb_set(event, '{claims}', claims);
+    return event;
+  end;
+$$;
+
+-- RLS
+alter table public.form enable row level security;
+alter table public.form_question enable row level security;
+alter table public.form_question_map enable row level security;
+alter table public.form_assignment enable row level security;
+alter table public.form_submission enable row level security;
+alter table public.form_answer enable row level security;
+
+-- Admin/manager manage forms and related objects.
+create policy form_select_authorized
+  on public.form
+  for select
+  using (public.authorize('form.read'));
+
+
+create policy form_insert_authorized
+  on public.form
+  for insert
+  with check (public.authorize('form.create'));
+
+create policy form_update_authorized
+  on public.form
+  for update
+  using (public.authorize('form.update'))
+  with check (public.authorize('form.update'));
+
+create policy form_delete_authorized
+  on public.form
+  for delete
+  using (public.authorize('form.delete'));
+
+create policy form_question_select_authorized
+  on public.form_question
+  for select
+  using (public.authorize('form_question.read'));
+
+create policy form_question_insert_authorized
+  on public.form_question
+  for insert
+  with check (public.authorize('form_question.create'));
+
+create policy form_question_update_authorized
+  on public.form_question
+  for update
+  using (public.authorize('form_question.update'))
+  with check (public.authorize('form_question.update'));
+
+create policy form_question_delete_authorized
+  on public.form_question
+  for delete
+  using (public.authorize('form_question.delete'));
+
+create policy form_question_map_select_authorized
+  on public.form_question_map
+  for select
+  using (public.authorize('form_question_map.read'));
+
+create policy form_question_map_insert_authorized
+  on public.form_question_map
+  for insert
+  with check (public.authorize('form_question_map.create'));
+
+create policy form_question_map_update_authorized
+  on public.form_question_map
+  for update
+  using (public.authorize('form_question_map.update'))
+  with check (public.authorize('form_question_map.update'));
+
+create policy form_question_map_delete_authorized
+  on public.form_question_map
+  for delete
+  using (public.authorize('form_question_map.delete'));
+
+create policy form_assignment_select_authorized
+  on public.form_assignment
+  for select
+  using (public.authorize('form_assignment.read'));
+
+create policy form_assignment_insert_authorized
+  on public.form_assignment
+  for insert
+  with check (public.authorize('form_assignment.create'));
+
+create policy form_assignment_update_authorized
+  on public.form_assignment
+  for update
+  using (public.authorize('form_assignment.update'))
+  with check (public.authorize('form_assignment.update'));
+
+create policy form_assignment_delete_authorized
+  on public.form_assignment
+  for delete
+  using (public.authorize('form_assignment.delete'));
+
+create policy form_submission_select_authorized
+  on public.form_submission
+  for select
+  using (public.authorize('form_submission.read'));
+
+create policy form_submission_insert_authorized
+  on public.form_submission
+  for insert
+  with check (public.authorize('form_submission.create'));
+
+create policy form_submission_update_authorized
+  on public.form_submission
+  for update
+  using (public.authorize('form_submission.update'))
+  with check (public.authorize('form_submission.update'));
+
+create policy form_submission_delete_authorized
+  on public.form_submission
+  for delete
+  using (public.authorize('form_submission.delete'));
+
+create policy form_answer_select_authorized
+  on public.form_answer
+  for select
+  using (public.authorize('form_answer.read'));
+
+create policy form_answer_insert_authorized
+  on public.form_answer
+  for insert
+  with check (public.authorize('form_answer.create'));
+
+create policy form_answer_update_authorized
+  on public.form_answer
+  for update
+  using (public.authorize('form_answer.update'))
+  with check (public.authorize('form_answer.update'));
+
+create policy form_answer_delete_authorized
+  on public.form_answer
+  for delete
+  using (public.authorize('form_answer.delete'));
+
+alter table public.sign_up_flow enable row level security;
+
+create policy sign_up_flow_select_site_read
+  on public.sign_up_flow
+  for select
+  using (public.authorize('site.read'));
+
+create policy sign_up_flow_select_auth_admin
+  on public.sign_up_flow
+  for select
+  to supabase_auth_admin
+  using (true);
+
+-- Supabase auth hook read access.
+create policy form_read_auth_admin
+  on public.form
+  for select
+  to supabase_auth_admin
+  using (true);
+
+create policy form_question_read_auth_admin
+  on public.form_question
+  for select
+  to supabase_auth_admin
+  using (true);
+
+create policy form_question_map_read_auth_admin
+  on public.form_question_map
+  for select
+  to supabase_auth_admin
+  using (true);
+
+create policy form_assignment_read_auth_admin
+  on public.form_assignment
+  for select
+  to supabase_auth_admin
+  using (true);
+
+create policy form_submission_read_auth_admin
+  on public.form_submission
+  for select
+  to supabase_auth_admin
+  using (true);
+
+create policy form_answer_read_auth_admin
+  on public.form_answer
+  for select
+  to supabase_auth_admin
+  using (true);
+
+-- Assignee access.
+create or replace function public.assignee_can_read_form(p_form_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists(
+    select 1
+    from public.form_assignment fa
+    where fa.form_id = p_form_id
+      and fa.user_id = auth.uid()
+  );
+$$;
+
+drop policy if exists form_assignee_read on public.form;
+create policy form_assignee_read
+  on public.form
+  for select
+  using (public.assignee_can_read_form(id));
+
+create policy form_question_assignee_read
+  on public.form_question
+  for select
+  using (exists (
+    select 1
+    from public.form_question_map fqm
+    join public.form_assignment fa on fa.form_id = fqm.form_id
+    where fqm.question_code = form_question.question_code
+      and fa.user_id = auth.uid()
+  ));
+
+create policy form_assignment_assignee_read
+  on public.form_assignment
+  for select
+  using (user_id = auth.uid());
+
+create policy form_question_map_assignee_read
+  on public.form_question_map
+  for select
+  using (exists (
+    select 1 from public.form_assignment fa
+    where fa.form_id = form_question_map.form_id
+      and fa.user_id = auth.uid()
+  ));
+
+create policy form_assignment_self_insert
+  on public.form_assignment
+  for insert
+  with check (
+    user_id = auth.uid()
+    and exists (
+      select 1 from public.form f
+      where f.id = form_assignment.form_id
+        and public.current_user_role() = any (f.auto_assign)
+    )
+  );
+
+grant execute on function public.sync_auto_assigned_forms_for_user(uuid) to authenticated;
+grant execute on function public.sync_auto_assigned_forms_for_form(uuid) to authenticated;
+
+create policy form_submission_assignee_insert
+  on public.form_submission
+  for insert
+  with check (
+    (user_id is null or user_id = auth.uid())
+    and
+    profile_id in (
+      select p.id from public.profile p where p.user_id = auth.uid()
+    )
+    and exists (
+      select 1 from public.form_assignment fa
+      where fa.form_id = form_submission.form_id
+        and fa.user_id = auth.uid()
+    )
+  );
+
+create policy form_submission_assignee_read
+  on public.form_submission
+  for select
+  using (
+    profile_id in (
+      select p.id from public.profile p where p.user_id = auth.uid()
+    )
+  );
+
+create policy form_answer_assignee_insert
+  on public.form_answer
+  for insert
+  with check (
+    exists (
+      select 1 from public.form_submission fs
+      where fs.id = form_answer.submission_id
+        and fs.profile_id in (
+          select p.id from public.profile p where p.user_id = auth.uid()
+        )
+    )
+  );
+
+create policy form_answer_assignee_read
+  on public.form_answer
+  for select
+  using (exists (
+    select 1 from public.form_submission fs
+    where fs.id = form_answer.submission_id
+      and fs.profile_id in (
+        select p.id from public.profile p where p.user_id = auth.uid()
+      )
+  ));
+
+create policy form_assignment_assignee_update_status
+  on public.form_assignment
+  for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+-- Grants
+grant all on table public.form to supabase_auth_admin;
+grant all on table public.form_question to supabase_auth_admin;
+grant all on table public.form_question_map to supabase_auth_admin;
+grant all on table public.form_assignment to supabase_auth_admin;
+grant all on table public.form_submission to supabase_auth_admin;
+grant all on table public.form_answer to supabase_auth_admin;
+grant all on table public.sign_up_flow to supabase_auth_admin;
+
+revoke all on table public.form from authenticated, anon, public;
+revoke all on table public.form_question from authenticated, anon, public;
+revoke all on table public.form_question_map from authenticated, anon, public;
+revoke all on table public.form_assignment from authenticated, anon, public;
+revoke all on table public.form_submission from authenticated, anon, public;
+revoke all on table public.form_answer from authenticated, anon, public;
+revoke all on table public.sign_up_flow from authenticated, anon, public;
+
+grant all on table public.form to authenticated;
+grant all on table public.form_question to authenticated;
+grant all on table public.form_question_map to authenticated;
+grant all on table public.form_assignment to authenticated;
+grant all on table public.form_submission to authenticated;
+grant all on table public.form_answer to authenticated;
+grant select on table public.sign_up_flow to authenticated;
+
+grant usage on type form_question_type to authenticated, supabase_auth_admin;
+grant usage on type form_assignment_status to authenticated, supabase_auth_admin;
+grant execute on function public.sync_auto_assigned_forms_for_user(uuid) to authenticated;
+grant execute on function public.sync_auto_assigned_forms_for_form(uuid) to authenticated;
+
+grant execute on function public.custom_access_token_hook(jsonb) to supabase_auth_admin;
+revoke execute on function public.custom_access_token_hook(jsonb) from authenticated, anon, public;

@@ -1,15 +1,51 @@
 import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData } from "react-router";
+import { useEffect, useRef } from "react";
 
 import type { Route } from "./+types/root";
 import { Navbar } from "./components/navbar";
-import { getServerClient } from "./server";
+import { enforceOnboardingGuard } from "./lib/auth.server";
+import { createClient } from "./lib/supabase/server";
+import { createClient as createBrowserClient } from "./lib/supabase/client";
 import "./app.css";
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { client } = getServerClient(request);
-  const { data } = await client.auth.getUser();
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+  const allowlist = new Set([
+    "/login",
+    "/sign-up",
+    "/sign-up/invite",
+    "/forgot-password",
+    "/auth/sign-up-details",
+    "/auth/waiting-on-guardian",
+    "/auth/confirm",
+    "/auth/error",
+    "/",
+  ]);
+  const isMyFormsPath = pathname === "/my-forms" || pathname.startsWith("/my-forms/");
 
-  return { user: data.user ?? null };
+  if (!allowlist.has(pathname) && !isMyFormsPath) {
+    try {
+      await enforceOnboardingGuard(request, { allowMyForms: false });
+    } catch (err) {
+      throw err;
+    }
+  }
+
+  const { supabase } = createClient(request);
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+
+  const user = userData?.user ?? null;
+
+  if (userError || !user) {
+    return { user: null, role: null };
+  }
+
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const claims = claimsData?.claims as { user_role?: string } | null | undefined;
+  const role = typeof claims?.user_role === "string" ? claims.user_role : null;
+
+  return { user, role };
 }
 
 export const links: Route.LinksFunction = () => [
@@ -44,11 +80,41 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { user } = useLoaderData<typeof loader>();
+  const { user, role } = useLoaderData<typeof loader>();
+  const hashHandledRef = useRef(false);
+
+  useEffect(() => {
+    if (hashHandledRef.current) return;
+    if (typeof window === "undefined") return;
+    const { hash } = window.location;
+    if (!hash) return;
+
+    const params = new URLSearchParams(hash.replace(/^#/, ""));
+    const access_token = params.get("access_token");
+    const refresh_token = params.get("refresh_token");
+    const type = params.get("type");
+
+    if (!access_token || !refresh_token) return;
+    hashHandledRef.current = true;
+
+    const supabase = createBrowserClient();
+    supabase.auth
+      .setSession({ access_token, refresh_token })
+      .then(({ error }) => {
+        if (error) {
+          console.error("Unable to hydrate session", error.message);
+          return;
+        }
+        const cleanUrl = window.location.pathname + window.location.search;
+        window.history.replaceState({}, "", cleanUrl);
+        const destination = type === "invite" ? "/sign-up/invite" : "/login";
+        window.location.replace(destination);
+      });
+  }, []);
 
   return (
     <>
-      <Navbar user={user} />
+      <Navbar user={user} role={role} />
       <Outlet />
     </>
   );
