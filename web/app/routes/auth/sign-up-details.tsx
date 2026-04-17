@@ -56,7 +56,7 @@ type Condition = {
   truthy?: boolean
 }
 
-const isConditionMet = (condition: Json | null | undefined, answers: Record<string, Json>) => {
+const isConditionMet = (condition: Json | null | undefined, answers: Record<string, Json>): boolean => {
   if (!condition || typeof condition !== 'object' || Array.isArray(condition)) return true
   const normalized = condition as Condition
 
@@ -694,11 +694,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   let resolvedChildPid = childPid
 
   if (!resolvedGuardianPid && Object.keys(profileUpdates.guardian).length > 0) {
+    const guardianEmailValue = profileUpdates.guardian.email
+    const hasEmail =
+      typeof guardianEmailValue === 'string' && guardianEmailValue.trim().length > 0
     const guardianPayload = {
       role: 'guardian',
       ...profileUpdates.guardian,
+      ...(hasEmail ? { email: guardianEmailValue.trim() } : {}),
     }
-    const hasEmail = typeof guardianPayload.email === 'string' && guardianPayload.email.trim()
     const guardianResponse = hasEmail
       ? await adminClient
           .from('profile')

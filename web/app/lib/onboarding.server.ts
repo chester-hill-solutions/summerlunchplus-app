@@ -20,7 +20,7 @@ type Condition = {
   truthy?: boolean
 }
 
-const isConditionMet = (condition: Json | null | undefined, answers: Record<string, Json>) => {
+const isConditionMet = (condition: Json | null | undefined, answers: Record<string, Json>): boolean => {
   if (!condition || typeof condition !== 'object' || Array.isArray(condition)) return true
   const normalized = condition as Condition
 

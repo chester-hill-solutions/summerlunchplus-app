@@ -17,7 +17,9 @@ test('guardian sign-up creates a parent profile', async ({ page }) => {
   const now = new Date()
   const stamp = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(
     now.getDate()
-  ).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+  ).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(
+    now.getSeconds()
+  ).padStart(2, '0')}${String(now.getMilliseconds()).padStart(3, '0')}`
   const email = `sai+SlpE2eGuardian${stamp}@chsolutions.ca`
 
   await page.goto('/')
@@ -25,38 +27,33 @@ test('guardian sign-up creates a parent profile', async ({ page }) => {
   await page.locator('form').getByRole('link', { name: 'Sign up' }).click()
   await page.getByRole('button', { name: 'I am a Guardian' }).click()
 
-  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Gmail').fill(email)
   await page.getByLabel('Password', { exact: true }).fill('123456789123456')
   await page.getByLabel('Repeat Password').fill('123456789123456')
 
   await page.getByRole('button', { name: 'Next' }).click()
 
   await assertNoErrorAfterSubmit(page)
-  await expect(page.getByLabel('Guardian First Name')).toBeVisible()
+  await expect(page.getByLabel('Your first name')).toBeVisible()
 
-  await page.getByLabel('Guardian First Name').fill('Alex')
-  await page.getByLabel('Guardian Surname').fill('Rivera')
-  await page.getByLabel('Guardian Phone Number').fill('4165550109')
-  await page
-    .getByLabel('Please select which site you are attending from')
-    .selectOption('Thorncliffe Park -TNO')
-  await page.getByLabel('Guardian Postal Code').fill('A1A 1A1')
+  await page.getByLabel('Your first name').fill('Alex')
+  await page.getByLabel('Your surname').fill('Rivera')
+  await page.getByLabel('Your phone number').fill('4165550109')
 
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Save and continue' }).click()
 
   await assertNoErrorAfterSubmit(page)
 
-  await expect(
-    page.getByText('Will your child attend using their own email address?')
-  ).toBeVisible()
+  await expect(page.getByLabel('Child first name')).toBeVisible()
 
-  await page.getByLabel('No, they do not have their own email').check()
   await page.getByLabel('Child first name').fill('Jamie')
   await page.getByLabel('Child surname').fill('Rivera')
+  await page.getByLabel('Child date of birth').fill('2012-05-10')
+  await page.getByLabel('No - this is their 1st summer').check()
 
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Save and continue' }).click()
 
   await assertNoErrorAfterSubmit(page)
 
-  await expect(page).toHaveURL(/step=forms/)
+  await expect(page.getByText(/^Child Email$/)).toBeVisible()
 })
