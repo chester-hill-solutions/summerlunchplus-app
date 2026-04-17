@@ -10,6 +10,11 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  ALLOWED_EMAIL_PATTERN,
+  isAllowedEmailDomain,
+  normalizeEmail,
+} from '@/lib/email-domain'
+import {
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
   Link,
@@ -35,13 +40,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const formData = await request.formData()
   const role = formData.get('role') as 'guardian' | 'student'
-  const email = formData.get('email') as string
+  const email = normalizeEmail((formData.get('email') as string) ?? '')
   const password = formData.get('password') as string
   const repeatPassword = formData.get('repeat-password') as string
 
   if (!password) {
     return {
       error: 'Password is required',
+    }
+  }
+
+  if (!isAllowedEmailDomain(email)) {
+    return {
+      error: 'Please enter a valid Gmail address',
     }
   }
 
@@ -109,12 +120,14 @@ export default function SignUp() {
           <fetcher.Form method="post" className="flex flex-col gap-6">
             <input type="hidden" name="role" value={role} />
             <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Gmail</Label>
               <Input
                 id="email"
                 name="email"
                 type="email"
-                placeholder="m@example.com"
+                placeholder="name@gmail.com"
+                pattern={ALLOWED_EMAIL_PATTERN}
+                title="Use a valid Gmail address"
                 required
               />
             </div>

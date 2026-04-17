@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/card'
 import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import type { Database, Json } from '@/lib/database.types'
+import { isAllowedEmailDomain, normalizeEmail } from '@/lib/email-domain'
 import { getProfileSignUpCompletion } from '@/lib/onboarding.server'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { redirect, useFetcher, useLoaderData } from 'react-router'
@@ -554,9 +555,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const metadata = (question.metadata ?? {}) as Record<string, Json>
+    const inputType = typeof metadata.input_type === 'string' ? metadata.input_type : null
     const isOptional = metadata.optional === true
     const isRequired = !isOptional
-    const value = submittedAnswers[question.question_code]
+    let value = submittedAnswers[question.question_code]
+
+    if (inputType === 'email' && typeof value === 'string') {
+      const normalized = normalizeEmail(value)
+      if (!isAllowedEmailDomain(normalized)) {
+        return { error: 'Please enter a valid Gmail address' }
+      }
+      value = normalized
+      submittedAnswers[question.question_code] = normalized
+      combinedAnswers[question.question_code] = normalized
+    }
 
     if (question.type === 'checkbox' && isRequired) {
       if (value !== true) {

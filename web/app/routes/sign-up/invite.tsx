@@ -119,7 +119,7 @@ export default function InviteSignUp() {
         <fetcher.Form method="post" className="flex flex-col gap-6">
           <input type="hidden" name="inviteId" value={loaderData.inviteId ?? ''} />
           <div className="grid gap-2">
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="email">Gmail</Label>
             <Input id="email" name="email" value={loaderData.email} readOnly />
           </div>
           <div className="grid gap-2">

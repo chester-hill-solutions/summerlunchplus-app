@@ -4,6 +4,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { requireAuth } from '@/lib/auth.server'
+import {
+  ALLOWED_EMAIL_PATTERN,
+  isAllowedEmailDomain,
+  normalizeEmail,
+} from '@/lib/email-domain'
 import { isRoleAtLeast, ROLE_ORDER } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 
@@ -27,11 +32,14 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const formData = await request.formData()
-  const email = (formData.get('email') as string | null)?.trim() ?? ''
+  const email = normalizeEmail((formData.get('email') as string | null) ?? '')
   const role = (formData.get('role') as string | null)?.trim() ?? ''
 
   if (!email) {
-    return { error: 'Email is required' } satisfies ActionData
+    return { error: 'Gmail is required' } satisfies ActionData
+  }
+  if (!isAllowedEmailDomain(email)) {
+    return { error: 'Please enter a valid Gmail address' } satisfies ActionData
   }
   if (!ROLE_ORDER.includes(role as (typeof ROLE_ORDER)[number])) {
     return { error: 'Role is invalid' } satisfies ActionData
@@ -100,8 +108,16 @@ export default function InvitesTablePage() {
         <h2 className="text-lg font-semibold">Invite a user</h2>
         <fetcher.Form method="post" className="mt-4 grid gap-4 md:grid-cols-[1fr_200px_auto]">
           <div className="grid gap-2">
-            <Label htmlFor="invite-email">Email</Label>
-            <Input id="invite-email" name="email" type="email" placeholder="name@example.com" required />
+            <Label htmlFor="invite-email">Gmail</Label>
+            <Input
+              id="invite-email"
+              name="email"
+              type="email"
+              placeholder="name@gmail.com"
+              pattern={ALLOWED_EMAIL_PATTERN}
+              title="Use a valid Gmail address"
+              required
+            />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="invite-role">Role</Label>

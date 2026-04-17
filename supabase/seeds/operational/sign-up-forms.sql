@@ -111,7 +111,7 @@ select 'guardian_firstname', 'Guardian first name', 'text'::form_question_type, 
 union all
 select 'guardian_surname', 'Guardian surname', 'text'::form_question_type, '[]'::jsonb
 union all
-select 'guardian_email', 'Guardian email', 'text'::form_question_type, '[]'::jsonb
+select 'guardian_email', 'Guardian Gmail', 'text'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_phone', 'Guardian phone number', 'text'::form_question_type, '[]'::jsonb
 union all
@@ -139,13 +139,13 @@ select 'address_postal_code', 'Postal code', 'text'::form_question_type, '[]'::j
 union all
 select 'child_has_email', 'Does the child have their own email?', 'single_choice'::form_question_type, '["Yes","No"]'::jsonb
 union all
-select 'child_email', 'Child email', 'text'::form_question_type, '[]'::jsonb
+select 'child_email', 'Child Gmail', 'text'::form_question_type, '[]'::jsonb
 union all
 select 'additional_guardian_firstname', 'Additional guardian first name', 'text'::form_question_type, '[]'::jsonb
 union all
 select 'additional_guardian_surname', 'Additional guardian surname', 'text'::form_question_type, '[]'::jsonb
 union all
-select 'additional_guardian_email', 'Additional guardian email', 'text'::form_question_type, '[]'::jsonb
+select 'additional_guardian_email', 'Additional guardian Gmail', 'text'::form_question_type, '[]'::jsonb
 union all
 select 'household_total_people', 'Total people in the household', 'text'::form_question_type, '[]'::jsonb
 union all
