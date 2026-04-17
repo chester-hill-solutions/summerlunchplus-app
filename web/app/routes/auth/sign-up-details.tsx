@@ -12,6 +12,7 @@ import FormQuestion, { type FormQuestionData } from '@/components/forms/form-que
 import type { Database, Json } from '@/lib/database.types'
 import { isAllowedEmailDomain, normalizeEmail } from '@/lib/email-domain'
 import { getProfileSignUpCompletion } from '@/lib/onboarding.server'
+import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { redirect, useFetcher, useLoaderData } from 'react-router'
 import { type FormEventHandler, useEffect, useMemo, useRef, useState } from 'react'
@@ -138,7 +139,13 @@ const parseFormValue = (question: FormQuestionData, formData: FormData) => {
   return rawValue
 }
 
-const buildAnswerMapFromSubmissions = (submissions: Array<{ form_id: string | null; form_answer: Array<{ question_code: string | null; value: Json }> | null }>) => {
+const buildAnswerMapFromSubmissions = (
+  submissions: Array<{
+    form_id: string | null
+    submitted_at: string | null
+    form_answer: Array<{ question_code: string | null; value: Json }> | null
+  }>
+) => {
   const answers: Record<string, Json> = {}
   const byForm: Record<string, Record<string, Json>> = {}
 
@@ -206,8 +213,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const { data: submissions } = await supabase
     .from('form_submission')
-    .select('form_id, form_answer ( question_code, value )')
+    .select('form_id, submitted_at, form_answer ( question_code, value )')
     .eq('profile_id', pid)
+    .order('submitted_at', { ascending: true })
   const submissionData = buildAnswerMapFromSubmissions(submissions ?? [])
 
   const { data: flowEntries } = await supabase
@@ -531,8 +539,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const { data: submissions } = await supabase
     .from('form_submission')
-    .select('form_id, form_answer ( question_code, value )')
+    .select('form_id, submitted_at, form_answer ( question_code, value )')
     .eq('profile_id', pid)
+    .order('submitted_at', { ascending: true })
   const submissionData = buildAnswerMapFromSubmissions(submissions ?? [])
 
   const submittedAnswers: Record<string, Json> = {}
@@ -589,15 +598,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
+  const requestMetadata = extractRequestMetadata(request)
   const { data: submission, error: submissionError } = await supabase
     .from('form_submission')
-    .upsert(
-      {
-        form_id: formId,
-        profile_id: pid,
-      },
-      { onConflict: 'form_id,profile_id' }
-    )
+    .insert({
+      form_id: formId,
+      profile_id: pid,
+      user_id: currentUser.user.id,
+      ip_address: requestMetadata.ipAddress,
+      forwarded_for: requestMetadata.forwardedFor,
+      user_agent: requestMetadata.userAgent,
+      accept_language: requestMetadata.acceptLanguage,
+      referer: requestMetadata.referer,
+      origin: requestMetadata.origin,
+      metadata: { source: 'signup_details' },
+    })
     .select('id')
     .single()
   if (submissionError || !submission?.id) {

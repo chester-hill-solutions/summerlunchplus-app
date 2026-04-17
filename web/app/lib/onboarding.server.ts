@@ -49,7 +49,11 @@ const isConditionMet = (condition: Json | null | undefined, answers: Record<stri
 }
 
 const buildAnswerMapFromSubmissions = (
-  submissions: Array<{ form_id: string | null; form_answer: Array<{ question_code: string | null; value: Json }> | null }>
+  submissions: Array<{
+    form_id: string | null
+    submitted_at: string | null
+    form_answer: Array<{ question_code: string | null; value: Json }> | null
+  }>
 ) => {
   const answers: Record<string, Json> = {}
 
@@ -71,8 +75,9 @@ export const getProfileSignUpCompletion = async (
 ): Promise<boolean> => {
   const { data: submissions } = await supabase
     .from('form_submission')
-    .select('form_id, form_answer ( question_code, value )')
+    .select('form_id, submitted_at, form_answer ( question_code, value )')
     .eq('profile_id', profileId)
+    .order('submitted_at', { ascending: true })
 
   const answers = buildAnswerMapFromSubmissions(submissions ?? [])
   const submittedFormIds = new Set((submissions ?? []).map(submission => submission.form_id).filter(Boolean))

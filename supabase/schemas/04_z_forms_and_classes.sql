@@ -60,9 +60,22 @@ create table public.form_submission (
   id uuid primary key default gen_random_uuid(),
   form_id uuid not null references public.form (id) on delete cascade,
   profile_id uuid not null references public.profile (id) on delete cascade,
+  user_id uuid references auth.users (id) on delete set null,
+  ip_address inet,
+  forwarded_for text,
+  user_agent text,
+  accept_language text,
+  referer text,
+  origin text,
   submitted_at timestamptz not null default now(),
-  unique (form_id, profile_id)
+  metadata jsonb not null default '{}'::jsonb
 );
+
+create index form_submission_profile_form_submitted_idx
+  on public.form_submission (profile_id, form_id, submitted_at desc);
+
+create index form_submission_user_submitted_idx
+  on public.form_submission (user_id, submitted_at desc);
 
 create table public.form_answer (
   id uuid primary key default gen_random_uuid(),
@@ -657,6 +670,8 @@ create policy form_submission_assignee_insert
   on public.form_submission
   for insert
   with check (
+    (user_id is null or user_id = auth.uid())
+    and
     profile_id in (
       select p.id from public.profile p where p.user_id = auth.uid()
     )

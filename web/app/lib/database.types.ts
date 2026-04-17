@@ -292,22 +292,46 @@ export type Database = {
       }
       form_submission: {
         Row: {
+          accept_language: string | null
+          forwarded_for: string | null
           form_id: string
           id: string
+          ip_address: string | null
+          metadata: Json
+          origin: string | null
           profile_id: string
+          referer: string | null
           submitted_at: string
+          user_agent: string | null
+          user_id: string | null
         }
         Insert: {
+          accept_language?: string | null
+          forwarded_for?: string | null
           form_id: string
           id?: string
+          ip_address?: string | null
+          metadata?: Json
+          origin?: string | null
           profile_id: string
+          referer?: string | null
           submitted_at?: string
+          user_agent?: string | null
+          user_id?: string | null
         }
         Update: {
+          accept_language?: string | null
+          forwarded_for?: string | null
           form_id?: string
           id?: string
+          ip_address?: string | null
+          metadata?: Json
+          origin?: string | null
           profile_id?: string
+          referer?: string | null
           submitted_at?: string
+          user_agent?: string | null
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -322,6 +346,13 @@ export type Database = {
             columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_submission_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -456,6 +487,62 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      login_event: {
+        Row: {
+          accept_language: string | null
+          email: string | null
+          event_at: string
+          forwarded_for: string | null
+          id: string
+          ip_address: string | null
+          login_method: string
+          metadata: Json
+          origin: string | null
+          referer: string | null
+          success: boolean
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          accept_language?: string | null
+          email?: string | null
+          event_at?: string
+          forwarded_for?: string | null
+          id?: string
+          ip_address?: string | null
+          login_method: string
+          metadata?: Json
+          origin?: string | null
+          referer?: string | null
+          success?: boolean
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          accept_language?: string | null
+          email?: string | null
+          event_at?: string
+          forwarded_for?: string | null
+          id?: string
+          ip_address?: string | null
+          login_method?: string
+          metadata?: Json
+          origin?: string | null
+          referer?: string | null
+          success?: boolean
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "login_event_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       person_guardian_child: {
         Row: {
@@ -1085,4 +1172,3 @@ export const Constants = {
     },
   },
 } as const
-

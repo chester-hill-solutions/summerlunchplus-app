@@ -8,6 +8,7 @@ import FormQuestion, { type FormQuestionData } from "@/components/forms/form-que
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { enforceOnboardingGuard } from "@/lib/auth.server";
+import { extractRequestMetadata } from "@/lib/request-metadata.server";
 import { createClient } from "@/lib/supabase/server";
 
 type Assignment = {
@@ -94,6 +95,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     .select("id, form_id, submitted_at")
     .eq("form_id", formId)
     .eq("profile_id", profile.id)
+    .order("submitted_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   assignment.submission = submission ? { ...submission, submitted_at: submission.submitted_at ?? "" } : null;
 
@@ -187,11 +190,23 @@ export async function action({ request, params }: Route.ActionArgs) {
     });
   }
 
+  const requestMetadata = extractRequestMetadata(request);
   const { data: submissionRows, error: submissionError } = await supabase
     .from("form_submission")
-    .upsert({ form_id: formId, profile_id: profile.id }, { onConflict: "form_id,profile_id" })
+    .insert({
+      form_id: formId,
+      profile_id: profile.id,
+      user_id: auth.user.id,
+      ip_address: requestMetadata.ipAddress,
+      forwarded_for: requestMetadata.forwardedFor,
+      user_agent: requestMetadata.userAgent,
+      accept_language: requestMetadata.acceptLanguage,
+      referer: requestMetadata.referer,
+      origin: requestMetadata.origin,
+      metadata: { source: "my_forms" },
+    })
     .select("id")
-    .maybeSingle();
+    .single();
 
   if (submissionError || !submissionRows) {
     return new Response(JSON.stringify({ error: "Failed to save submission" }), {
@@ -226,7 +241,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
   }
 
-  const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+  await supabase.auth.refreshSession();
 
   throw redirect("/my-forms", { headers });
 }

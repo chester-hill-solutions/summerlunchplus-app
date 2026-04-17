@@ -11,6 +11,7 @@ import {
 import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
+import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import type { Json } from '@/lib/database.types'
@@ -110,6 +111,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     .select('id')
     .eq('form_id', formRow.id)
     .eq('profile_id', familyProfileId)
+    .order('submitted_at', { ascending: false })
+    .limit(1)
     .maybeSingle()
 
   let answers: Record<string, Json> = {}
@@ -213,15 +216,21 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
   }
 
+  const requestMetadata = extractRequestMetadata(request)
   const { data: submission, error: submissionError } = await adminClient
     .from('form_submission')
-    .upsert(
-      {
-        form_id: formRow.id,
-        profile_id: familyProfileId,
-      },
-      { onConflict: 'form_id,profile_id' }
-    )
+    .insert({
+      form_id: formRow.id,
+      profile_id: familyProfileId,
+      user_id: auth.user.id,
+      ip_address: requestMetadata.ipAddress,
+      forwarded_for: requestMetadata.forwardedFor,
+      user_agent: requestMetadata.userAgent,
+      accept_language: requestMetadata.acceptLanguage,
+      referer: requestMetadata.referer,
+      origin: requestMetadata.origin,
+      metadata: { source: 'semester_pre_survey' },
+    })
     .select('id')
     .single()
 

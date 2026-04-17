@@ -1,5 +1,6 @@
 
 import { createClient } from '@/lib/supabase/server'
+import { recordLoginEvent } from '@/lib/login-events.server'
 import { type EmailOtpType } from '@supabase/supabase-js'
 import { type LoaderFunctionArgs, redirect } from 'react-router'
 
@@ -17,6 +18,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       token_hash,
     })
     if (!error) {
+      const { data: userData } = await supabase.auth.getUser()
+      if (userData.user) {
+        await recordLoginEvent({
+          supabase,
+          request,
+          userId: userData.user.id,
+          email: userData.user.email ?? null,
+          loginMethod: `otp:${type}`,
+        })
+      }
       return redirect(next, { headers })
     } else {
       return redirect(`/auth/error?error=${error?.message}`)

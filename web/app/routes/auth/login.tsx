@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { recordLoginEvent } from '@/lib/login-events.server'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -46,6 +47,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return {
       error: error instanceof Error ? error.message : 'An error occurred',
     }
+  }
+
+  const { data: userData } = await supabase.auth.getUser()
+  if (userData.user) {
+    await recordLoginEvent({
+      supabase,
+      request,
+      userId: userData.user.id,
+      email: userData.user.email ?? null,
+      loginMethod: 'password',
+    })
   }
 
   // Update this route to redirect to an authenticated route. The user already has an active session.

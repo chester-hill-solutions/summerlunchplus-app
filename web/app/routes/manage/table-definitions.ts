@@ -190,8 +190,21 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'form-submission': {
     label: 'Form Submissions',
     table: 'form_submission',
-    select: 'id, form_id, profile_id, submitted_at',
-    columns: ['form_name', 'profile_display', 'submitted_at'],
+    select:
+      'id, form_id, profile_id, user_id, submitted_at, ip_address, forwarded_for, user_agent, accept_language, referer, origin, metadata',
+    columns: [
+      'form_name',
+      'profile_display',
+      'user_email',
+      'submitted_at',
+      'ip_address',
+      'forwarded_for',
+      'user_agent',
+      'accept_language',
+      'referer',
+      'origin',
+      'metadata',
+    ],
     order: 'submitted_at',
     lookupMappings: [
       { keyColumn: 'form_id', table: 'form', valueColumn: 'name', resultColumn: 'form_name' },
@@ -202,6 +215,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         select: 'id, firstname, surname, email',
         format: 'profile_display',
       },
+      { keyColumn: 'user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'user_email' },
     ],
   },
   'form-answer': {
@@ -247,6 +261,30 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     lookupMappings: [
       { keyColumn: 'inviter_user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'inviter_user_email' },
       { keyColumn: 'invitee_user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'invitee_user_email' },
+    ],
+  },
+  'login-event': {
+    label: 'Login Events',
+    table: 'login_event',
+    select:
+      'id, user_id, email, login_method, success, event_at, ip_address, forwarded_for, user_agent, accept_language, referer, origin, metadata',
+    columns: [
+      'user_email',
+      'email',
+      'login_method',
+      'success',
+      'event_at',
+      'ip_address',
+      'forwarded_for',
+      'user_agent',
+      'accept_language',
+      'referer',
+      'origin',
+      'metadata',
+    ],
+    order: 'event_at',
+    lookupMappings: [
+      { keyColumn: 'user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'user_email' },
     ],
   },
 }

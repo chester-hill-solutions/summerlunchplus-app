@@ -61,12 +61,19 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { data: submissionsData } = await supabase
     .from("form_submission")
     .select("id, form_id, submitted_at")
-    .eq("profile_id", profile.id);
+    .eq("profile_id", profile.id)
+    .order("submitted_at", { ascending: false });
   const submissions = submissionsData ?? [];
+  const latestSubmissionByForm = new Map<string, (typeof submissions)[number]>();
+  for (const submission of submissions) {
+    if (!latestSubmissionByForm.has(submission.form_id)) {
+      latestSubmissionByForm.set(submission.form_id, submission);
+    }
+  }
 
   const assignments: Assignment[] = assignmentsRaw.map((a: any) => {
     const formRaw = a.form;
-    const submission = submissions.find((s) => s.form_id === formRaw?.id) ?? null;
+    const submission = latestSubmissionByForm.get(String(formRaw?.id ?? "")) ?? null;
     return {
       id: String(a.id),
       status: String(a.status),

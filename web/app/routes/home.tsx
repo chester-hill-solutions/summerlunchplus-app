@@ -179,12 +179,14 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
-  const { data: preSurveySubmission } = await adminClient
-    .from('form_submission')
-    .select('id')
-    .eq('form_id', preSurveyForm.id)
-    .eq('profile_id', targetProfileId)
-    .maybeSingle()
+    const { data: preSurveySubmission } = await adminClient
+      .from('form_submission')
+      .select('id')
+      .eq('form_id', preSurveyForm.id)
+      .eq('profile_id', targetProfileId)
+      .order('submitted_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
   if (!preSurveySubmission?.id) {
     return {

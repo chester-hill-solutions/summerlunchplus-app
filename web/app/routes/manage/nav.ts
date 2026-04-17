@@ -13,6 +13,7 @@ export const teamPages = [
   { to: '/manage/form-question-map', label: 'Form question map', description: 'Questions mapped to forms and ordering.' },
   { to: '/manage/form-assignment', label: 'Form assignments', description: 'Assignments per user.' },
   { to: '/manage/form-submission', label: 'Form submissions', description: 'User response metadata.' },
+  { to: '/manage/login-event', label: 'Login events', description: 'Successful sign-in metadata and source context.' },
   { to: '/manage/form-answer', label: 'Form answers', description: 'Individual answers with JSON value.' },
   { to: '/manage/gift-cards', label: 'Gift cards', description: 'Upload and process gift card batches.' },
   { to: '/manage/role-permission', label: 'Role permissions', description: 'Permissions assigned to each role.' },
