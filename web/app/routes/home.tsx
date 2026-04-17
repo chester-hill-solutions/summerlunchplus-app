@@ -112,10 +112,11 @@ export async function action({ request }: Route.ActionArgs) {
   const { error } = await supabase.from('workshop_enrollment').upsert(
     {
       workshop_id: workshopId,
+      semester_id: workshopRow.semester_id,
       profile_id: targetProfileId,
       status: 'pending',
     },
-    { onConflict: 'workshop_id,profile_id' }
+    { onConflict: 'semester_id,profile_id' }
   )
 
   if (error) {
