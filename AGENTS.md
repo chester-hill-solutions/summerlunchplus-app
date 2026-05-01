@@ -138,7 +138,7 @@ Update it when you add commands, tests, or conventions that agents need to know.
 - Test new or modified routes in `npm run dev` before pushing; the dev server warns about missing route files early.
 
 15. Suggested Next Steps
-- When you add tests, document the command you used (e.g., `npm run test:e2e -- web/tests/e2e/create-parent.spec.ts`).
+- When you add tests, document the command you used (e.g., `npm run test:e2e -- web/tests/e2e/create-guardian.spec.ts`).
 - Run `npm run typecheck` after touching routes and loaders, and mention the result in your PR description.
 - If you make styling or UX changes, manually verify on both desktop and mobile viewports via the dev server.
 - Keep this handbook updated with any future tooling or workflow additions so future agents can ramp quickly.
