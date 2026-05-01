@@ -9,6 +9,9 @@ import { createClient as createBrowserClient } from "./lib/supabase/client";
 import "./app.css";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL ?? '';
+  const supabaseAnonKey = process.env.VITE_SUPABASE_PUBLISHABLE_OR_ANON_KEY ?? '';
+
   const url = new URL(request.url);
   const pathname = url.pathname;
   const allowlist = new Set([
@@ -38,14 +41,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   const user = userData?.user ?? null;
 
   if (userError || !user) {
-    return { user: null, role: null };
+    return { user: null, role: null, supabaseUrl, supabaseAnonKey };
   }
 
   const { data: claimsData } = await supabase.auth.getClaims();
   const claims = claimsData?.claims as { user_role?: string } | null | undefined;
   const role = typeof claims?.user_role === "string" ? claims.user_role : null;
 
-  return { user, role };
+  return { user, role, supabaseUrl, supabaseAnonKey };
 }
 
 export const links: Route.LinksFunction = () => [
@@ -80,7 +83,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { user, role } = useLoaderData<typeof loader>();
+  const { user, role, supabaseUrl, supabaseAnonKey } = useLoaderData<typeof loader>();
   const hashHandledRef = useRef(false);
 
   useEffect(() => {
@@ -97,7 +100,7 @@ export default function App() {
     if (!access_token || !refresh_token) return;
     hashHandledRef.current = true;
 
-    const supabase = createBrowserClient();
+    const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
     supabase.auth
       .setSession({ access_token, refresh_token })
       .then(({ error }) => {
@@ -110,7 +113,7 @@ export default function App() {
         const destination = type === "invite" ? "/sign-up/invite" : "/login";
         window.location.replace(destination);
       });
-  }, []);
+  }, [supabaseAnonKey, supabaseUrl]);
 
   return (
     <>
