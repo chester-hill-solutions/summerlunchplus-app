@@ -1,10 +1,16 @@
-import { Link, useFetcher, useLoaderData } from 'react-router'
+import { Link, redirect, useFetcher, useLoaderData } from 'react-router'
 
 import type { Route } from './+types/home'
 import { Button } from '@/components/ui/button'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
+import { isRoleAtLeast } from '@/lib/roles'
+import {
+  buildWorkshopCapacityMap,
+  getWorkshopEnrollmentAction,
+  type WorkshopCapacitySnapshot,
+} from '@/lib/workshop-capacity'
 import { createClient } from '@/lib/supabase/server'
 import {
   Table,
@@ -20,6 +26,10 @@ const formatDate = (value: string) =>
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await enforceOnboardingGuard(request)
+  if (isRoleAtLeast(auth.claims.role, 'instructor')) {
+    throw redirect('/manage', { headers: auth.headers })
+  }
+
   const { supabase } = createClient(request)
   const now = new Date().toISOString()
 
@@ -27,7 +37,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const { data: workshops, error: workshopError } = await supabase
     .from('workshop')
-    .select('id, description, enrollment_open_at, enrollment_close_at, semester_id')
+    .select('id, description, enrollment_open_at, enrollment_close_at, semester_id, capacity, wait_list_capacity')
     .gte('enrollment_close_at', now)
     .order('enrollment_open_at', { ascending: true })
   if (workshopError) {
@@ -42,6 +52,21 @@ export async function loader({ request }: Route.LoaderArgs) {
     .from('workshop_enrollment')
     .select('workshop_id, status, semester_id, profile_id')
     .in('profile_id', family.familyProfileIds)
+
+  const workshopIds = (workshops ?? []).map(workshop => workshop.id)
+  const { data: workshopEnrollments } = workshopIds.length
+    ? await supabase
+        .from('workshop_enrollment')
+        .select('workshop_id, status')
+        .in('workshop_id', workshopIds)
+    : { data: [] }
+
+  const workshopCapacityById = Object.fromEntries(
+    Array.from(
+      buildWorkshopCapacityMap(workshops ?? [], workshopEnrollments ?? []).entries(),
+      ([workshopId, snapshot]) => [workshopId, snapshot]
+    )
+  )
 
   const semesterIds = Array.from(
     new Set((workshops ?? []).map(workshop => workshop.semester_id).filter(Boolean))
@@ -122,6 +147,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     semesters: semesters ?? [],
     preSurveyBySemester,
     enrollments: enrollments ?? [],
+    workshopCapacityById,
   }
 }
 
@@ -139,12 +165,20 @@ export async function action({ request }: Route.ActionArgs) {
 
   const { data: workshopRow, error: workshopError } = await supabase
     .from('workshop')
-    .select('id, semester_id')
+    .select('id, semester_id, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity')
     .eq('id', workshopId)
     .single()
 
   if (workshopError || !workshopRow?.semester_id) {
     return { error: workshopError?.message ?? 'Unable to find workshop' }
+  }
+
+  const nowIso = new Date().toISOString()
+  const enrollmentOpenAt = workshopRow.enrollment_open_at
+  const enrollmentCloseAt = workshopRow.enrollment_close_at
+  const isOpen = (!enrollmentOpenAt || nowIso >= enrollmentOpenAt) && (!enrollmentCloseAt || nowIso <= enrollmentCloseAt)
+  if (!isOpen) {
+    return { error: 'Enrollment is closed for this workshop' }
   }
 
   const { data: existingEnrollment } = await supabase
@@ -195,12 +229,39 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
+  const { data: workshopEnrollments } = await supabase
+    .from('workshop_enrollment')
+    .select('workshop_id, status')
+    .eq('workshop_id', workshopId)
+
+  const capacitySnapshot = buildWorkshopCapacityMap(
+    [
+      {
+        id: workshopId,
+        capacity: workshopRow.capacity,
+        wait_list_capacity: workshopRow.wait_list_capacity,
+      },
+    ],
+    workshopEnrollments ?? []
+  ).get(workshopId)
+
+  if (!capacitySnapshot) {
+    return { error: 'Unable to evaluate workshop capacity' }
+  }
+
+  const nextAction = getWorkshopEnrollmentAction(capacitySnapshot)
+  if (nextAction === 'full') {
+    return { error: 'This workshop and its waitlist are full' }
+  }
+
+  const targetStatus = nextAction === 'waitlist' ? 'waitlisted' : 'pending'
+
   const { error } = await supabase.from('workshop_enrollment').upsert(
     {
       workshop_id: workshopId,
       semester_id: workshopRow.semester_id,
       profile_id: targetProfileId,
-      status: 'pending',
+      status: targetStatus,
     },
     { onConflict: 'semester_id,profile_id' }
   )
@@ -209,7 +270,10 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: error.message }
   }
 
-  return { success: true }
+  return {
+    success: true,
+    successMessage: targetStatus === 'waitlisted' ? 'Added to waitlist.' : 'Enrollment request submitted.',
+  }
 }
 
 type WorkshopRow = {
@@ -218,6 +282,8 @@ type WorkshopRow = {
   enrollment_open_at: string
   enrollment_close_at: string
   semester_id: string
+  capacity: number
+  wait_list_capacity: number
   workshop_start: string
   workshop_end: string
 }
@@ -231,10 +297,11 @@ type LoaderData = {
   semesters: { id: string; starts_at: string; ends_at: string }[]
   preSurveyBySemester: Record<string, { required: boolean; completed: boolean; preSurveyPath: string | null }>
   enrollments: { workshop_id: string | null; status: string; semester_id: string; profile_id: string | null }[]
+  workshopCapacityById: Record<string, WorkshopCapacitySnapshot>
 }
 
 export default function Home() {
-  const { workshops, enrollments, now, family, semesters, preSurveyBySemester } = useLoaderData<LoaderData>()
+  const { workshops, enrollments, now, family, semesters, preSurveyBySemester, workshopCapacityById } = useLoaderData<LoaderData>()
   const fetcher = useFetcher<typeof action>()
   const statusByWorkshop = new Map<string, string>()
   const enrollmentBySemester = new Map<string, string>()
@@ -350,6 +417,8 @@ export default function Home() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Workshop</TableHead>
+                    <TableHead>Seats</TableHead>
+                    <TableHead>Waitlist</TableHead>
                     <TableHead>Enrollment starts</TableHead>
                     <TableHead>Enrollment ends</TableHead>
                     <TableHead>Workshop starts</TableHead>
@@ -361,53 +430,101 @@ export default function Home() {
                   {semesterWorkshops.map(workshop => {
                     const enrollmentStatus = statusByWorkshop.get(workshop.id)
                     const isOpen = now >= workshop.enrollment_open_at && now <= workshop.enrollment_close_at
+                    const capacitySnapshot = workshopCapacityById[workshop.id]
+                    const enrollmentAction = capacitySnapshot
+                      ? getWorkshopEnrollmentAction(capacitySnapshot)
+                      : 'enroll'
                     const semesterStatus = enrollmentBySemester.get(workshop.semester_id)
                     const familyEnrolledThisSemester = Boolean(semesterStatus)
+                    const isPending = enrollmentStatus === 'pending'
+                    const isWaitlisted = enrollmentStatus === 'waitlisted'
+                    const isApproved = enrollmentStatus === 'approved'
                     const disabled =
                       !preSurveyComplete ||
                       !isOpen ||
-                      enrollmentStatus === 'pending' ||
-                      enrollmentStatus === 'approved' ||
-                      familyEnrolledThisSemester
+                      isPending ||
+                      isWaitlisted ||
+                      isApproved ||
+                      familyEnrolledThisSemester ||
+                      enrollmentAction === 'full'
+                    const rowAccentClass = isPending
+                      ? 'bg-amber-50/60'
+                      : isWaitlisted
+                      ? 'bg-sky-50/60'
+                      : ''
 
                     return (
-                      <TableRow key={workshop.id}>
+                      <TableRow key={workshop.id} className={rowAccentClass}>
                         <TableCell>
                           <p className="font-medium text-slate-900">{workshop.description}</p>
+                        </TableCell>
+                        <TableCell>
+                          {capacitySnapshot
+                            ? `${capacitySnapshot.approvedCount} / ${capacitySnapshot.capacity}`
+                            : `0 / ${workshop.capacity}`}
+                        </TableCell>
+                        <TableCell>
+                          {capacitySnapshot
+                            ? `${capacitySnapshot.waitlistedCount} / ${capacitySnapshot.waitListCapacity}`
+                            : `0 / ${workshop.wait_list_capacity}`}
                         </TableCell>
                         <TableCell>{formatDate(workshop.enrollment_open_at)}</TableCell>
                         <TableCell>{formatDate(workshop.enrollment_close_at)}</TableCell>
                         <TableCell>{workshop.workshop_start ? formatDate(workshop.workshop_start) : 'TBD'}</TableCell>
                         <TableCell>{workshop.workshop_end ? formatDate(workshop.workshop_end) : 'TBD'}</TableCell>
                         <TableCell>
-                          <fetcher.Form method="post" className="flex flex-col gap-1">
-                            <input type="hidden" name="workshopId" value={workshop.id} />
-                            <Button
-                              type="submit"
-                              variant={disabled ? 'ghost' : 'default'}
-                              size="sm"
-                              disabled={disabled}
-                            >
-                              {enrollmentStatus === 'approved'
-                                ? 'Enrolled'
-                                : enrollmentStatus === 'pending'
-                                ? 'Pending'
-                                : familyEnrolledThisSemester
-                                ? 'Already Enrolled'
-                                : !preSurveyComplete
-                                ? 'Complete Pre-Survey'
-                                : isOpen
-                                ? 'Enroll'
-                                : 'Closed'}
-                            </Button>
-                            <p className="text-xs text-muted-foreground">
-                              {familyEnrolledThisSemester
-                                ? 'Family already enrolled this semester'
-                                : !preSurveyComplete
-                                ? 'Pre-semester family survey required'
-                                : `Status: ${enrollmentStatus ?? 'not enrolled'}`}
-                            </p>
-                          </fetcher.Form>
+                          {isPending ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="inline-flex w-fit items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+                                Pending Review
+                              </span>
+                              <p className="text-xs text-amber-900">Staff will review this request soon.</p>
+                            </div>
+                          ) : isWaitlisted ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="inline-flex w-fit items-center rounded-full border border-sky-300 bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-900">
+                                On Waitlist
+                              </span>
+                              <p className="text-xs text-sky-900">You will be notified if a seat opens up.</p>
+                            </div>
+                          ) : isApproved ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="inline-flex w-fit items-center rounded-full border border-emerald-300 bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-900">
+                                Enrolled
+                              </span>
+                            </div>
+                          ) : (
+                            <fetcher.Form method="post" className="flex flex-col gap-1">
+                              <input type="hidden" name="workshopId" value={workshop.id} />
+                              <Button
+                                type="submit"
+                                variant={disabled ? 'ghost' : 'default'}
+                                size="sm"
+                                disabled={disabled}
+                              >
+                                {familyEnrolledThisSemester
+                                  ? 'Already Enrolled'
+                                  : !preSurveyComplete
+                                  ? 'Complete Pre-Survey'
+                                  : isOpen
+                                  ? enrollmentAction === 'waitlist'
+                                    ? 'Join Waitlist'
+                                    : enrollmentAction === 'full'
+                                    ? 'Full'
+                                    : 'Enroll'
+                                  : 'Closed'}
+                              </Button>
+                              <p className="text-xs text-muted-foreground">
+                                {familyEnrolledThisSemester
+                                  ? 'Family already enrolled this semester'
+                                  : !preSurveyComplete
+                                  ? 'Pre-semester family survey required'
+                                  : enrollmentAction === 'full'
+                                  ? 'Workshop and waitlist are full'
+                                  : `Status: ${enrollmentStatus ?? 'not enrolled'}`}
+                              </p>
+                            </fetcher.Form>
+                          )}
                         </TableCell>
                       </TableRow>
                     )
@@ -428,6 +545,7 @@ export default function Home() {
           ) : null}
         </div>
       ) : null}
+      {fetcher.data?.successMessage ? <p className="pt-3 text-sm text-emerald-600">{fetcher.data.successMessage}</p> : null}
     </main>
   )
 }

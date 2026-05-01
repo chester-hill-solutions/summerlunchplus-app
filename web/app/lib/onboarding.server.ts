@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database, Json } from '@/lib/database.types'
 import { adminClient } from '@/lib/supabase/adminClient'
+import { getSignUpFlowContext } from '@/lib/sign-up-flow-context.server'
 
 export type SignUpDetailsStatus = {
   isComplete: boolean
@@ -117,6 +118,34 @@ export const getProfileSignUpCompletion = async (
   return true
 }
 
+export const getProfileSignUpCompletionWithContext = async (
+  supabase: SupabaseClient<Database>,
+  profileId: string,
+  role: Database['public']['Enums']['app_role']
+): Promise<boolean> => {
+  if (role !== 'guardian' && role !== 'student') {
+    return getProfileSignUpCompletion(supabase, profileId, role)
+  }
+
+  const { data: profile } = await supabase
+    .from('profile')
+    .select('email')
+    .eq('id', profileId)
+    .maybeSingle()
+
+  const signUpFlowContext = await getSignUpFlowContext(supabase, {
+    email: profile?.email ?? null,
+    role,
+  })
+
+  return getProfileSignUpCompletion(
+    supabase,
+    profileId,
+    role,
+    signUpFlowContext.skipSlugs.length ? { skipSlugs: signUpFlowContext.skipSlugs } : undefined
+  )
+}
+
 export async function getSignUpDetailsStatus(
   supabase: SupabaseClient<Database>,
   userId: string,
@@ -141,24 +170,10 @@ export async function getSignUpDetailsStatus(
   if (!role || role === 'unassigned') {
     return { isComplete: false, profileId: profile.id, role, waitingOnGuardians: false }
   }
-  const invitedStudent =
-    role === 'student' &&
-    Boolean(
-      profile.email &&
-        (await supabase
-          .from('invites')
-          .select('id')
-          .eq('invitee_email', profile.email)
-          .eq('role', 'student')
-          .limit(1)
-          .maybeSingle())?.data?.id
-    )
-
-  const formsComplete = await getProfileSignUpCompletion(
+  const formsComplete = await getProfileSignUpCompletionWithContext(
     supabase,
     profile.id,
-    role as Database['public']['Enums']['app_role'],
-    invitedStudent ? { skipSlugs: ['guardian_details'] } : undefined
+    role as Database['public']['Enums']['app_role']
   )
 
   if (role === 'student') {
@@ -179,7 +194,7 @@ export async function getSignUpDetailsStatus(
 
     const guardianCompletions = await Promise.all(
       guardianIds.map(guardianId =>
-        getProfileSignUpCompletion(adminClient, guardianId, 'guardian')
+        getProfileSignUpCompletionWithContext(adminClient, guardianId, 'guardian')
       )
     )
     const hasCompleteGuardian = guardianCompletions.some(Boolean)

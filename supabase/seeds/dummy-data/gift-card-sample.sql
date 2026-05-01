@@ -22,8 +22,8 @@ with last_year_semester as (
     '2025 Summer Workshop - Sample',
     '2025-02-01T00:00:00Z',
     '2025-05-15T23:59:59Z',
-    25,
-    5
+    5,
+    2
   )
   on conflict (id) do update
     set semester_id = excluded.semester_id,

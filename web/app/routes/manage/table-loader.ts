@@ -2,6 +2,14 @@ import { createClient } from '@/lib/supabase/server'
 import { TABLE_DEFINITIONS } from './table-definitions'
 import type { LoaderFunctionArgs } from 'react-router'
 
+const fromQualifiedTable = (supabase: ReturnType<typeof createClient>['supabase'], qualifiedTable: string) => {
+  const [schema, table, ...rest] = qualifiedTable.split('.')
+  if (schema && table && rest.length === 0) {
+    return supabase.schema(schema).from(table)
+  }
+  return supabase.from(qualifiedTable)
+}
+
 const normalizeLookupRow = (value: unknown) => {
   if (Array.isArray(value)) return value[0] ?? null
   return value as Record<string, unknown> | null
@@ -33,8 +41,7 @@ export function createTableLoader(tableName: string) {
     }
 
     const { supabase } = createClient(request)
-    const { data, error } = await supabase
-      .from(definition.table)
+    const { data, error } = await fromQualifiedTable(supabase, definition.table)
       .select(definition.select)
       .order(definition.order, { ascending: true })
 
@@ -59,10 +66,12 @@ export function createTableLoader(tableName: string) {
         const selectColumns = mapping.select
           ? mapping.select
           : [keyColumn, ...(mapping.valueColumns ?? (mapping.valueColumn ? [mapping.valueColumn] : []))].join(', ')
-        const { data: lookupRowsRaw } = await supabase
-          .from(mapping.table)
+        const { data: lookupRowsRaw, error: lookupError } = await fromQualifiedTable(supabase, mapping.table)
           .select(selectColumns)
           .in(keyColumn, Array.from(ids))
+        if (lookupError) {
+          continue
+        }
         const valueById = new Map<string, string>()
         const valueObjectById = new Map<string, Record<string, unknown>>()
         const lookupRows = (lookupRowsRaw ?? []) as unknown as Record<string, unknown>[]

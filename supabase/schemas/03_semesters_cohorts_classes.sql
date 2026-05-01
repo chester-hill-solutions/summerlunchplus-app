@@ -2,8 +2,10 @@
 
 create type public.workshop_enrollment_status as enum (
   'pending',
+  'waitlisted',
   'approved',
-  'rejected'
+  'rejected',
+  'revoked'
 );
 
 create type public.class_attendance_status as enum (
@@ -392,7 +394,7 @@ create policy workshop_enrollment_insert_self
         where p.user_id = auth.uid()
       )
     )
-    and coalesce(status, 'pending') = 'pending'
+    and coalesce(status::text, 'pending') in ('pending', 'waitlisted')
   );
 
 create policy workshop_enrollment_update_admin

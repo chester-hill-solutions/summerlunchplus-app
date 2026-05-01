@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { getProfileSignUpCompletion } from '@/lib/onboarding.server'
+import { getProfileSignUpCompletionWithContext } from '@/lib/onboarding.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 
@@ -142,22 +142,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect('/auth/sign-up-details', { headers })
   }
 
-  const invitedStudent = Boolean(
-    studentProfile.email &&
-      (await supabase
-        .from('invites')
-        .select('id')
-        .eq('invitee_email', studentProfile.email)
-        .eq('role', 'student')
-        .limit(1)
-        .maybeSingle())?.data?.id
-  )
-
-  const studentComplete = await getProfileSignUpCompletion(
+  const studentComplete = await getProfileSignUpCompletionWithContext(
     supabase,
     studentProfile.id,
-    'student',
-    invitedStudent ? { skipSlugs: ['guardian_details'] } : undefined
+    'student'
   )
 
   if (!studentComplete) {
@@ -188,7 +176,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       firstname: guardian.firstname,
       surname: guardian.surname,
       email: guardian.email,
-      isComplete: await getProfileSignUpCompletion(adminClient, guardian.id, 'guardian'),
+      isComplete: await getProfileSignUpCompletionWithContext(adminClient, guardian.id, 'guardian'),
     }))
   )
 

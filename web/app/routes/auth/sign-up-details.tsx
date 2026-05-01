@@ -11,8 +11,9 @@ import {
 import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import type { Database, Json } from '@/lib/database.types'
 import { isAllowedEmailDomain, normalizeEmail } from '@/lib/email-domain'
-import { getProfileSignUpCompletion } from '@/lib/onboarding.server'
+import { getProfileSignUpCompletionWithContext } from '@/lib/onboarding.server'
 import { extractRequestMetadata } from '@/lib/request-metadata.server'
+import { getSignUpFlowContext } from '@/lib/sign-up-flow-context.server'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { redirect, useFetcher, useLoaderData } from 'react-router'
 import { type FormEventHandler, useEffect, useMemo, useRef, useState } from 'react'
@@ -198,18 +199,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const resolvedRole = (roleParam ?? (profile.role as 'guardian' | 'student')) as 'guardian' | 'student'
 
-  const invitedStudent =
-    resolvedRole === 'student' &&
-    Boolean(
-      profile.email &&
-        (await supabase
-          .from('invites')
-          .select('id')
-          .eq('invitee_email', profile.email)
-          .eq('role', 'student')
-          .limit(1)
-          .maybeSingle())?.data?.id
-    )
+  const signUpFlowContext = await getSignUpFlowContext(supabase, {
+    email: profile.email,
+    role: resolvedRole,
+  })
 
   const { data: submissions } = await supabase
     .from('form_submission')
@@ -229,7 +222,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }))
     .filter(entry => entry.roles?.includes(resolvedRole))
     .filter(entry => isConditionMet(entry.condition as Json, submissionData.answers))
-    .filter(entry => !(invitedStudent && entry.slug === 'guardian_details'))
+    .filter(entry => !signUpFlowContext.skipSlugs.includes(entry.slug ?? ''))
 
   const formIds = normalizedFlowEntries.map(entry => entry.form_id)
   const { data: assignments } = formIds.length
@@ -262,6 +255,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   let currentFormQuestions: FormQuestionData[] = []
   let currentFormAnswers: Record<string, Json> = {}
+  let primaryChildProfile: Record<string, unknown> | null = null
+
+  if (resolvedRole === 'guardian' && signUpFlowContext.invitedGuardianByStudent) {
+    const { data: primaryChildLink } = await supabase
+      .from('person_guardian_child')
+      .select('child_profile_id')
+      .eq('guardian_profile_id', pid)
+      .eq('primary_child', true)
+      .maybeSingle()
+
+    const childProfileId = primaryChildLink?.child_profile_id
+    if (childProfileId) {
+      const { data: childProfile } = await supabase
+        .from('profile')
+        .select('firstname, surname, date_of_birth, email, phone')
+        .eq('id', childProfileId)
+        .maybeSingle()
+
+      primaryChildProfile = (childProfile ?? null) as Record<string, unknown> | null
+    }
+  }
+
   if (currentForm) {
     const { data: questions } = await supabase
       .from('form_question_map')
@@ -286,11 +301,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     for (const question of currentFormQuestions) {
       const metadata = (question.metadata ?? {}) as Record<string, Json>
       if (metadata.target !== 'profile') continue
-      if (metadata.role !== 'self') continue
       if (typeof metadata.field !== 'string') continue
       if (currentFormAnswers[question.question_code] !== undefined) continue
 
-      const prefillValue = getProfileFieldValue(profile as Record<string, unknown>, metadata.field)
+      const sourceProfile =
+        metadata.role === 'self'
+          ? (profile as Record<string, unknown>)
+          : metadata.role === 'child'
+            ? primaryChildProfile
+            : null
+      if (!sourceProfile) continue
+
+      const prefillValue = getProfileFieldValue(sourceProfile, metadata.field)
       if (prefillValue !== undefined) {
         currentFormAnswers[question.question_code] = prefillValue
       }
@@ -318,7 +340,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       guardianStatus = await Promise.all(
         (guardians ?? []).map(async guardian => ({
           ...guardian,
-          isComplete: await getProfileSignUpCompletion(adminClient, guardian.id, 'guardian'),
+          isComplete: await getProfileSignUpCompletionWithContext(adminClient, guardian.id, 'guardian'),
         }))
       )
       waitingOnGuardians = guardianStatus.some(guardian => !guardian.isComplete)
@@ -493,6 +515,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .eq('form_id', formId)
     .maybeSingle()
   const currentSlug = flowEntry?.slug ?? ''
+  const wantsAdditionalGuardian =
+    currentSlug === 'additional_guardians'
+      ? (formData.get('additional_guardian_choice') as string | null) === 'yes'
+      : true
 
   const { data: profile } = await supabase
     .from('profile')
@@ -555,6 +581,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const combinedAnswers = mergeAnswerMaps(submissionData.answers, submittedAnswers)
   const answersToSave: { questionCode: string; value: Json }[] = []
   const hiddenQuestionCodes: string[] = []
+  const additionalGuardianQuestionCodes: string[] = []
 
   for (const question of questions) {
     const isVisible = isConditionMet(question.visibility_condition as Json, combinedAnswers)
@@ -564,6 +591,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const metadata = (question.metadata ?? {}) as Record<string, Json>
+    if (currentSlug === 'additional_guardians' && metadata.target === 'additional_guardian' && !wantsAdditionalGuardian) {
+      additionalGuardianQuestionCodes.push(question.question_code)
+      hiddenQuestionCodes.push(question.question_code)
+      continue
+    }
+    if (metadata.target === 'additional_guardian') {
+      additionalGuardianQuestionCodes.push(question.question_code)
+    }
+
     const inputType = typeof metadata.input_type === 'string' ? metadata.input_type : null
     const isOptional = metadata.optional === true
     const isRequired = !isOptional
@@ -595,6 +631,47 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (value !== undefined) {
       answersToSave.push({ questionCode: question.question_code, value })
+    }
+  }
+
+  const additionalGuardian: Record<string, Json> = {}
+  for (const question of questions) {
+    const metadata = (question.metadata ?? {}) as Record<string, Json>
+    if (metadata.target !== 'additional_guardian' || typeof metadata.field !== 'string') continue
+    if (!wantsAdditionalGuardian) continue
+    const value = submittedAnswers[question.question_code]
+    if (value !== undefined && value !== null && value !== '') {
+      additionalGuardian[metadata.field] = value
+    }
+  }
+
+  if (currentSlug === 'additional_guardians') {
+    const guardianFirstname = normalizeString(additionalGuardian.firstname)
+    const guardianSurname = normalizeString(additionalGuardian.surname)
+    const guardianEmail = normalizeString(additionalGuardian.email)
+    const hasAllAdditionalGuardianValues = Boolean(guardianFirstname && guardianSurname && guardianEmail)
+
+    if (wantsAdditionalGuardian && !hasAllAdditionalGuardianValues) {
+      return {
+        error: 'Please provide first name, surname, and email to invite an additional guardian.',
+      }
+    }
+
+    if (!wantsAdditionalGuardian && additionalGuardianQuestionCodes.length) {
+      const { data: existingSubmissions } = await supabase
+        .from('form_submission')
+        .select('id')
+        .eq('profile_id', pid)
+        .eq('form_id', formId)
+
+      const submissionIds = (existingSubmissions ?? []).map(entry => entry.id).filter(Boolean)
+      if (submissionIds.length) {
+        await supabase
+          .from('form_answer')
+          .delete()
+          .in('submission_id', submissionIds)
+          .in('question_code', additionalGuardianQuestionCodes)
+      }
     }
   }
 
@@ -652,7 +729,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     child: {},
   }
 
-  const additionalGuardian: Record<string, Json> = {}
   let guardianInviteEmail: string | null = null
 
   for (const question of questions) {
@@ -672,13 +748,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const value = submittedAnswers[question.question_code]
       if (value !== undefined && value !== null && value !== '') {
         profileUpdates[targetRole][metadata.field] = value
-      }
-    }
-
-    if (metadata.target === 'additional_guardian' && typeof metadata.field === 'string') {
-      const value = submittedAnswers[question.question_code]
-      if (value !== undefined && value !== null && value !== '') {
-        additionalGuardian[metadata.field] = value
       }
     }
 
@@ -869,21 +938,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const guardianFirstname = normalizeString(additionalGuardian.firstname)
     const guardianSurname = normalizeString(additionalGuardian.surname)
     const guardianEmail = normalizeString(additionalGuardian.email)
-    const hasAnyAdditionalGuardianValue = Boolean(
-      guardianFirstname || guardianSurname || guardianEmail
-    )
-    const hasAllAdditionalGuardianValues = Boolean(
-      guardianFirstname && guardianSurname && guardianEmail
-    )
+    const hasAllAdditionalGuardianValues = Boolean(guardianFirstname && guardianSurname && guardianEmail)
 
-    if (hasAnyAdditionalGuardianValue && !hasAllAdditionalGuardianValues) {
-      return {
-        error:
-          'To add an additional guardian, please provide first name, surname, and email. Leave all three blank to skip this optional step.',
-      }
-    }
-
-    if (hasAllAdditionalGuardianValues && resolvedChildPid) {
+    if (wantsAdditionalGuardian && hasAllAdditionalGuardianValues && resolvedChildPid) {
       let additionalGuardianPid: string | null = null
       let inviteeUserId: string | null = null
 
@@ -1032,6 +1089,60 @@ export default function SignUpDetails() {
     isConditionMet(question.visibility_condition as Json, answerState)
   )
 
+  const isAdditionalGuardianStep = currentForm?.slug === 'additional_guardians'
+  const additionalGuardianQuestionCodes = useMemo(
+    () =>
+      currentFormQuestions
+        .filter(question => {
+          const metadata = (question.metadata ?? {}) as Record<string, Json>
+          return metadata.target === 'additional_guardian'
+        })
+        .map(question => question.question_code),
+    [currentFormQuestions]
+  )
+
+  const hasAdditionalGuardianAnswers = useMemo(
+    () =>
+      additionalGuardianQuestionCodes.some(code => {
+        const value = answerState[code]
+        return typeof value === 'string' ? value.trim().length > 0 : false
+      }),
+    [additionalGuardianQuestionCodes, answerState]
+  )
+
+  const [wantsAdditionalGuardian, setWantsAdditionalGuardian] = useState<boolean>(hasAdditionalGuardianAnswers)
+
+  useEffect(() => {
+    if (!isAdditionalGuardianStep) return
+    setWantsAdditionalGuardian(hasAdditionalGuardianAnswers)
+  }, [isAdditionalGuardianStep, currentForm?.formId, hasAdditionalGuardianAnswers])
+
+  const clearAdditionalGuardianFields = () => {
+    setAnswerState(current => {
+      const next = { ...current }
+      for (const code of additionalGuardianQuestionCodes) {
+        delete next[code]
+      }
+      return next
+    })
+  }
+
+  const displayedQuestions =
+    isAdditionalGuardianStep && !wantsAdditionalGuardian
+      ? visibleQuestions.filter(question => !additionalGuardianQuestionCodes.includes(question.question_code))
+      : visibleQuestions
+
+  const additionalGuardianFieldsComplete = useMemo(
+    () =>
+      additionalGuardianQuestionCodes.every(code => {
+        const value = answerState[code]
+        return typeof value === 'string' ? value.trim().length > 0 : false
+      }),
+    [additionalGuardianQuestionCodes, answerState]
+  )
+
+  const disableContinue = loading || (isAdditionalGuardianStep && wantsAdditionalGuardian && !additionalGuardianFieldsComplete)
+
   return (
     <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
       <div className="w-full max-w-3xl">
@@ -1067,13 +1178,44 @@ export default function SignUpDetails() {
                 <p className="text-sm text-slate-500">
                   Step {currentFormIndex ?? 1} of {totalFormSteps}
                 </p>
-                {currentForm.slug === 'additional_guardians' ? (
-                  <p className="text-sm text-slate-500">
-                    Optional step. Leave all fields blank to skip, or complete all fields to add an additional
-                    guardian.
-                  </p>
+                {isAdditionalGuardianStep ? (
+                  <div className="space-y-3 rounded-md border border-slate-200 p-3">
+                    <p className="text-sm font-medium text-slate-900">
+                      Do you want to invite an additional guardian?
+                    </p>
+                    <div className="flex gap-4 text-sm">
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="additional_guardian_choice"
+                          value="yes"
+                          checked={wantsAdditionalGuardian}
+                          onChange={() => setWantsAdditionalGuardian(true)}
+                        />
+                        Yes
+                      </label>
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="additional_guardian_choice"
+                          value="no"
+                          checked={!wantsAdditionalGuardian}
+                          onChange={() => {
+                            setWantsAdditionalGuardian(false)
+                            clearAdditionalGuardianFields()
+                          }}
+                        />
+                        No
+                      </label>
+                    </div>
+                    {!wantsAdditionalGuardian ? (
+                      <p className="text-xs text-slate-500">
+                        Additional guardian is optional. Click Save and continue to skip this step.
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
-                {visibleQuestions.map(question => {
+                {displayedQuestions.map(question => {
                   const metadata = (question.metadata ?? {}) as Record<string, Json>
                   const isOptional = metadata.optional === true
                   return (
@@ -1085,8 +1227,13 @@ export default function SignUpDetails() {
                     />
                   )
                 })}
+                {isAdditionalGuardianStep && wantsAdditionalGuardian && !additionalGuardianFieldsComplete ? (
+                  <p className="text-xs text-amber-700">
+                    Please complete first name, surname, and email before continuing.
+                  </p>
+                ) : null}
                 {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={loading}>
+                <Button type="submit" className="w-full" disabled={disableContinue}>
                   {loading ? 'Saving...' : 'Save and continue'}
                 </Button>
               </fetcher.Form>

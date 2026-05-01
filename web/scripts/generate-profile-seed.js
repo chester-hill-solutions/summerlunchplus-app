@@ -5,7 +5,7 @@ import { parse } from 'csv-parse/sync'
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname)
 const csvPath = path.resolve(__dirname, '..', '..', '_seed.csv')
-const outputPath = path.resolve(__dirname, '..', '..', 'supabase', 'seeds', 'person-onboarding-seed.sql')
+const outputPath = path.resolve(__dirname, '..', '..', 'supabase', 'seeds', 'testing', 'profile-onboarding-seed.sql')
 
 const csvContent = fs.readFileSync(csvPath, 'utf8')
 const rows = parse(csvContent, {
@@ -18,7 +18,7 @@ const escapeSql = (value = '') => value.replace(/'/g, "''")
 
 const chooseNameParts = fullName => {
   const parts = fullName.trim().split(/\s+/).filter(Boolean)
-  if (!parts.length) return ['Parent', 'Family']
+  if (!parts.length) return ['Guardian', 'Family']
   if (parts.length === 1) return [parts[0], 'Family']
   return [parts[0], parts.slice(1).join(' ')]
 }
@@ -30,15 +30,16 @@ rows.slice(1).forEach((row, index) => {
   if (row.length <= 48) return
   const email = sentinel(row[3])?.toLowerCase()
   if (!email) return
+
   const phone = sentinel(row[2])
   const site = sentinel(row[11]) ?? 'Unknown'
   const postal = sentinel(row[48]) ?? ''
   const firstTimeRaw = sentinel(row[9])
   const priorParticipation = firstTimeRaw && firstTimeRaw.toLowerCase().includes('yes') ? 'no' : 'yes'
-  const [firstname, surname] = chooseNameParts(sentinel(row[1]) ?? 'Parent Family')
+  const [firstname, surname] = chooseNameParts(sentinel(row[1]) ?? 'Guardian Family')
 
   const userId = crypto.randomUUID()
-  const personId = crypto.randomUUID()
+  const profileId = crypto.randomUUID()
 
   const phoneValue = phone ? `'${escapeSql(phone)}'` : 'NULL'
   const phoneConfirmed = 'NULL'
@@ -49,7 +50,7 @@ rows.slice(1).forEach((row, index) => {
   const sanitizedSite = escapeSql(site)
   const sanitizedEmail = escapeSql(email)
 
-const statement = `-- seed row ${index + 1}
+  const statement = `-- seed row ${index + 1}
 with existing_user as (
   select id
   from auth.users
@@ -62,12 +63,14 @@ with existing_user as (
   )
   select
     '${userId}', gen_random_uuid(), 'authenticated', 'authenticated', '${sanitizedEmail}', now(), now(), now(),
-    '{}'::jsonb, '{}'::jsonb, false, false, ${userPhoneValue}, ${phoneConfirmed}
+    '{}'::jsonb, '{"role":"guardian"}'::jsonb, false, false, ${userPhoneValue}, ${phoneConfirmed}
   where not exists (select 1 from existing_user)
   returning id
 ), updated_user as (
   update auth.users
-  set updated_at = now()
+  set
+    updated_at = now(),
+    raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || '{"role":"guardian"}'::jsonb
   where id = (select id from existing_user)
   returning id
 ), user_row as (
@@ -77,44 +80,72 @@ with existing_user as (
   union all
   select id from existing_user
   limit 1
-), person_existing as (
+), profile_existing as (
   select id
-  from public.person
+  from public.profile
   where user_id = (select id from user_row)
   limit 1
-), inserted_person as (
-  insert into public.person (
-    id, user_id, role, email, firstname, surname, phone, postcode, partner_program
+), inserted_profile as (
+  insert into public.profile (
+    id, user_id, role, email, firstname, surname, phone, postcode, partner_program, password_set
   )
   select
-    '${personId}', (select id from user_row), 'parent', '${sanitizedEmail}', '${sanitizedFirst}', '${sanitizedSurname}', ${phoneValue},
-    ${postal ? `'${sanitizedPostcode}'` : 'NULL'}, '${sanitizedSite}'
-  where not exists (select 1 from person_existing)
+    '${profileId}', (select id from user_row), 'guardian', '${sanitizedEmail}', '${sanitizedFirst}', '${sanitizedSurname}', ${phoneValue},
+    ${postal ? `'${sanitizedPostcode}'` : 'NULL'}, '${sanitizedSite}', true
+  where not exists (select 1 from profile_existing)
   returning id
-), updated_person as (
-  update public.person
+), updated_profile as (
+  update public.profile
   set
+    role = 'guardian',
+    email = '${sanitizedEmail}',
     firstname = '${sanitizedFirst}',
     surname = '${sanitizedSurname}',
-    phone = COALESCE(${phoneValue}, phone),
+    phone = coalesce(${phoneValue}, phone),
     postcode = ${postal ? `'${sanitizedPostcode}'` : 'NULL'},
-    partner_program = '${sanitizedSite}'
-  where id = (select id from person_existing)
+    partner_program = '${sanitizedSite}',
+    password_set = true
+  where id = (select id from profile_existing)
   returning id
-), person_row as (
-  select id from inserted_person
+), profile_row as (
+  select id from inserted_profile
   union all
-  select id from updated_person
+  select id from updated_profile
   union all
-  select id from person_existing
+  select id from profile_existing
   limit 1
-), submission_row as (
-  insert into public.form_submission (id, form_id, user_id, submitted_at)
-  select gen_random_uuid(), f.id, (select id from user_row), now()
-  from public.form f
-  where f.name = 'Onboarding Survey'
-  on conflict (form_id, user_id) do update set submitted_at = now()
+), form_row as (
+  select id
+  from public.form
+  where name = 'Onboarding Survey'
+  limit 1
+), submission_existing as (
+  select fs.id
+  from public.form_submission fs
+  join form_row fr on fr.id = fs.form_id
+  where fs.profile_id = (select id from profile_row)
+  order by fs.submitted_at desc
+  limit 1
+), inserted_submission as (
+  insert into public.form_submission (id, form_id, profile_id, user_id, submitted_at)
+  select gen_random_uuid(), fr.id, (select id from profile_row), (select id from user_row), now()
+  from form_row fr
+  where not exists (select 1 from submission_existing)
   returning id
+), updated_submission as (
+  update public.form_submission
+  set
+    submitted_at = now(),
+    user_id = (select id from user_row)
+  where id = (select id from submission_existing)
+  returning id
+), submission_row as (
+  select id from inserted_submission
+  union all
+  select id from updated_submission
+  union all
+  select id from submission_existing
+  limit 1
 )
 insert into public.form_answer (submission_id, question_code, value)
 select submission_row.id, 'onboarding_where_you_live', to_jsonb('${escapeSql(postal)}'::text)
@@ -136,4 +167,4 @@ if (!scriptLines.length) {
 }
 
 fs.writeFileSync(outputPath, scriptLines.join('\n\n'))
-console.log(`Wrote ${scriptLines.length} person seeds to ${path.relative(process.cwd(), outputPath)}`)
+console.log(`Wrote ${scriptLines.length} profile seeds to ${path.relative(process.cwd(), outputPath)}`)

@@ -19,15 +19,15 @@ with summer_semester as (
   returning id
 )
 insert into public.workshop (id, semester_id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity) values
-  ('214b9aff-3391-4685-9b09-c93e8ce4ba50', (select id from summer_semester), '12+ — Tuesday 4-5:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 20, 8),
-  ('c24ce9f0-29bb-467d-8ff4-b7ff1b608653', (select id from summer_semester), '12+ — Wednesday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 20, 8),
-  ('202998a9-a086-466a-a378-f0771bd996d2', (select id from summer_semester), '12+ — Thursday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 20, 8),
-  ('bfe62a82-558f-4f9f-8f9d-423494baaf37', (select id from summer_semester), '7-11 — Tuesday 4-5:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 20, 8),
-  ('f94b0a94-bb63-4621-8d27-b9c22a7c49c2', (select id from summer_semester), '7-11 — Wednesday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 20, 8),
-  ('1fba4e11-61d9-4116-9ae3-9d03964a0d1c', (select id from summer_semester), '7-11 — Thursday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 20, 8),
-  ('5042310e-90dc-471f-b5ae-f2e6e6b7eed2', (select id from summer_semester), 'All Ages French — Wednesday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 30, 8),
-  ('153fab85-d06b-4847-8808-38dffe158f94', (select id from summer_semester), 'All Ages Lunch — Thursday 11-12:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 30, 8),
-  ('caa00244-8af7-41bb-829c-27817d68f46c', (select id from summer_semester), 'All Ages Advanced Chef — Thursday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 30, 8);
+  ('214b9aff-3391-4685-9b09-c93e8ce4ba50', (select id from summer_semester), '12+ — Tuesday 4-5:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 5, 2),
+  ('c24ce9f0-29bb-467d-8ff4-b7ff1b608653', (select id from summer_semester), '12+ — Wednesday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 5, 2),
+  ('202998a9-a086-466a-a378-f0771bd996d2', (select id from summer_semester), '12+ — Thursday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 5, 2),
+  ('bfe62a82-558f-4f9f-8f9d-423494baaf37', (select id from summer_semester), '7-11 — Tuesday 4-5:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 5, 2),
+  ('f94b0a94-bb63-4621-8d27-b9c22a7c49c2', (select id from summer_semester), '7-11 — Wednesday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 5, 2),
+  ('1fba4e11-61d9-4116-9ae3-9d03964a0d1c', (select id from summer_semester), '7-11 — Thursday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 5, 2),
+  ('5042310e-90dc-471f-b5ae-f2e6e6b7eed2', (select id from summer_semester), 'All Ages French — Wednesday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 5, 2),
+  ('153fab85-d06b-4847-8808-38dffe158f94', (select id from summer_semester), 'All Ages Lunch — Thursday 11-12:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 5, 2),
+  ('caa00244-8af7-41bb-829c-27817d68f46c', (select id from summer_semester), 'All Ages Advanced Chef — Thursday 5-6:30pm – Summer Sessions', '2026-02-01T00:00:00Z', '2026-05-31T23:59:59Z', 5, 2);
 
 insert into public.class (id, workshop_id, starts_at, ends_at, location) values
   ('c7561f00-7db2-44d2-88c2-cbd9f0206b1d', '214b9aff-3391-4685-9b09-c93e8ce4ba50', '2026-06-02T16:00:00Z', '2026-06-02T17:30:00Z', 'Community Kitchen'),

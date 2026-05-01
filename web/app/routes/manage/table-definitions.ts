@@ -67,8 +67,8 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   workshop: {
     label: 'Workshops',
     table: 'workshop',
-    select: 'id, semester_id, description, enrollment_open_at, enrollment_close_at, capacity',
-    columns: ['semester_range', 'description', 'enrollment_open_at', 'enrollment_close_at', 'capacity'],
+    select: 'id, semester_id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity',
+    columns: ['semester_range', 'description', 'enrollment_open_at', 'enrollment_close_at', 'capacity', 'wait_list_capacity'],
     lookupMappings: [
       {
         keyColumn: 'semester_id',
@@ -248,8 +248,20 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     columns: ['user_email', 'role', 'assigned_by_email', 'created_at'],
     order: 'created_at',
     lookupMappings: [
-      { keyColumn: 'user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'user_email' },
-      { keyColumn: 'assigned_by', table: 'auth.users', valueColumn: 'email', resultColumn: 'assigned_by_email' },
+      {
+        keyColumn: 'user_id',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        valueColumn: 'email',
+        resultColumn: 'user_email',
+      },
+      {
+        keyColumn: 'assigned_by',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        valueColumn: 'email',
+        resultColumn: 'assigned_by_email',
+      },
     ],
   },
   invites: {

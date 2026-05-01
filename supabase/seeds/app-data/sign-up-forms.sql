@@ -101,11 +101,11 @@ with profile_form as (
   returning id
 )
 insert into public.form_question (question_code, prompt, "type", options)
-select 'parent_firstname', 'Your first name', 'text'::form_question_type, '[]'::jsonb
+select 'guardian_self_firstname', 'Your first name', 'text'::form_question_type, '[]'::jsonb
 union all
-select 'parent_surname', 'Your surname', 'text'::form_question_type, '[]'::jsonb
+select 'guardian_self_surname', 'Your surname', 'text'::form_question_type, '[]'::jsonb
 union all
-select 'parent_phone', 'Your phone number', 'text'::form_question_type, '[]'::jsonb
+select 'guardian_self_phone', 'Your phone number', 'text'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_firstname', 'Guardian first name', 'text'::form_question_type, '[]'::jsonb
 union all
@@ -212,11 +212,11 @@ with profile_form as (
   select id from public.form where name = 'Guardian Consent'
 )
 insert into public.form_question_map (form_id, question_code, position, metadata, visibility_condition)
-select id, 'parent_firstname', 1, '{"target":"profile","role":"self","field":"firstname"}'::jsonb, null::jsonb from profile_form
+select id, 'guardian_self_firstname', 1, '{"target":"profile","role":"self","field":"firstname"}'::jsonb, null::jsonb from profile_form
 union all
-select id, 'parent_surname', 2, '{"target":"profile","role":"self","field":"surname"}'::jsonb, null::jsonb from profile_form
+select id, 'guardian_self_surname', 2, '{"target":"profile","role":"self","field":"surname"}'::jsonb, null::jsonb from profile_form
 union all
-select id, 'parent_phone', 3, '{"target":"profile","role":"self","field":"phone","input_type":"tel","autocomplete":"tel"}'::jsonb, null::jsonb from profile_form
+select id, 'guardian_self_phone', 3, '{"target":"profile","role":"self","field":"phone","input_type":"tel","autocomplete":"tel"}'::jsonb, null::jsonb from profile_form
 union all
 select id, 'guardian_firstname', 1, '{"target":"profile","role":"guardian","field":"firstname"}'::jsonb, null::jsonb from guardian_details_form
 union all

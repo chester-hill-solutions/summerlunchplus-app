@@ -16,6 +16,7 @@ SCHEMA & MIGRATIONS
 
 - TYPES
 - Database schema types live at `web/app/lib/database.types.ts`. Regenerate with `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts` from repo root when the schema changes.
+- Do not duplicate database enum values in route/component constants. Use generated types/constants from `web/app/lib/database.types.ts` (for example `Database['public']['Enums'][...]` and `Constants.public.Enums...`) as the single source of truth.
 
 - ROUTES
 - Register every new route file under `web/app/routes` in `web/app/routes.ts` using `route("path", "routes/your-route.tsx")` or `index("routes/your-index.tsx")` to avoid 404s.
