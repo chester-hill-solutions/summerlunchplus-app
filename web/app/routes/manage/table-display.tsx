@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFetcher, useLoaderData, useSearchParams } from 'react-router'
 
+import { Constants, type Database } from '@/lib/database.types'
+
 const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
 
 const isTimestampColumn = (column: string) => column.endsWith('_at') || timestampColumns.has(column)
@@ -168,6 +170,7 @@ export default function TableDisplay() {
   }
 
   const isClassAttendance = tableName === 'class-attendance'
+  const isWorkshopEnrollment = tableName === 'class-enrollment'
 
   const updateAttendanceStatus = (row: Record<string, unknown>, value: string) => {
     if (!isClassAttendance || !canEditStatus) return
@@ -178,6 +181,18 @@ export default function TableDisplay() {
     formData.set('intent', 'update-status')
     formData.set('class_id', classId)
     formData.set('profile_id', profileId)
+    formData.set('status', value)
+    fetcher.submit(formData, { method: 'post' })
+  }
+
+  const updateWorkshopEnrollmentStatus = (row: Record<string, unknown>, value: string) => {
+    if (!isWorkshopEnrollment || !canEditStatus || !value) return
+    const enrollmentId = typeof row.id === 'string' ? row.id : ''
+    if (!enrollmentId) return
+
+    const formData = new FormData()
+    formData.set('intent', 'update-status')
+    formData.set('enrollment_id', enrollmentId)
     formData.set('status', value)
     fetcher.submit(formData, { method: 'post' })
   }
@@ -236,6 +251,25 @@ export default function TableDisplay() {
                           <option value="unknown">unknown</option>
                           <option value="present">present</option>
                           <option value="absent">absent</option>
+                        </select>
+                      </td>
+                    )
+                  }
+
+                  if (isWorkshopEnrollment && column === 'status' && canEditStatus) {
+                    const statusValue = typeof row.status === 'string' ? row.status : ''
+                    return (
+                      <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2 font-mono">
+                        <select
+                          value={statusValue}
+                          onChange={event => updateWorkshopEnrollmentStatus(row, event.target.value)}
+                          className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
+                        >
+                          {Constants.public.Enums.workshop_enrollment_status.map((status: Database['public']['Enums']['workshop_enrollment_status']) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
                         </select>
                       </td>
                     )

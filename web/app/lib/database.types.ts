@@ -293,10 +293,10 @@ export type Database = {
       form_submission: {
         Row: {
           accept_language: string | null
-          forwarded_for: string | null
           form_id: string
+          forwarded_for: string | null
           id: string
-          ip_address: string | null
+          ip_address: unknown
           metadata: Json
           origin: string | null
           profile_id: string
@@ -307,10 +307,10 @@ export type Database = {
         }
         Insert: {
           accept_language?: string | null
-          forwarded_for?: string | null
           form_id: string
+          forwarded_for?: string | null
           id?: string
-          ip_address?: string | null
+          ip_address?: unknown
           metadata?: Json
           origin?: string | null
           profile_id: string
@@ -321,10 +321,10 @@ export type Database = {
         }
         Update: {
           accept_language?: string | null
-          forwarded_for?: string | null
           form_id?: string
+          forwarded_for?: string | null
           id?: string
-          ip_address?: string | null
+          ip_address?: unknown
           metadata?: Json
           origin?: string | null
           profile_id?: string
@@ -348,53 +348,62 @@ export type Database = {
             referencedRelation: "profile"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "form_submission_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
         ]
       }
       gift_card_asset: {
         Row: {
           asset_url: string
+          assigned_profile_id: string | null
           created_at: string
           id: string
           metadata: Json
           page_count: number | null
+          sent_at: string | null
           source_index: number | null
           status: Database["public"]["Enums"]["gift_card_asset_status"]
           updated_at: string
           upload_id: string
+          used_at: string | null
           value: number
         }
         Insert: {
           asset_url: string
+          assigned_profile_id?: string | null
           created_at?: string
           id?: string
           metadata?: Json
           page_count?: number | null
+          sent_at?: string | null
           source_index?: number | null
           status?: Database["public"]["Enums"]["gift_card_asset_status"]
           updated_at?: string
           upload_id: string
+          used_at?: string | null
           value: number
         }
         Update: {
           asset_url?: string
+          assigned_profile_id?: string | null
           created_at?: string
           id?: string
           metadata?: Json
           page_count?: number | null
+          sent_at?: string | null
           source_index?: number | null
           status?: Database["public"]["Enums"]["gift_card_asset_status"]
           updated_at?: string
           upload_id?: string
+          used_at?: string | null
           value?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "gift_card_asset_assigned_profile_id_fkey"
+            columns: ["assigned_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "gift_card_asset_upload_id_fkey"
             columns: ["upload_id"]
@@ -418,7 +427,7 @@ export type Database = {
           total_cards: number
           updated_at: string
           upload_type: Database["public"]["Enums"]["gift_card_upload_type"]
-          uploaded_by: string
+          uploaded_by: string | null
         }
         Insert: {
           created_at?: string
@@ -433,7 +442,7 @@ export type Database = {
           total_cards?: number
           updated_at?: string
           upload_type: Database["public"]["Enums"]["gift_card_upload_type"]
-          uploaded_by: string
+          uploaded_by?: string | null
         }
         Update: {
           created_at?: string
@@ -448,7 +457,7 @@ export type Database = {
           total_cards?: number
           updated_at?: string
           upload_type?: Database["public"]["Enums"]["gift_card_upload_type"]
-          uploaded_by?: string
+          uploaded_by?: string | null
         }
         Relationships: []
       }
@@ -495,7 +504,7 @@ export type Database = {
           event_at: string
           forwarded_for: string | null
           id: string
-          ip_address: string | null
+          ip_address: unknown
           login_method: string
           metadata: Json
           origin: string | null
@@ -510,7 +519,7 @@ export type Database = {
           event_at?: string
           forwarded_for?: string | null
           id?: string
-          ip_address?: string | null
+          ip_address?: unknown
           login_method: string
           metadata?: Json
           origin?: string | null
@@ -525,7 +534,7 @@ export type Database = {
           event_at?: string
           forwarded_for?: string | null
           id?: string
-          ip_address?: string | null
+          ip_address?: unknown
           login_method?: string
           metadata?: Json
           origin?: string | null
@@ -534,15 +543,7 @@ export type Database = {
           user_agent?: string | null
           user_id?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "login_event_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       person_guardian_child: {
         Row: {
@@ -953,7 +954,7 @@ export type Database = {
         | "address"
         | "agreement"
         | "checkbox"
-      gift_card_asset_status: "available" | "invalid"
+      gift_card_asset_status: "available" | "sent" | "used" | "invalid"
       gift_card_upload_status:
         | "uploaded"
         | "processing"
@@ -961,7 +962,12 @@ export type Database = {
         | "failed"
       gift_card_upload_type: "pdf_per_page" | "pdf_per_4_pages" | "csv_link"
       invite_status: "pending" | "confirmed" | "revoked"
-      workshop_enrollment_status: "pending" | "approved" | "rejected"
+      workshop_enrollment_status:
+        | "pending"
+        | "waitlisted"
+        | "approved"
+        | "rejected"
+        | "revoked"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1159,7 +1165,7 @@ export const Constants = {
         "agreement",
         "checkbox",
       ],
-      gift_card_asset_status: ["available", "invalid"],
+      gift_card_asset_status: ["available", "sent", "used", "invalid"],
       gift_card_upload_status: [
         "uploaded",
         "processing",
@@ -1168,7 +1174,14 @@ export const Constants = {
       ],
       gift_card_upload_type: ["pdf_per_page", "pdf_per_4_pages", "csv_link"],
       invite_status: ["pending", "confirmed", "revoked"],
-      workshop_enrollment_status: ["pending", "approved", "rejected"],
+      workshop_enrollment_status: [
+        "pending",
+        "waitlisted",
+        "approved",
+        "rejected",
+        "revoked",
+      ],
     },
   },
 } as const
+

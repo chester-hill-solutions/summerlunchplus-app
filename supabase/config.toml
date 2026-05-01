@@ -219,8 +219,8 @@ host = "smtp.resend.com"
 port = 465
 user = "resend"
 pass = "env(SMTP_API_KEY)"
-admin_email = "summerlunchplus@chsolutions.ca"
-sender_name = "summerlunch+"
+admin_email = "hub@summerlunchplus.com"
+sender_name = "Summerlunch+ Hub"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]

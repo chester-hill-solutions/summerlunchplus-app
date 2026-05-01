@@ -22,7 +22,7 @@ export function Navbar({ user, role }: NavbarProps) {
           summerlunch+
         </Link>
 
-        {user ? <AuthenticatedNav role={role} /> : <UnauthenticatedNav />}
+        {user ? <AuthenticatedNav role={role} email={user.email ?? null} /> : <UnauthenticatedNav />}
       </div>
     </header>
   )
@@ -41,11 +41,14 @@ function UnauthenticatedNav() {
   )
 }
 
-function AuthenticatedNav({ role }: { role: string | null }) {
+function AuthenticatedNav({ role, email }: { role: string | null; email: string | null }) {
   return (
     <div className="flex items-center gap-2">
       {import.meta.env.DEV && (
-        <span className="text-xs text-muted-foreground">Your role: {role ?? 'unknown'}</span>
+        <>
+          <span className="text-xs text-muted-foreground">Your role: {role ?? 'unknown'}</span>
+          <span className="text-xs text-muted-foreground">Your email: {email ?? 'unknown'}</span>
+        </>
       )}
       {(role === 'admin' || role === 'manager') && (
         <Button variant="ghost" asChild>
@@ -70,8 +73,11 @@ type IconButtonProps = {
 
 function IconButton({ to, label, children }: IconButtonProps) {
   return (
-    <Button variant="ghost" size="icon" asChild className={cn('rounded-full')} aria-label={label}>
-      <Link to={to}>{children}</Link>
+    <Button variant="ghost" size="icon" asChild className={cn('rounded-full')}>
+      <Link to={to} aria-label={label} title={label}>
+        {children}
+        <span className="sr-only">{label}</span>
+      </Link>
     </Button>
   )
 }

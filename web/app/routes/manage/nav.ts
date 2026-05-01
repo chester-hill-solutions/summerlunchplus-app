@@ -1,11 +1,11 @@
 export const teamPages = [
   { to: '/manage', label: 'Overview', description: 'Admin workspace and quick links.' },
-  { to: '/manage/workshop-enrollment', label: 'Workshop enrollments', description: 'Pending and approved workshop enrollments.' },
+  { to: '/manage/workshop-enrollment', label: 'Workshop enrollments', description: 'Pending, waitlisted, approved, and rejected workshop enrollments.' },
   { to: '/manage/class-attendance', label: 'Class attendance', description: 'Attendance by class and student.' },
   { to: '/manage/workshop', label: 'Workshops', description: 'Current workshop sections and limits.' },
-  { to: '/manage/invites', label: 'Invites', description: 'Pending/confirmed invitations.' },
   { to: '/manage/participants', label: 'Participants', description: 'Guardians, students, and unassigned users.' },
   { to: '/manage/team', label: 'Team', description: 'Instructors and staff roles.' },
+  { to: '/manage/invites', label: 'Invites', description: 'Pending/confirmed invitations.' },
   { to: '/manage/class', label: 'Classes', description: 'Individual class schedule entries.' },
   { to: '/manage/person-guardian-child', label: 'Guardian child links', description: 'Guardian/child relationships.' },
   { to: '/manage/form', label: 'Forms', description: 'Onboarding forms configuration.' },

@@ -13,6 +13,7 @@ Update it when you add commands, tests, or conventions that agents need to know.
 - Treat `supabase/migrations/` as generated output; add schema changes to `supabase/schemas/` and seeding to `supabase/seeds/` before migrating.
 - After touching schema, regenerate Supabase types (remote ref): `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
 - After touching schema, regenerate Supabase types (local): `supabase gen types typescript --local > web/app/lib/database.types.ts`.
+- Do not hardcode DB enum lists in UI/server files; read enum options from generated types/constants in `web/app/lib/database.types.ts`.
 - Never stage `.env.local`, Supabase service keys, or other secrets; `git status` should be clean of creds.
 - Cursor rules (`.cursor/`, `.cursorrules`) and Copilot instructions (`.github/copilot-instructions.md`) do not exist right now, so no extra AI-guidance applies.
 - Keep diffs tight; do not reformat entire files when making small logic changes.
