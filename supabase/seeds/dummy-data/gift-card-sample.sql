@@ -38,19 +38,17 @@ with last_year_semester as (
         wait_list_capacity = excluded.wait_list_capacity
   returning id
 ), last_year_class as (
-  insert into public.class (id, workshop_id, starts_at, ends_at, location)
+  insert into public.class (id, workshop_id, starts_at, ends_at)
   values (
     '11111111-ffff-ffff-ffff-111111111111'::uuid,
     (select id from last_year_workshop),
     '2025-06-10T16:00:00Z',
-    '2025-06-10T17:30:00Z',
-    'Community Kitchen'
+    '2025-06-10T17:30:00Z'
   )
   on conflict (id) do update
     set workshop_id = excluded.workshop_id,
         starts_at = excluded.starts_at,
-        ends_at = excluded.ends_at,
-        location = excluded.location
+        ends_at = excluded.ends_at
   returning id
 ), enrollments as (
   insert into public.workshop_enrollment (workshop_id, semester_id, profile_id, status)

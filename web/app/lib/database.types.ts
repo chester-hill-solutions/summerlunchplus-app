@@ -39,7 +39,6 @@ export type Database = {
           created_at: string
           ends_at: string
           id: string
-          location: string | null
           starts_at: string
           updated_at: string
           workshop_id: string | null
@@ -48,7 +47,6 @@ export type Database = {
           created_at?: string
           ends_at: string
           id?: string
-          location?: string | null
           starts_at: string
           updated_at?: string
           workshop_id?: string | null
@@ -57,7 +55,6 @@ export type Database = {
           created_at?: string
           ends_at?: string
           id?: string
-          location?: string | null
           starts_at?: string
           updated_at?: string
           workshop_id?: string | null
@@ -954,6 +951,7 @@ export type Database = {
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
+        | "number"
         | "single_choice"
         | "multi_choice"
         | "date"
@@ -1164,6 +1162,7 @@ export const Constants = {
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
+        "number",
         "single_choice",
         "multi_choice",
         "date",
@@ -1190,4 +1189,3 @@ export const Constants = {
     },
   },
 } as const
-

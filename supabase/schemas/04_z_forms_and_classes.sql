@@ -2,6 +2,7 @@
 
 create type form_question_type as enum (
   'text',
+  'number',
   'single_choice',
   'multi_choice',
   'date',

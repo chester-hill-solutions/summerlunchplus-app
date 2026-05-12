@@ -168,7 +168,7 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
     )
   }
 
-  const resolvedInputType = inputType ?? (question.type === 'date' ? 'date' : 'text')
+  const resolvedInputType = inputType ?? (question.type === 'date' ? 'date' : question.type === 'number' ? 'number' : 'text')
   return (
     <div className="grid gap-2">
       <Label htmlFor={name}>

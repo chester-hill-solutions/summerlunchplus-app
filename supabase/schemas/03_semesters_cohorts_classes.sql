@@ -56,7 +56,6 @@ create table public.class (
   workshop_id uuid references public.workshop (id) on update cascade on delete set null,
   starts_at timestamptz not null,
   ends_at timestamptz not null,
-  location text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (starts_at < ends_at)
