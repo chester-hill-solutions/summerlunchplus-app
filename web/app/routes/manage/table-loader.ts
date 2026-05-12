@@ -2,6 +2,11 @@ import { createClient } from '@/lib/supabase/server'
 import { TABLE_DEFINITIONS } from './table-definitions'
 import type { LoaderFunctionArgs } from 'react-router'
 
+type ForeignKeyOption = {
+  value: string
+  label: string
+}
+
 const fromQualifiedTable = (supabase: ReturnType<typeof createClient>['supabase'], qualifiedTable: string) => {
   const [schema, table, ...rest] = qualifiedTable.split('.')
   if (schema && table && rest.length === 0) {
@@ -31,6 +36,58 @@ const submissionDisplay = (profileRow: Record<string, unknown> | null, fallbackI
   if (firstname && surname) return `${firstname} ${surname}`
   if (email) return email
   return fallbackId
+}
+
+const formatDateLabel = (value: unknown) => {
+  if (typeof value !== 'string' || !value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
+}
+
+const semesterDisplay = (semesterRow: Record<string, unknown> | null, fallbackId: string) => {
+  const name = typeof semesterRow?.name === 'string' ? semesterRow.name.trim() : ''
+  if (name) return name
+  const start = formatDateLabel(semesterRow?.starts_at)
+  const end = formatDateLabel(semesterRow?.ends_at)
+  const range = [start, end].filter(Boolean).join(' - ')
+  return range || fallbackId
+}
+
+const workshopDisplay = (workshopRow: Record<string, unknown> | null, fallbackId: string) => {
+  const description = typeof workshopRow?.description === 'string' ? workshopRow.description.trim() : ''
+  return description || fallbackId
+}
+
+const foreignKeyOptions = async (
+  supabase: ReturnType<typeof createClient>['supabase'],
+  tableName: string
+): Promise<Record<string, ForeignKeyOption[]>> => {
+  if (tableName === 'workshop') {
+    const { data } = await supabase
+      .from('semester')
+      .select('id, name, starts_at, ends_at')
+      .order('starts_at', { ascending: true })
+    const options = ((data ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: semesterDisplay(row, id) }
+    })
+    return { semester_id: options.filter(option => option.value) }
+  }
+
+  if (tableName === 'class') {
+    const { data } = await supabase
+      .from('workshop')
+      .select('id, description')
+      .order('description', { ascending: true })
+    const options = ((data ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: workshopDisplay(row, id) }
+    })
+    return { workshop_id: options.filter(option => option.value) }
+  }
+
+  return {}
 }
 
 export function createTableLoader(tableName: string) {
@@ -99,10 +156,7 @@ export function createTableLoader(tableName: string) {
               continue
             }
             if (mapping.format === 'semester_range') {
-              row[mapping.resultColumn] = {
-                start: lookupRow?.starts_at ?? null,
-                end: lookupRow?.ends_at ?? null,
-              }
+              row[mapping.resultColumn] = semesterDisplay(lookupRow, idValue)
               continue
             }
             if (mapping.format === 'class_display') {
@@ -132,6 +186,16 @@ export function createTableLoader(tableName: string) {
       }
     }
 
-    return { columns: definition.columns, rows, label: definition.label, tableName }
+    const editorConfig = definition.editor
+    const fkOptions = editorConfig ? await foreignKeyOptions(supabase, tableName) : {}
+
+    return {
+      columns: definition.columns,
+      rows,
+      label: definition.label,
+      tableName,
+      editorConfig,
+      foreignKeyOptions: fkOptions,
+    }
   }
 }

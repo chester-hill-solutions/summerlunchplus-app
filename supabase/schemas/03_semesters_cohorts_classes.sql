@@ -16,6 +16,8 @@ create type public.class_attendance_status as enum (
 
 create table public.semester (
   id uuid primary key default gen_random_uuid(),
+  name text,
+  description text,
   starts_at timestamptz not null,
   ends_at timestamptz not null,
   enrollment_open_at timestamptz,

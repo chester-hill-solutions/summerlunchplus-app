@@ -32,7 +32,7 @@ export default [
     index("routes/manage/index.tsx"),
     route("participants", "routes/manage/participants.tsx"),
     route("team", "routes/manage/team-members.tsx"),
-    route("person-guardian-child", "routes/manage/person-guardian-child.tsx"),
+    route("families", "routes/manage/families.tsx"),
     route("workshop", "routes/manage/workshop.tsx"),
     route("class", "routes/manage/class.tsx"),
     route("class-attendance", "routes/manage/class-attendance.tsx"),
