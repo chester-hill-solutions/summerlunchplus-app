@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
-import { useFetcher, useLoaderData, useSearchParams } from 'react-router'
+import type { Dispatch, ReactNode, SetStateAction } from 'react'
+import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'react-router'
 
 import { Combobox } from '@/components/ui/combobox'
 import { Constants, type Database } from '@/lib/database.types'
@@ -13,9 +13,10 @@ type TimestampLabelValue = {
 
 type EditorField = {
   label?: string
-  type: 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'foreign_key'
+  type: 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'foreign_key' | 'enum' | 'json'
   required?: boolean
   nullable?: boolean
+  enumValues?: string[]
 }
 
 type EditorConfig = {
@@ -121,7 +122,11 @@ const rowKeyFor = (row: Record<string, unknown>, editorConfig?: EditorConfig) =>
   return editorConfig.primaryKey.map(key => String(row[key] ?? '')).join('::')
 }
 
-export default function TableDisplay() {
+type TableDisplayProps = {
+  headerActions?: ReactNode
+}
+
+export default function TableDisplay({ headerActions }: TableDisplayProps = {}) {
   const {
     columns = [],
     rows = [],
@@ -131,6 +136,7 @@ export default function TableDisplay() {
     editorConfig,
     foreignKeyOptions = {},
   } = useLoaderData() as LoaderData
+  const location = useLocation()
 
   const statusFetcher = useFetcher()
   const editorFetcher = useFetcher<{ error?: string; success?: boolean }>()
@@ -280,6 +286,7 @@ export default function TableDisplay() {
   }
 
   const fieldKeys = editorConfig ? Object.keys(editorConfig.fields) : []
+  const isNumericColumn = (column: string) => editorConfig?.fields[column]?.type === 'number'
 
   const beginEdit = (row: Record<string, unknown>) => {
     if (!editorConfig) return
@@ -292,6 +299,14 @@ export default function TableDisplay() {
         nextValues[fieldName] = toDateValue(value)
       } else if (fieldConfig.type === 'boolean') {
         nextValues[fieldName] = value ? 'true' : 'false'
+      } else if (fieldConfig.type === 'json') {
+        if (typeof value === 'string') {
+          nextValues[fieldName] = value
+        } else if (value == null) {
+          nextValues[fieldName] = ''
+        } else {
+          nextValues[fieldName] = JSON.stringify(value)
+        }
       } else {
         nextValues[fieldName] = value == null ? '' : String(value)
       }
@@ -368,8 +383,52 @@ export default function TableDisplay() {
       )
     }
 
+    if (field.type === 'enum') {
+      return (
+        <label key={fieldName} className="grid gap-1 text-xs">
+          <span className="text-muted-foreground">{commonLabel}</span>
+          <select
+            value={value}
+            onChange={event => {
+              const nextValue = event.target.value
+              setValues(prev => ({ ...prev, [fieldName]: nextValue }))
+            }}
+            className="h-9 rounded border border-input bg-background px-2"
+          >
+            {field.nullable ? <option value="">(none)</option> : null}
+            {(field.enumValues ?? []).map(option => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+      )
+    }
+
+    if (field.type === 'json') {
+      return (
+        <label key={fieldName} className="grid gap-1 text-xs md:col-span-2 lg:col-span-3">
+          <span className="text-muted-foreground">{commonLabel}</span>
+          <textarea
+            required={field.required}
+            value={value}
+            onChange={event => {
+              const nextValue = event.target.value
+              setValues(prev => ({ ...prev, [fieldName]: nextValue }))
+            }}
+            className="min-h-24 rounded border border-input bg-background px-2 py-1 font-mono text-xs"
+          />
+        </label>
+      )
+    }
+
     const inputType = field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : field.type === 'datetime' ? 'datetime-local' : 'text'
     const fieldLabel = field.type === 'datetime' ? `${commonLabel} (${displayTimeZone})` : commonLabel
+    const inputClassName =
+      field.type === 'number'
+        ? 'h-9 w-28 rounded border border-input bg-background px-2'
+        : 'h-9 rounded border border-input bg-background px-2'
 
     return (
       <label key={fieldName} className="grid gap-1 text-xs">
@@ -382,7 +441,7 @@ export default function TableDisplay() {
             const nextValue = event.target.value
             setValues(prev => ({ ...prev, [fieldName]: nextValue }))
           }}
-          className="h-9 rounded border border-input bg-background px-2"
+          className={inputClassName}
         />
       </label>
     )
@@ -390,10 +449,13 @@ export default function TableDisplay() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">{label}</h1>
-        <p className="text-sm text-muted-foreground">Showing live entries from the {label.toLowerCase()} table ({derivedRows.length} rows).</p>
-        <p className="text-xs text-muted-foreground">Time values shown in {displayTimeZone}.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">{label}</h1>
+          <p className="text-sm text-muted-foreground">Showing live entries from the {label.toLowerCase()} table ({derivedRows.length} rows).</p>
+          <p className="text-xs text-muted-foreground">Time values shown in {displayTimeZone}.</p>
+        </div>
+        {headerActions ? <div className="ml-auto">{headerActions}</div> : null}
       </div>
 
       {canInlineInsert ? (
@@ -439,7 +501,10 @@ export default function TableDisplay() {
           <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground">
             <tr>
               {columns.map(column => (
-                <th key={`head-${column}`} className="px-4 py-2 text-left">
+                <th
+                  key={`head-${column}`}
+                  className={isNumericColumn(column) ? 'w-24 px-4 py-2 text-left' : 'px-4 py-2 text-left'}
+                >
                   <button
                     type="button"
                     onClick={() => updateSort(column)}
@@ -461,7 +526,11 @@ export default function TableDisplay() {
                       value={filters[column] ?? ''}
                       onChange={event => updateFilter(column, event.target.value)}
                       placeholder="Filter"
-                      className="w-full rounded border border-border px-2 py-1 pr-7 text-xs"
+                      className={
+                        isNumericColumn(column)
+                          ? 'w-full max-w-24 rounded border border-border px-2 py-1 pr-7 text-xs'
+                          : 'w-full rounded border border-border px-2 py-1 pr-7 text-xs'
+                      }
                     />
                     {filters[column] ? (
                       <button
@@ -525,13 +594,33 @@ export default function TableDisplay() {
                         )
                       }
 
+                      const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
                       return (
                         <td
                           key={`cell-${rowIndex}-${column}`}
-                          className="max-w-xs cursor-pointer truncate px-4 py-2 font-mono hover:bg-muted/30"
+                          className={
+                            isNumericColumn(column)
+                              ? 'w-24 cursor-pointer whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums hover:bg-muted/30'
+                              : 'max-w-xs cursor-pointer truncate px-4 py-2 font-mono hover:bg-muted/30'
+                          }
                           onClick={() => appendFilter(column, getCellValue(column, row, tableName))}
                         >
-                          {getCellValue(column, row, tableName)}
+                          {isFormNameLink ? (
+                            <Link
+                              to={{
+                                pathname: `/manage/form/${row.id}`,
+                                search: new URLSearchParams({
+                                  returnTo: `${location.pathname}${location.search}`,
+                                }).toString(),
+                              }}
+                              onClick={event => event.stopPropagation()}
+                              className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                            >
+                              {getCellValue(column, row, tableName)}
+                            </Link>
+                          ) : (
+                            getCellValue(column, row, tableName)
+                          )}
                         </td>
                       )
                     })}

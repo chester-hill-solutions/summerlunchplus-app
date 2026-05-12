@@ -132,7 +132,7 @@ const parseFormValue = (question: FormQuestionData, formData: FormData) => {
   const rawValue = (formData.get(fieldName) as string | null)?.trim() ?? ''
   if (!rawValue) return null
 
-  if (inputType === 'number') {
+  if (inputType === 'number' || question.type === 'number') {
     const parsed = Number(rawValue)
     return Number.isNaN(parsed) ? null : parsed
   }
