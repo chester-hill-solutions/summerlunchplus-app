@@ -3,6 +3,6 @@ import { createTableLoader } from './table-loader'
 
 export const loader = createTableLoader('person-guardian-child')
 
-export default function PersonGuardianChildTablePage() {
+export default function FamiliesTablePage() {
   return <TableDisplay />
 }

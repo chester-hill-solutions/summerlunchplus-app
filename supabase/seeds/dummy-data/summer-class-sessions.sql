@@ -3,16 +3,20 @@
 -- These seeds cover the two age groups and all-ages tracks requested for Tuesdays, Wednesdays, and Thursdays.
 
 with summer_semester as (
-  insert into public.semester (id, starts_at, ends_at, enrollment_open_at, enrollment_close_at)
+  insert into public.semester (id, name, description, starts_at, ends_at, enrollment_open_at, enrollment_close_at)
   values (
     '99999999-9999-9999-9999-999999999999'::uuid,
+    'Summer 2026',
+    'Main Summer Lunch Plus semester for 2026 workshops.',
     '2026-06-01T00:00:00Z',
     '2026-08-31T23:59:59Z',
     '2026-02-01T00:00:00Z',
     '2026-05-31T23:59:59Z'
   )
   on conflict (id) do update
-    set starts_at = excluded.starts_at,
+    set name = excluded.name,
+        description = excluded.description,
+        starts_at = excluded.starts_at,
         ends_at = excluded.ends_at,
         enrollment_open_at = excluded.enrollment_open_at,
         enrollment_close_at = excluded.enrollment_close_at

@@ -1,15 +1,19 @@
 -- Sample gift card uploads and assets tied to last year's attendance.
 with last_year_semester as (
-  insert into public.semester (id, starts_at, ends_at, enrollment_open_at, enrollment_close_at)
+  insert into public.semester (id, name, description, starts_at, ends_at, enrollment_open_at, enrollment_close_at)
   values (
     'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::uuid,
+    'Summer 2025',
+    'Prior-year semester used for gift card sample data.',
     '2025-06-03T00:00:00Z',
     '2025-08-30T23:59:59Z',
     '2025-02-01T00:00:00Z',
     '2025-05-15T23:59:59Z'
   )
   on conflict (id) do update
-    set starts_at = excluded.starts_at,
+    set name = excluded.name,
+        description = excluded.description,
+        starts_at = excluded.starts_at,
         ends_at = excluded.ends_at,
         enrollment_open_at = excluded.enrollment_open_at,
         enrollment_close_at = excluded.enrollment_close_at
