@@ -24,16 +24,20 @@ on conflict (id) do update
       postcode = excluded.postcode,
       partner_program = excluded.partner_program;
 
-insert into public.semester (id, starts_at, ends_at, enrollment_open_at, enrollment_close_at)
+insert into public.semester (id, name, description, starts_at, ends_at, enrollment_open_at, enrollment_close_at)
 values (
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid,
+  'Prior Summer Semester',
+  'Previous-year semester for enrollment and attendance scenario seeds.',
   date_trunc('year', now()) - interval '1 year' + interval '5 months',
   date_trunc('year', now()) - interval '1 year' + interval '6 months' - interval '1 second',
   date_trunc('year', now()) - interval '1 year' + interval '3 months',
   date_trunc('year', now()) - interval '1 year' + interval '5 months' - interval '1 second'
 )
 on conflict (id) do update
-  set starts_at = excluded.starts_at,
+  set name = excluded.name,
+      description = excluded.description,
+      starts_at = excluded.starts_at,
       ends_at = excluded.ends_at,
       enrollment_open_at = excluded.enrollment_open_at,
       enrollment_close_at = excluded.enrollment_close_at;
@@ -106,16 +110,20 @@ values
 on conflict (class_id, profile_id) do update
   set status = excluded.status;
 
-insert into public.semester (id, starts_at, ends_at, enrollment_open_at, enrollment_close_at)
+insert into public.semester (id, name, description, starts_at, ends_at, enrollment_open_at, enrollment_close_at)
 values (
   'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::uuid,
+  'Current Summer Semester',
+  'Current-year semester for enrollment and waitlist scenario seeds.',
   date_trunc('year', now()) + interval '5 months',
   date_trunc('year', now()) + interval '6 months' - interval '1 second',
   date_trunc('year', now()) + interval '3 months',
   date_trunc('year', now()) + interval '5 months' - interval '1 second'
 )
 on conflict (id) do update
-  set starts_at = excluded.starts_at,
+  set name = excluded.name,
+      description = excluded.description,
+      starts_at = excluded.starts_at,
       ends_at = excluded.ends_at,
       enrollment_open_at = excluded.enrollment_open_at,
       enrollment_close_at = excluded.enrollment_close_at;

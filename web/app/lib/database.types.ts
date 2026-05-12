@@ -662,28 +662,34 @@ export type Database = {
       semester: {
         Row: {
           created_at: string
+          description: string | null
           ends_at: string
           enrollment_close_at: string | null
           enrollment_open_at: string | null
           id: string
+          name: string | null
           starts_at: string
           updated_at: string
         }
         Insert: {
           created_at?: string
+          description?: string | null
           ends_at: string
           enrollment_close_at?: string | null
           enrollment_open_at?: string | null
           id?: string
+          name?: string | null
           starts_at: string
           updated_at?: string
         }
         Update: {
           created_at?: string
+          description?: string | null
           ends_at?: string
           enrollment_close_at?: string | null
           enrollment_open_at?: string | null
           id?: string
+          name?: string | null
           starts_at?: string
           updated_at?: string
         }
