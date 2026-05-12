@@ -34,6 +34,7 @@ export default [
     route("team", "routes/manage/team-members.tsx"),
     route("families", "routes/manage/families.tsx"),
     route("workshop", "routes/manage/workshop.tsx"),
+    route("workshop/setup", "routes/manage/workshop.setup.tsx"),
     route("class", "routes/manage/class.tsx"),
     route("class-attendance", "routes/manage/class-attendance.tsx"),
     route("workshop-enrollment", "routes/manage/workshop-enrollment.tsx"),

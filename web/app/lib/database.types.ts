@@ -39,7 +39,6 @@ export type Database = {
           created_at: string
           ends_at: string
           id: string
-          location: string | null
           starts_at: string
           updated_at: string
           workshop_id: string | null
@@ -48,7 +47,6 @@ export type Database = {
           created_at?: string
           ends_at: string
           id?: string
-          location?: string | null
           starts_at: string
           updated_at?: string
           workshop_id?: string | null
@@ -57,7 +55,6 @@ export type Database = {
           created_at?: string
           ends_at?: string
           id?: string
-          location?: string | null
           starts_at?: string
           updated_at?: string
           workshop_id?: string | null

@@ -68,27 +68,24 @@ on conflict (id) do update
       capacity = excluded.capacity,
       wait_list_capacity = excluded.wait_list_capacity;
 
-insert into public.class (id, workshop_id, starts_at, ends_at, location)
+insert into public.class (id, workshop_id, starts_at, ends_at)
 values
   (
     'aaaaaaaa-1111-1111-1111-aaaaaaaa1111'::uuid,
     '11111111-1111-1111-1111-111111111111'::uuid,
     date_trunc('year', now()) - interval '1 year' + interval '5 months' + interval '6 days 16 hours',
-    date_trunc('year', now()) - interval '1 year' + interval '5 months' + interval '6 days 17 hours 30 minutes',
-    'Community Kitchen'
+    date_trunc('year', now()) - interval '1 year' + interval '5 months' + interval '6 days 17 hours 30 minutes'
   ),
   (
     'aaaaaaaa-2222-2222-2222-aaaaaaaa2222'::uuid,
     '11111111-1111-1111-1111-111111111111'::uuid,
     date_trunc('year', now()) - interval '1 year' + interval '5 months' + interval '13 days 16 hours',
-    date_trunc('year', now()) - interval '1 year' + interval '5 months' + interval '13 days 17 hours 30 minutes',
-    'Community Kitchen'
+    date_trunc('year', now()) - interval '1 year' + interval '5 months' + interval '13 days 17 hours 30 minutes'
   )
 on conflict (id) do update
   set workshop_id = excluded.workshop_id,
       starts_at = excluded.starts_at,
-      ends_at = excluded.ends_at,
-      location = excluded.location;
+      ends_at = excluded.ends_at;
 
 insert into public.workshop_enrollment (workshop_id, semester_id, profile_id, status)
 values
@@ -164,27 +161,24 @@ on conflict (id) do update
       capacity = excluded.capacity,
       wait_list_capacity = excluded.wait_list_capacity;
 
-insert into public.class (id, workshop_id, starts_at, ends_at, location)
+insert into public.class (id, workshop_id, starts_at, ends_at)
 values
   (
     'bbbbbbbb-1111-1111-1111-bbbbbbbb1111'::uuid,
     'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid,
     date_trunc('year', now()) + interval '5 months' + interval '5 days 16 hours',
-    date_trunc('year', now()) + interval '5 months' + interval '5 days 17 hours 30 minutes',
-    'Community Kitchen'
+    date_trunc('year', now()) + interval '5 months' + interval '5 days 17 hours 30 minutes'
   ),
   (
     'bbbbbbbb-2222-2222-2222-bbbbbbbb2222'::uuid,
     'dddddddd-dddd-dddd-dddd-dddddddddddd'::uuid,
     date_trunc('year', now()) + interval '5 months' + interval '7 days 17 hours',
-    date_trunc('year', now()) + interval '5 months' + interval '7 days 18 hours 30 minutes',
-    'Community Kitchen'
+    date_trunc('year', now()) + interval '5 months' + interval '7 days 18 hours 30 minutes'
   )
 on conflict (id) do update
   set workshop_id = excluded.workshop_id,
       starts_at = excluded.starts_at,
-      ends_at = excluded.ends_at,
-      location = excluded.location;
+      ends_at = excluded.ends_at;
 
 insert into public.workshop_enrollment (workshop_id, semester_id, profile_id, status)
 values

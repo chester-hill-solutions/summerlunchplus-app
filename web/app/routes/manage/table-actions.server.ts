@@ -29,6 +29,22 @@ const parseFieldValue = (rawValue: FormDataEntryValue | null, fieldType: string,
     return { value: value === 'true', valid: true }
   }
 
+  if (fieldType === 'json') {
+    try {
+      return { value: JSON.parse(value), valid: true }
+    } catch {
+      return { value: null, valid: false }
+    }
+  }
+
+  if (fieldType === 'datetime') {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+      return { value: null, valid: false }
+    }
+    return { value: date.toISOString(), valid: true }
+  }
+
   return { value, valid: true }
 }
 
@@ -66,6 +82,13 @@ export const createTableAction = (tableName: string) => {
 
       if (fieldConfig.type === 'number' && typeof parsed.value === 'number' && parsed.value < 0) {
         return { error: `${fieldConfig.label ?? fieldName} must be non-negative.` }
+      }
+
+      if (fieldConfig.type === 'enum' && parsed.value !== null && parsed.value !== '') {
+        const enumValues = fieldConfig.enumValues ?? []
+        if (!enumValues.includes(String(parsed.value))) {
+          return { error: `Invalid value for ${fieldConfig.label ?? fieldName}.` }
+        }
       }
 
       payload[fieldName] = parsed.value === '' ? null : parsed.value

@@ -9,7 +9,7 @@ export type LookupMapping = {
   format?: 'profile_display' | 'semester_range' | 'class_display' | 'submission_display'
 }
 
-export type EditorFieldType = 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'foreign_key'
+export type EditorFieldType = 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'foreign_key' | 'enum' | 'json'
 
 export type EditorFieldConfig = {
   label?: string
@@ -17,6 +17,7 @@ export type EditorFieldConfig = {
   required?: boolean
   nullable?: boolean
   foreignKeyTable?: string
+  enumValues?: string[]
 }
 
 export type TableEditorConfig = {
@@ -134,8 +135,8 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   class: {
     label: 'Classes',
     table: 'class',
-    select: 'id, workshop_id, starts_at, ends_at, location',
-    columns: ['workshop_description', 'starts_at', 'ends_at', 'location'],
+    select: 'id, workshop_id, starts_at, ends_at',
+    columns: ['workshop_description', 'starts_at', 'ends_at'],
     order: 'starts_at',
     lookupMappings: [
       { keyColumn: 'workshop_id', table: 'workshop', valueColumn: 'description', resultColumn: 'workshop_description' },
@@ -148,7 +149,6 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         workshop_id: { label: 'Workshop', type: 'foreign_key', nullable: true, foreignKeyTable: 'workshop' },
         starts_at: { label: 'Starts At', type: 'datetime', required: true },
         ends_at: { label: 'Ends At', type: 'datetime', required: true },
-        location: { label: 'Location', type: 'text', nullable: true },
       },
     },
   },
@@ -212,6 +212,16 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     select: 'id, name, due_at, is_required, created_at',
     columns: ['name', 'due_at', 'is_required', 'created_at'],
     order: 'created_at',
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        name: { label: 'Name', type: 'text', required: true },
+        due_at: { label: 'Due At', type: 'datetime', nullable: true },
+        is_required: { label: 'Required', type: 'boolean', required: true },
+      },
+    },
   },
   'form-question': {
     label: 'Form Questions',
@@ -219,6 +229,22 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     select: 'question_code, prompt, type, options',
     columns: ['question_code', 'prompt', 'type', 'options'],
     order: 'question_code',
+    editor: {
+      primaryKey: ['question_code'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        question_code: { label: 'Question Code', type: 'text', required: true },
+        prompt: { label: 'Prompt', type: 'text', required: true },
+        type: {
+          label: 'Type',
+          type: 'enum',
+          required: true,
+          enumValues: ['text', 'single_choice', 'multi_choice', 'date', 'address', 'agreement', 'checkbox'],
+        },
+        options: { label: 'Options JSON', type: 'json', required: true },
+      },
+    },
   },
   'form-question-map': {
     label: 'Form Question Map',
@@ -229,6 +255,18 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     lookupMappings: [
       { keyColumn: 'form_id', table: 'form', valueColumn: 'name', resultColumn: 'form_name' },
     ],
+    editor: {
+      primaryKey: ['form_id', 'question_code'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        form_id: { label: 'Form', type: 'foreign_key', required: true, foreignKeyTable: 'form' },
+        question_code: { label: 'Question', type: 'foreign_key', required: true, foreignKeyTable: 'form_question' },
+        position: { label: 'Position', type: 'number', required: true },
+        prompt_override: { label: 'Prompt Override', type: 'text', nullable: true },
+        options_override: { label: 'Options Override JSON', type: 'json', nullable: true },
+      },
+    },
   },
   'form-assignment': {
     label: 'Form Assignments',
@@ -238,9 +276,36 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     order: 'assigned_at',
     lookupMappings: [
       { keyColumn: 'form_id', table: 'form', valueColumn: 'name', resultColumn: 'form_name' },
-      { keyColumn: 'user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'user_email' },
-      { keyColumn: 'assigned_by', table: 'auth.users', valueColumn: 'email', resultColumn: 'assigned_by_email' },
+      {
+        keyColumn: 'user_id',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        resultColumn: 'user_email',
+        select: 'user_id, firstname, surname, email',
+        format: 'profile_display',
+      },
+      {
+        keyColumn: 'assigned_by',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        resultColumn: 'assigned_by_email',
+        select: 'user_id, firstname, surname, email',
+        format: 'profile_display',
+      },
     ],
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        form_id: { label: 'Form', type: 'foreign_key', required: true, foreignKeyTable: 'form' },
+        user_id: { label: 'User', type: 'foreign_key', required: true, foreignKeyTable: 'auth.users' },
+        status: { label: 'Status', type: 'enum', required: true, enumValues: ['pending', 'submitted'] },
+        assigned_at: { label: 'Assigned At', type: 'datetime', required: true },
+        assigned_by: { label: 'Assigned By', type: 'foreign_key', nullable: true, foreignKeyTable: 'auth.users' },
+        due_at: { label: 'Due At', type: 'datetime', nullable: true },
+      },
+    },
   },
   'form-submission': {
     label: 'Form Submissions',
@@ -270,8 +335,26 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         select: 'id, firstname, surname, email',
         format: 'profile_display',
       },
-      { keyColumn: 'user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'user_email' },
+      {
+        keyColumn: 'user_id',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        resultColumn: 'user_email',
+        select: 'user_id, firstname, surname, email',
+        format: 'profile_display',
+      },
     ],
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        form_id: { label: 'Form', type: 'foreign_key', required: true, foreignKeyTable: 'form' },
+        profile_id: { label: 'Profile', type: 'foreign_key', required: true, foreignKeyTable: 'profile' },
+        user_id: { label: 'User', type: 'foreign_key', nullable: true, foreignKeyTable: 'auth.users' },
+        submitted_at: { label: 'Submitted At', type: 'datetime', required: true },
+      },
+    },
   },
   'form-answer': {
     label: 'Form Answers',
@@ -284,10 +367,20 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         keyColumn: 'submission_id',
         table: 'form_submission',
         resultColumn: 'submission_display',
-        select: 'id, submitted_at, profile:profile_id ( id, firstname, surname, email )',
+        select: 'id, submitted_at, form:form_id ( name ), profile:profile_id ( id, firstname, surname, email )',
         format: 'submission_display',
       },
     ],
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        submission_id: { label: 'Submission', type: 'foreign_key', required: true, foreignKeyTable: 'form_submission' },
+        question_code: { label: 'Question', type: 'foreign_key', required: true, foreignKeyTable: 'form_question' },
+        value: { label: 'Answer JSON', type: 'json', required: true },
+      },
+    },
   },
   'role-permission': {
     label: 'Role Permission',

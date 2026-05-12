@@ -24,18 +24,27 @@ const profileDisplay = (profileRow: Record<string, unknown> | null, fallbackId: 
   const firstname = typeof profileRow?.firstname === 'string' ? profileRow.firstname.trim() : ''
   const surname = typeof profileRow?.surname === 'string' ? profileRow.surname.trim() : ''
   const email = typeof profileRow?.email === 'string' ? profileRow.email.trim() : ''
-  if (firstname && surname) return `${firstname} ${surname}`
   if (email) return email
-  return fallbackId
+  if (firstname && surname) return `${firstname} ${surname}`
+  return `ID ${fallbackId}`
 }
 
-const submissionDisplay = (profileRow: Record<string, unknown> | null, fallbackId: string) => {
+const submissionDisplay = (formRow: Record<string, unknown> | null, profileRow: Record<string, unknown> | null, fallbackId: string, submittedAt: unknown) => {
+  const formName = typeof formRow?.name === 'string' && formRow.name.trim() ? formRow.name.trim() : 'Form'
   const firstname = typeof profileRow?.firstname === 'string' ? profileRow.firstname.trim() : ''
   const surname = typeof profileRow?.surname === 'string' ? profileRow.surname.trim() : ''
   const email = typeof profileRow?.email === 'string' ? profileRow.email.trim() : ''
-  if (firstname && surname) return `${firstname} ${surname}`
-  if (email) return email
-  return fallbackId
+  const profileLabel = email || (firstname && surname ? `${firstname} ${surname}` : `ID ${fallbackId}`)
+
+  let submittedDate = ''
+  if (typeof submittedAt === 'string') {
+    const date = new Date(submittedAt)
+    submittedDate = Number.isNaN(date.getTime())
+      ? submittedAt
+      : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
+  }
+
+  return [formName, profileLabel, submittedDate].filter(Boolean).join(' - ')
 }
 
 const formatDateLabel = (value: unknown) => {
@@ -57,6 +66,20 @@ const semesterDisplay = (semesterRow: Record<string, unknown> | null, fallbackId
 const workshopDisplay = (workshopRow: Record<string, unknown> | null, fallbackId: string) => {
   const description = typeof workshopRow?.description === 'string' ? workshopRow.description.trim() : ''
   return description || fallbackId
+}
+
+const formDisplay = (formRow: Record<string, unknown> | null, fallbackId: string) => {
+  const name = typeof formRow?.name === 'string' ? formRow.name.trim() : ''
+  return name || `ID ${fallbackId}`
+}
+
+const userProfileDisplay = (profileRow: Record<string, unknown> | null, fallbackId: string) => {
+  const email = typeof profileRow?.email === 'string' ? profileRow.email.trim() : ''
+  const firstname = typeof profileRow?.firstname === 'string' ? profileRow.firstname.trim() : ''
+  const surname = typeof profileRow?.surname === 'string' ? profileRow.surname.trim() : ''
+  if (email) return email
+  if (firstname && surname) return `${firstname} ${surname}`
+  return `ID ${fallbackId}`
 }
 
 const foreignKeyOptions = async (
@@ -85,6 +108,118 @@ const foreignKeyOptions = async (
       return { value: id, label: workshopDisplay(row, id) }
     })
     return { workshop_id: options.filter(option => option.value) }
+  }
+
+  if (tableName === 'form-question-map') {
+    const [{ data: forms }, { data: questions }] = await Promise.all([
+      supabase.from('form').select('id, name').order('name', { ascending: true }),
+      supabase.from('form_question').select('question_code, prompt').order('question_code', { ascending: true }),
+    ])
+
+    const formOptions = ((forms ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: formDisplay(row, id) }
+    })
+
+    const questionOptions = ((questions ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const code = typeof row.question_code === 'string' ? row.question_code : ''
+      const prompt = typeof row.prompt === 'string' ? row.prompt.trim() : ''
+      return { value: code, label: prompt ? `${code} - ${prompt}` : code }
+    })
+
+    return {
+      form_id: formOptions.filter(option => option.value),
+      question_code: questionOptions.filter(option => option.value),
+    }
+  }
+
+  if (tableName === 'form-assignment') {
+    const [{ data: forms }, { data: profiles }] = await Promise.all([
+      supabase.from('form').select('id, name').order('name', { ascending: true }),
+      supabase
+        .from('profile')
+        .select('user_id, email, firstname, surname')
+        .not('user_id', 'is', null)
+        .order('email', { ascending: true }),
+    ])
+
+    const formOptions = ((forms ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: formDisplay(row, id) }
+    })
+
+    const userOptions = ((profiles ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const userId = typeof row.user_id === 'string' ? row.user_id : ''
+      return { value: userId, label: userProfileDisplay(row, userId) }
+    })
+
+    return {
+      form_id: formOptions.filter(option => option.value),
+      user_id: userOptions.filter(option => option.value),
+      assigned_by: userOptions.filter(option => option.value),
+    }
+  }
+
+  if (tableName === 'form-submission') {
+    const [{ data: forms }, { data: profiles }, { data: userProfiles }] = await Promise.all([
+      supabase.from('form').select('id, name').order('name', { ascending: true }),
+      supabase.from('profile').select('id, email, firstname, surname').order('email', { ascending: true }),
+      supabase
+        .from('profile')
+        .select('user_id, email, firstname, surname')
+        .not('user_id', 'is', null)
+        .order('email', { ascending: true }),
+    ])
+
+    const formOptions = ((forms ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: formDisplay(row, id) }
+    })
+
+    const profileOptions = ((profiles ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: profileDisplay(row, id) }
+    })
+
+    const userOptions = ((userProfiles ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const userId = typeof row.user_id === 'string' ? row.user_id : ''
+      return { value: userId, label: userProfileDisplay(row, userId) }
+    })
+
+    return {
+      form_id: formOptions.filter(option => option.value),
+      profile_id: profileOptions.filter(option => option.value),
+      user_id: userOptions.filter(option => option.value),
+    }
+  }
+
+  if (tableName === 'form-answer') {
+    const [{ data: questions }, { data: submissions }] = await Promise.all([
+      supabase.from('form_question').select('question_code, prompt').order('question_code', { ascending: true }),
+      supabase
+        .from('form_submission')
+        .select('id, submitted_at, form:form_id ( name ), profile:profile_id ( id, firstname, surname, email )')
+        .order('submitted_at', { ascending: false }),
+    ])
+
+    const questionOptions = ((questions ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const code = typeof row.question_code === 'string' ? row.question_code : ''
+      const prompt = typeof row.prompt === 'string' ? row.prompt.trim() : ''
+      return { value: code, label: prompt ? `${code} - ${prompt}` : code }
+    })
+
+    const submissionOptions = ((submissions ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      const formRow = normalizeLookupRow(row.form)
+      const profileRow = normalizeLookupRow(row.profile)
+      const profileId = typeof profileRow?.id === 'string' ? profileRow.id : id
+      return { value: id, label: submissionDisplay(formRow, profileRow, profileId, row.submitted_at) }
+    })
+
+    return {
+      question_code: questionOptions.filter(option => option.value),
+      submission_id: submissionOptions.filter(option => option.value),
+    }
   }
 
   return {}
@@ -170,13 +305,10 @@ export function createTableLoader(tableName: string) {
               continue
             }
             if (mapping.format === 'submission_display') {
+              const formRow = normalizeLookupRow(lookupRow?.form)
               const profileRow = normalizeLookupRow(lookupRow?.profile)
               const profileId = typeof profileRow?.id === 'string' ? profileRow.id : idValue
-              row[mapping.resultColumn] = {
-                label: submissionDisplay(profileRow, profileId),
-                timestamp: lookupRow?.submitted_at ?? null,
-                order: 'timestamp_first',
-              }
+              row[mapping.resultColumn] = submissionDisplay(formRow, profileRow, profileId, lookupRow?.submitted_at)
               continue
             }
           }
