@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-import { useFetcher, useLoaderData, useSearchParams } from 'react-router'
+import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'react-router'
 
 import { Combobox } from '@/components/ui/combobox'
 import { Constants, type Database } from '@/lib/database.types'
@@ -136,6 +136,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     editorConfig,
     foreignKeyOptions = {},
   } = useLoaderData() as LoaderData
+  const location = useLocation()
 
   const statusFetcher = useFetcher()
   const editorFetcher = useFetcher<{ error?: string; success?: boolean }>()
@@ -593,6 +594,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                         )
                       }
 
+                      const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
                       return (
                         <td
                           key={`cell-${rowIndex}-${column}`}
@@ -603,7 +605,22 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                           }
                           onClick={() => appendFilter(column, getCellValue(column, row, tableName))}
                         >
-                          {getCellValue(column, row, tableName)}
+                          {isFormNameLink ? (
+                            <Link
+                              to={{
+                                pathname: `/manage/form/${row.id}`,
+                                search: new URLSearchParams({
+                                  returnTo: `${location.pathname}${location.search}`,
+                                }).toString(),
+                              }}
+                              onClick={event => event.stopPropagation()}
+                              className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                            >
+                              {getCellValue(column, row, tableName)}
+                            </Link>
+                          ) : (
+                            getCellValue(column, row, tableName)
+                          )}
                         </td>
                       )
                     })}

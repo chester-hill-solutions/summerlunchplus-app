@@ -39,6 +39,7 @@ export default [
     route("class-attendance", "routes/manage/class-attendance.tsx"),
     route("workshop-enrollment", "routes/manage/workshop-enrollment.tsx"),
     route("form", "routes/manage/form.tsx"),
+    route("form/:formID", "routes/manage/form.$id.tsx"),
     route("form-question", "routes/manage/form-question.tsx"),
     route("form-question-map", "routes/manage/form-question-map.tsx"),
     route("form-assignment", "routes/manage/form-assignment.tsx"),
