@@ -147,9 +147,9 @@ select 'additional_guardian_surname', 'Additional guardian surname', 'text'::for
 union all
 select 'additional_guardian_email', 'Additional guardian Gmail', 'text'::form_question_type, '[]'::jsonb
 union all
-select 'household_total_people', 'Total people in the household', 'text'::form_question_type, '[]'::jsonb
+select 'household_total_people', 'Total people in the household', 'number'::form_question_type, '[]'::jsonb
 union all
-select 'household_total_children', 'Total children in the household', 'text'::form_question_type, '[]'::jsonb
+select 'household_total_children', 'Total children in the household', 'number'::form_question_type, '[]'::jsonb
 union all
 select 'partner_organization', 'Partner organization', 'single_choice'::form_question_type, $$[
   "Thorncliffe Park -TNO",

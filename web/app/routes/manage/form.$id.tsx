@@ -24,6 +24,8 @@ type FormQuestionMapItem = {
   position: number
   prompt: string
   type: string
+  base_prompt: string
+  base_options: Json
   options_override: Json | null
   visibility_condition: Json | null
   prompt_override: string | null
@@ -123,7 +125,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const { data: rows, error: mapError } = await supabase
     .from('form_question_map')
-    .select('question_code, position, prompt_override, options_override, visibility_condition, form_question ( prompt, type )')
+    .select('question_code, position, prompt_override, options_override, visibility_condition, form_question ( prompt, type, options )')
     .eq('form_id', formId)
     .order('position', { ascending: true })
 
@@ -138,6 +140,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       position: Number(row.position ?? 0),
       prompt: String(row.prompt_override ?? base?.prompt ?? ''),
       type: String(base?.type ?? 'text'),
+      base_prompt: String(base?.prompt ?? ''),
+      base_options: (base?.options ?? []) as Json,
       options_override: (row.options_override ?? null) as Json | null,
       visibility_condition: (row.visibility_condition ?? null) as Json | null,
       prompt_override: row.prompt_override ?? null,
@@ -333,7 +337,7 @@ export default function ManageFormFlowEditorPage() {
           {!selectedQuestion ? (
             <p className="mt-2 text-sm text-muted-foreground">Select a question node to edit its settings.</p>
           ) : (
-            <fetcher.Form method="post" className="mt-3 space-y-3">
+            <fetcher.Form key={selectedQuestion.question_code} method="post" className="mt-3 space-y-3">
               <input type="hidden" name="intent" value="update-question" />
               <input type="hidden" name="question_code" value={selectedQuestion.question_code} />
 
@@ -373,15 +377,21 @@ export default function ManageFormFlowEditorPage() {
                   defaultValue={selectedQuestion.prompt_override ?? ''}
                   className="min-h-20 rounded border border-input bg-background px-2 py-1.5 text-sm"
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  Base prompt: {selectedQuestion.base_prompt || 'None'}
+                </p>
               </div>
 
               <div className="grid gap-1">
                 <label className="text-xs text-muted-foreground">Options override JSON</label>
                 <textarea
                   name="options_override"
-                  defaultValue={prettyJson(selectedQuestion.options_override)}
+                  defaultValue={prettyJson(selectedQuestion.options_override ?? selectedQuestion.base_options)}
                   className="min-h-28 rounded border border-input bg-background px-2 py-1.5 font-mono text-xs"
                 />
+                {selectedQuestion.options_override == null ? (
+                  <p className="text-[11px] text-muted-foreground">Currently using base options shown above.</p>
+                ) : null}
               </div>
 
               <div className="grid gap-1">

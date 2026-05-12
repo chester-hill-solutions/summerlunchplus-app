@@ -4,7 +4,7 @@ create type "public"."app_role" as enum ('unassigned', 'admin', 'manager', 'staf
 
 create type "public"."form_assignment_status" as enum ('pending', 'submitted');
 
-create type "public"."form_question_type" as enum ('text', 'single_choice', 'multi_choice', 'date', 'address', 'agreement', 'checkbox');
+create type "public"."form_question_type" as enum ('text', 'number', 'single_choice', 'multi_choice', 'date', 'address', 'agreement', 'checkbox');
 
 create type "public"."invite_status" as enum ('pending', 'confirmed', 'revoked');
 
@@ -2034,5 +2034,4 @@ CREATE TRIGGER on_workshop_enrollment_updated_set_timestamp BEFORE UPDATE ON pub
 CREATE TRIGGER on_auth_user_created_create_profile AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_profile();
 
 CREATE TRIGGER on_auth_user_created_set_role AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_user_role();
-
 

@@ -229,7 +229,15 @@ export async function action({ request, params }: Route.ActionArgs) {
         ? formData.getAll(key).map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean).join(", ")
         : formData.get(key);
     const normalized = typeof rawValue === "string" ? rawValue.trim() : "";
-    const payload = type === "single_choice" ? { value: normalized } : { text: normalized };
+    let payload: { value?: string | number; text?: string | number };
+    if (type === "single_choice") {
+      payload = { value: normalized };
+    } else if (type === "number") {
+      const parsed = Number(normalized);
+      payload = Number.isNaN(parsed) ? { text: normalized } : { value: parsed };
+    } else {
+      payload = { text: normalized };
+    }
     return { submission_id: submissionRows.id, question_code: q.question_code, value: payload };
   });
 

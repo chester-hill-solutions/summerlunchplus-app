@@ -951,6 +951,7 @@ export type Database = {
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
+        | "number"
         | "single_choice"
         | "multi_choice"
         | "date"
@@ -1161,6 +1162,7 @@ export const Constants = {
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
+        "number",
         "single_choice",
         "multi_choice",
         "date",
@@ -1187,4 +1189,3 @@ export const Constants = {
     },
   },
 } as const
-

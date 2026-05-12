@@ -240,7 +240,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
           label: 'Type',
           type: 'enum',
           required: true,
-          enumValues: ['text', 'single_choice', 'multi_choice', 'date', 'address', 'agreement', 'checkbox'],
+          enumValues: ['text', 'number', 'single_choice', 'multi_choice', 'date', 'address', 'agreement', 'checkbox'],
         },
         options: { label: 'Options JSON', type: 'json', required: true },
       },
