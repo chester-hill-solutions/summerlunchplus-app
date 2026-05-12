@@ -1,4 +1,4 @@
-import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
+import { Form, Link, redirect, useActionData, useLoaderData, useNavigation, useRouteLoaderData } from "react-router";
 import { useEffect } from "react";
 
 import type { Route } from "./+types/my-forms.$formId";
@@ -39,6 +39,11 @@ type LoaderData = {
 
 type ActionData = {
   error?: string;
+};
+
+type RootLoaderData = {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -250,6 +255,7 @@ export default function MyFormDetail() {
   const { assignment, questions } = useLoaderData<LoaderData>();
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
+  const rootData = useRouteLoaderData("root") as RootLoaderData | undefined;
   const submitted = Boolean(assignment.submission);
   const isSubmitting =
     navigation.state === "submitting" && navigation.formAction?.includes(assignment.form.id);
@@ -260,10 +266,10 @@ export default function MyFormDetail() {
     if (!didSubmitSuccessfully) return;
 
     import("@/lib/supabase/client").then(async ({ createClient }) => {
-      const supabaseClient = createClient();
+      const supabaseClient = createClient(rootData?.supabaseUrl, rootData?.supabaseAnonKey);
       await supabaseClient.auth.refreshSession();
     });
-  }, [actionData?.error, navigation.state, submitted]);
+  }, [actionData?.error, navigation.state, rootData?.supabaseAnonKey, rootData?.supabaseUrl, submitted]);
 
   return (
     <main className="flex w-full flex-col gap-6 px-6 py-10">

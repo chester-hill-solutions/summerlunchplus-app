@@ -7,7 +7,7 @@ export const teamPages = [
   { to: '/manage/team', label: 'Team', description: 'Instructors and staff roles.' },
   { to: '/manage/invites', label: 'Invites', description: 'Pending/confirmed invitations.' },
   { to: '/manage/class', label: 'Classes', description: 'Individual class schedule entries.' },
-  { to: '/manage/person-guardian-child', label: 'Guardian child links', description: 'Guardian/child relationships.' },
+  { to: '/manage/families', label: 'Families', description: 'Guardian/child relationships.' },
   { to: '/manage/form', label: 'Forms', description: 'Onboarding forms configuration.' },
   { to: '/manage/form-question', label: 'Form questions', description: 'Questions tied to forms.' },
   { to: '/manage/form-question-map', label: 'Form question map', description: 'Questions mapped to forms and ordering.' },

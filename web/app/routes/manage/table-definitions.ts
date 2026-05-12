@@ -9,6 +9,23 @@ export type LookupMapping = {
   format?: 'profile_display' | 'semester_range' | 'class_display' | 'submission_display'
 }
 
+export type EditorFieldType = 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'foreign_key'
+
+export type EditorFieldConfig = {
+  label?: string
+  type: EditorFieldType
+  required?: boolean
+  nullable?: boolean
+  foreignKeyTable?: string
+}
+
+export type TableEditorConfig = {
+  primaryKey: string[]
+  allowInsert: boolean
+  allowUpdate: boolean
+  fields: Record<string, EditorFieldConfig>
+}
+
 export type TableDefinition = {
   label: string
   table: string
@@ -16,6 +33,7 @@ export type TableDefinition = {
   columns: string[]
   order: string
   lookupMappings?: LookupMapping[]
+  editor?: TableEditorConfig
 }
 
 export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
@@ -42,7 +60,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     order: 'id',
   },
   'person-guardian-child': {
-    label: 'Guardian Child Links',
+    label: 'Families',
     table: 'person_guardian_child',
     select: 'guardian_profile_id, child_profile_id, primary_child',
     columns: ['guardian_display', 'child_display', 'primary_child'],
@@ -74,18 +92,44 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         keyColumn: 'semester_id',
         table: 'semester',
         resultColumn: 'semester_range',
-        select: 'id, starts_at, ends_at',
+        select: 'id, name, starts_at, ends_at',
         format: 'semester_range',
       },
     ],
     order: 'enrollment_open_at',
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        semester_id: { label: 'Semester', type: 'foreign_key', required: true, foreignKeyTable: 'semester' },
+        description: { label: 'Description', type: 'text', nullable: true },
+        enrollment_open_at: { label: 'Enrollment Open', type: 'datetime', nullable: true },
+        enrollment_close_at: { label: 'Enrollment Close', type: 'datetime', nullable: true },
+        capacity: { label: 'Capacity', type: 'number', required: true },
+        wait_list_capacity: { label: 'Waitlist Capacity', type: 'number', required: true },
+      },
+    },
   },
   semester: {
     label: 'Semesters',
     table: 'semester',
-    select: 'id, starts_at, ends_at, enrollment_open_at, enrollment_close_at',
-    columns: ['starts_at', 'ends_at', 'enrollment_open_at', 'enrollment_close_at'],
+    select: 'id, name, description, starts_at, ends_at, enrollment_open_at, enrollment_close_at',
+    columns: ['name', 'description', 'starts_at', 'ends_at', 'enrollment_open_at', 'enrollment_close_at'],
     order: 'starts_at',
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        name: { label: 'Name', type: 'text', nullable: true },
+        description: { label: 'Description', type: 'text', nullable: true },
+        starts_at: { label: 'Starts At', type: 'datetime', required: true },
+        ends_at: { label: 'Ends At', type: 'datetime', required: true },
+        enrollment_open_at: { label: 'Enrollment Open', type: 'datetime', nullable: true },
+        enrollment_close_at: { label: 'Enrollment Close', type: 'datetime', nullable: true },
+      },
+    },
   },
   class: {
     label: 'Classes',
@@ -96,6 +140,17 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     lookupMappings: [
       { keyColumn: 'workshop_id', table: 'workshop', valueColumn: 'description', resultColumn: 'workshop_description' },
     ],
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        workshop_id: { label: 'Workshop', type: 'foreign_key', nullable: true, foreignKeyTable: 'workshop' },
+        starts_at: { label: 'Starts At', type: 'datetime', required: true },
+        ends_at: { label: 'Ends At', type: 'datetime', required: true },
+        location: { label: 'Location', type: 'text', nullable: true },
+      },
+    },
   },
   'class-enrollment': {
     label: 'Workshop Enrollments',
@@ -115,7 +170,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         keyColumn: 'semester_id',
         table: 'semester',
         resultColumn: 'semester_range',
-        select: 'id, starts_at, ends_at',
+        select: 'id, name, starts_at, ends_at',
         format: 'semester_range',
       },
       {
