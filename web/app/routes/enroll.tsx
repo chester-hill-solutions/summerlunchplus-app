@@ -1,8 +1,9 @@
-import { useLoaderData, useFetcher } from 'react-router'
+import { Link, redirect, useActionData, useLoaderData, useSearchParams } from 'react-router'
 
 import type { Route } from './+types/enroll'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { adminClient } from '@/lib/supabase/adminClient'
 import { requireAuth } from '@/lib/auth.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import {
@@ -42,9 +43,28 @@ type LoaderData = {
   semesters: SemesterRow[]
   enrollments: EnrollmentRow[]
   workshopCapacityById: Record<string, WorkshopCapacitySnapshot>
+  preSurveyBySemester: Record<string, { required: boolean; completed: boolean; preSurveyPath: string | null }>
+  selectedSemesterId: string | null
 }
 
-type ActionResult = { ok: boolean; error?: string; status?: 'pending' | 'waitlisted' }
+type ActionData = {
+  ok?: boolean
+  error?: string
+  status?: 'pending' | 'waitlisted'
+  surveyPath?: string | null
+}
+
+const formatDate = (value: string) =>
+  new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+
+const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveFamilyGraph>>) => {
+  if (family.profileRole === 'guardian') {
+    return family.primaryChildByGuardian.get(family.profileId) ?? null
+  }
+  return family.profileId
+}
+
+const getPreSurveyFormName = (semesterId: string) => `Pre-Semester Survey - ${semesterId}`
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
@@ -55,8 +75,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     family = await resolveFamilyGraph(supabase, auth.user.id)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Profile not found'
-    throw new Response(message, { status: 404 })
+    throw new Response(message, { status: 404, headers })
   }
+
+  const url = new URL(request.url)
+  const selectedSemesterId = url.searchParams.get('semester')
 
   const [{ data: semesterData }, { data: enrollmentsData }] = await Promise.all([
     supabase
@@ -69,10 +92,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       .in('profile_id', family.familyProfileIds)
       .order('requested_at', { ascending: false }),
   ])
-
-  const merged = new Headers(headers)
-  auth.headers.forEach((value, key) => merged.set(key, value))
-  merged.set('Content-Type', 'application/json')
 
   const semesters: SemesterRow[] = (semesterData ?? []).map((s: any) => ({
     id: String(s.id),
@@ -106,6 +125,47 @@ export async function loader({ request }: Route.LoaderArgs) {
     )
   )
 
+  const targetProfileId = getFamilyEnrollmentProfileId(family)
+  const semesterIds = semesters.map(semester => semester.id)
+  const preSurveyNames = semesterIds.map(semesterId => getPreSurveyFormName(semesterId))
+  const { data: preSurveyForms } = preSurveyNames.length
+    ? await adminClient.from('form').select('id, name').in('name', preSurveyNames)
+    : { data: [] }
+
+  const preSurveyFormBySemester = new Map<string, string>()
+  for (const row of preSurveyForms ?? []) {
+    const semesterId = row.name.replace('Pre-Semester Survey - ', '')
+    preSurveyFormBySemester.set(semesterId, row.id)
+  }
+
+  const preSurveyFormIds = Array.from(preSurveyFormBySemester.values())
+  const { data: preSurveySubmissions } =
+    targetProfileId && preSurveyFormIds.length
+      ? await adminClient
+          .from('form_submission')
+          .select('form_id')
+          .eq('profile_id', targetProfileId)
+          .in('form_id', preSurveyFormIds)
+      : { data: [] }
+
+  const completedPreSurveyFormIds = new Set(
+    (preSurveySubmissions ?? []).map(submission => submission.form_id).filter(Boolean)
+  )
+
+  const preSurveyBySemester = Object.fromEntries(
+    semesterIds.map(semesterId => {
+      const formId = preSurveyFormBySemester.get(semesterId)
+      return [
+        semesterId,
+        {
+          required: true,
+          completed: Boolean(formId && completedPreSurveyFormIds.has(formId)),
+          preSurveyPath: formId ? `/semester-surveys/${semesterId}/pre` : null,
+        },
+      ]
+    })
+  )
+
   const enrollments: EnrollmentRow[] = (enrollmentsData ?? []).map((e: any) => ({
     id: String(e.id),
     workshop_id: String(e.workshop_id),
@@ -114,7 +174,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     status: String(e.status),
   }))
 
-  return new Response(JSON.stringify({ semesters, enrollments, workshopCapacityById }), { headers: merged })
+  return {
+    semesters,
+    enrollments,
+    workshopCapacityById,
+    preSurveyBySemester,
+    selectedSemesterId,
+  } satisfies LoaderData
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -122,17 +188,14 @@ export async function action({ request }: Route.ActionArgs) {
   const workshop_id = String(formData.get('workshop_id') ?? '')
 
   const auth = await requireAuth(request)
-  const { supabase, headers } = createClient(request)
+  const { supabase } = createClient(request)
 
   let family
   try {
     family = await resolveFamilyGraph(supabase, auth.user.id)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Profile not found'
-    return new Response(JSON.stringify({ ok: false, error: message } satisfies ActionResult), {
-      status: 404,
-      headers,
-    })
+    return { ok: false, error: message } satisfies ActionData
   }
 
   const { data: workshopRow, error: workshopError } = await supabase
@@ -142,10 +205,7 @@ export async function action({ request }: Route.ActionArgs) {
     .single()
 
   if (workshopError || !workshopRow?.semester_id) {
-    return new Response(JSON.stringify({ ok: false, error: 'Workshop not found' } satisfies ActionResult), {
-      status: 404,
-      headers,
-    })
+    return { ok: false, error: 'Workshop not found' } satisfies ActionData
   }
 
   const nowIso = new Date().toISOString()
@@ -153,10 +213,7 @@ export async function action({ request }: Route.ActionArgs) {
   const enrollmentCloseAt = workshopRow.enrollment_close_at
   const isOpen = (!enrollmentOpenAt || nowIso >= enrollmentOpenAt) && (!enrollmentCloseAt || nowIso <= enrollmentCloseAt)
   if (!isOpen) {
-    return new Response(JSON.stringify({ ok: false, error: 'Enrollment is closed for this workshop' } satisfies ActionResult), {
-      status: 400,
-      headers,
-    })
+    return { ok: false, error: 'Enrollment is closed for this workshop' } satisfies ActionData
   }
 
   const { data: existingEnrollment } = await supabase
@@ -168,21 +225,41 @@ export async function action({ request }: Route.ActionArgs) {
     .maybeSingle()
 
   if (existingEnrollment?.id) {
-    return new Response(
-      JSON.stringify({ ok: false, error: 'Family already enrolled for this semester' } satisfies ActionResult),
-      { status: 400, headers }
-    )
+    return { ok: false, error: 'Your family is already enrolled in one workshop for this semester.' } satisfies ActionData
   }
 
-  const primaryChildId = family.primaryChildByGuardian.get(family.profileId)
-  if (family.profileRole === 'guardian' && !primaryChildId) {
-    return new Response(
-      JSON.stringify({ ok: false, error: 'Primary child not found for guardian' } satisfies ActionResult),
-      { status: 400, headers }
-    )
+  const targetProfileId = getFamilyEnrollmentProfileId(family)
+  if (!targetProfileId) {
+    return { ok: false, error: 'Family enrollment profile not found.' } satisfies ActionData
   }
 
-  const targetProfileId = primaryChildId ?? family.profileId
+  const preSurveyFormName = getPreSurveyFormName(workshopRow.semester_id)
+  const { data: preSurveyForm } = await adminClient
+    .from('form')
+    .select('id')
+    .eq('name', preSurveyFormName)
+    .maybeSingle()
+
+  if (!preSurveyForm?.id) {
+    return { ok: false, error: 'Pre-semester survey is not configured for this semester.' } satisfies ActionData
+  }
+
+  const { data: preSurveySubmission } = await adminClient
+    .from('form_submission')
+    .select('id')
+    .eq('form_id', preSurveyForm.id)
+    .eq('profile_id', targetProfileId)
+    .order('submitted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!preSurveySubmission?.id) {
+    return {
+      ok: false,
+      error: 'Please complete the pre-semester survey before enrolling.',
+      surveyPath: `/semester-surveys/${workshopRow.semester_id}/pre`,
+    } satisfies ActionData
+  }
 
   const { data: workshopEnrollments } = await supabase
     .from('workshop_enrollment')
@@ -201,21 +278,15 @@ export async function action({ request }: Route.ActionArgs) {
   ).get(workshop_id)
 
   if (!capacitySnapshot) {
-    return new Response(JSON.stringify({ ok: false, error: 'Unable to evaluate workshop capacity' } satisfies ActionResult), {
-      status: 500,
-      headers,
-    })
+    return { ok: false, error: 'Unable to evaluate workshop capacity' } satisfies ActionData
   }
 
   const enrollmentAction = getWorkshopEnrollmentAction(capacitySnapshot)
   if (enrollmentAction === 'full') {
-    return new Response(
-      JSON.stringify({ ok: false, error: 'This workshop and its waitlist are full' } satisfies ActionResult),
-      { status: 400, headers }
-    )
+    return { ok: false, error: 'This workshop and its waitlist are full' } satisfies ActionData
   }
 
-  const status: ActionResult['status'] = enrollmentAction === 'waitlist' ? 'waitlisted' : 'pending'
+  const status: ActionData['status'] = enrollmentAction === 'waitlist' ? 'waitlisted' : 'pending'
 
   const { error } = await supabase.from('workshop_enrollment').insert({
     workshop_id,
@@ -223,128 +294,164 @@ export async function action({ request }: Route.ActionArgs) {
     status,
   })
 
-  const merged = new Headers(headers)
-  auth.headers.forEach((value, key) => merged.set(key, value))
-  merged.set('Content-Type', 'application/json')
-
   if (error) {
-    return new Response(JSON.stringify({ ok: false, error: error.message } satisfies ActionResult), {
-      status: 400,
-      headers: merged,
-    })
+    return { ok: false, error: error.message } satisfies ActionData
   }
 
-  return new Response(JSON.stringify({ ok: true, status } satisfies ActionResult), { headers: merged })
+  return { ok: true, status } satisfies ActionData
 }
 
 export default function EnrollPage() {
-  const { semesters, enrollments, workshopCapacityById } = useLoaderData<LoaderData>()
-  const fetcher = useFetcher<ActionResult>()
+  const { semesters, enrollments, workshopCapacityById, preSurveyBySemester, selectedSemesterId } = useLoaderData<LoaderData>()
+  const actionData = useActionData<ActionData>()
+  const [searchParams] = useSearchParams()
 
-  const enrollmentBySemester = new Map(enrollments.map((e) => [e.semester_id, e]))
+  const semesterId = selectedSemesterId ?? searchParams.get('semester')
+  const selectedSemester = semesterId ? semesters.find(semester => semester.id === semesterId) : null
+  const semesterEnrollment = semesterId ? enrollments.find(enrollment => enrollment.semester_id === semesterId) : null
 
   return (
     <main className="flex w-full flex-col gap-6 px-6 py-10">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold">Enroll in a workshop</h1>
-        <p className="text-muted-foreground text-sm">
-          Choose one workshop per semester for your family. Requests go to admins for approval.
-        </p>
+        <p className="text-sm text-muted-foreground">Step 1: select a semester. Step 2: complete pre-survey. Step 3: choose one workshop.</p>
       </div>
 
-      <div className="flex flex-col gap-6">
-        {semesters.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No semesters available.</p>
-        ) : (
-          semesters.map((semester) => {
-            const existing = enrollmentBySemester.get(semester.id)
-            return (
-              <div key={semester.id} className="rounded-lg border bg-card p-4 shadow-sm">
-                <div className="mb-4">
-                  <h2 className="text-lg font-semibold">Semester starting {new Date(semester.starts_at).toLocaleDateString()}</h2>
-                  <p className="text-sm text-muted-foreground">
-                    {new Date(semester.starts_at).toLocaleDateString()} – {new Date(semester.ends_at).toLocaleDateString()}
-                  </p>
-                </div>
-                {semester.workshops.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No workshops available.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Workshop</TableHead>
-                          <TableHead>Seats</TableHead>
-                          <TableHead>Waitlist</TableHead>
-                          <TableHead>Enrollment window</TableHead>
-                          <TableHead className="text-right">Action</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {semester.workshops.map((workshop) => {
-                          const status = existing?.status
-                          const capacitySnapshot = workshopCapacityById[workshop.id]
-                          const enrollmentAction = capacitySnapshot
-                            ? getWorkshopEnrollmentAction(capacitySnapshot)
-                            : 'enroll'
-                          const isFull = enrollmentAction === 'full'
-                          const actionLabel = enrollmentAction === 'waitlist' ? 'Join waitlist' : 'Request enrollment'
-                          return (
-                            <TableRow key={workshop.id}>
-                              <TableCell className="font-medium">{workshop.description ?? 'Workshop'}</TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {capacitySnapshot
-                                  ? `${capacitySnapshot.approvedCount} / ${capacitySnapshot.capacity}`
-                                  : `0 / ${workshop.capacity}`}
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {capacitySnapshot
-                                  ? `${capacitySnapshot.waitlistedCount} / ${capacitySnapshot.waitListCapacity}`
-                                  : `0 / ${workshop.wait_list_capacity}`}
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {workshop.enrollment_open_at
-                                  ? new Date(workshop.enrollment_open_at).toLocaleDateString()
-                                  : 'Open'}{' '}
-                                –{' '}
-                                {workshop.enrollment_close_at
-                                  ? new Date(workshop.enrollment_close_at).toLocaleDateString()
-                                  : 'Close'}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {status ? (
-                                  <span className="text-sm capitalize text-muted-foreground">{status}</span>
-                                ) : (
-                                  <fetcher.Form method="post" className="inline-flex justify-end">
-                                    <input type="hidden" name="workshop_id" value={workshop.id} />
-                                    <Button type="submit" disabled={fetcher.state === 'submitting' || isFull}>
-                                      {isFull
-                                        ? 'Full'
-                                        : fetcher.state === 'submitting'
-                                        ? 'Submitting…'
-                                        : actionLabel}
-                                    </Button>
-                                  </fetcher.Form>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </div>
-            )
-          })
-        )}
-        {fetcher.data?.error ? <p className="pt-3 text-sm text-destructive">{fetcher.data.error}</p> : null}
-        {fetcher.data?.ok ? (
-          <p className="pt-3 text-sm text-emerald-600">
-            {fetcher.data.status === 'waitlisted' ? 'Added to waitlist.' : 'Enrollment requested.'}
-          </p>
-        ) : null}
-      </div>
+      {!selectedSemester ? (
+        <div className="rounded-lg border bg-card p-4 shadow-sm">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Semester</TableHead>
+                <TableHead>Dates</TableHead>
+                <TableHead>Pre-survey</TableHead>
+                <TableHead>Enrollment</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {semesters.map(semester => {
+                const preSurvey = preSurveyBySemester[semester.id]
+                const status = enrollments.find(enrollment => enrollment.semester_id === semester.id)?.status
+                return (
+                  <TableRow key={semester.id}>
+                    <TableCell className="font-medium">{semester.id.slice(0, 8)}</TableCell>
+                    <TableCell>{formatDate(semester.starts_at)} - {formatDate(semester.ends_at)}</TableCell>
+                    <TableCell>{preSurvey?.completed ? 'Complete' : 'Required'}</TableCell>
+                    <TableCell className="capitalize">{status ?? 'Not enrolled'}</TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild size="sm" variant="outline">
+                        <Link to={`/enroll?semester=${semester.id}`}>Select semester</Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Semester {selectedSemester.id.slice(0, 8)}</h2>
+            <Button asChild variant="outline" size="sm">
+              <Link to="/enroll">Change semester</Link>
+            </Button>
+          </div>
+
+          {semesterEnrollment ? (
+            <div className="rounded-lg border bg-card p-4 shadow-sm space-y-2">
+              <p className="font-medium">Your family is already enrolled in one workshop for this semester.</p>
+              <p className="text-sm text-muted-foreground capitalize">Enrollment status: {semesterEnrollment.status}</p>
+              <Button asChild variant="outline" size="sm">
+                <Link to="/home">Back to Family Workshops</Link>
+              </Button>
+            </div>
+          ) : !preSurveyBySemester[selectedSemester.id]?.completed ? (
+            <div className="rounded-lg border bg-card p-4 shadow-sm space-y-2">
+              <p className="font-medium">Complete pre-survey before choosing a workshop.</p>
+              {preSurveyBySemester[selectedSemester.id]?.preSurveyPath ? (
+                <Button asChild>
+                  <Link to={preSurveyBySemester[selectedSemester.id].preSurveyPath as string}>Complete pre-survey</Link>
+                </Button>
+              ) : (
+                <p className="text-sm text-muted-foreground">Pre-survey is not configured yet for this semester.</p>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
+              <p className="text-sm text-muted-foreground">You can enroll in one workshop for this semester.</p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Workshop</TableHead>
+                    <TableHead>Seats</TableHead>
+                    <TableHead>Waitlist</TableHead>
+                    <TableHead>Enrollment window</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedSemester.workshops.map(workshop => {
+                    const capacitySnapshot = workshopCapacityById[workshop.id]
+                    const enrollmentAction = capacitySnapshot
+                      ? getWorkshopEnrollmentAction(capacitySnapshot)
+                      : 'enroll'
+                    const isFull = enrollmentAction === 'full'
+                    const actionLabel = enrollmentAction === 'waitlist' ? 'Join waitlist' : 'Request enrollment'
+
+                    return (
+                      <TableRow key={workshop.id}>
+                        <TableCell className="font-medium">{workshop.description ?? 'Workshop'}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {capacitySnapshot
+                            ? `${capacitySnapshot.approvedCount} / ${capacitySnapshot.capacity}`
+                            : `0 / ${workshop.capacity}`}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {capacitySnapshot
+                            ? `${capacitySnapshot.waitlistedCount} / ${capacitySnapshot.waitListCapacity}`
+                            : `0 / ${workshop.wait_list_capacity}`}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {(workshop.enrollment_open_at ? formatDate(workshop.enrollment_open_at) : 'Open')}
+                          {' - '}
+                          {(workshop.enrollment_close_at ? formatDate(workshop.enrollment_close_at) : 'Close')}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <form method="post" className="inline-flex justify-end">
+                            <input type="hidden" name="workshop_id" value={workshop.id} />
+                            <Button type="submit" disabled={isFull} size="sm">
+                              {isFull ? 'Full' : actionLabel}
+                            </Button>
+                          </form>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {actionData?.error ? (
+        <div className="space-y-2">
+          <p className="text-sm text-destructive">{actionData.error}</p>
+          {actionData.surveyPath ? (
+            <Button asChild variant="outline" size="sm">
+              <Link to={actionData.surveyPath}>Complete pre-survey</Link>
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {actionData?.ok ? (
+        <p className="text-sm text-emerald-600">
+          {actionData.status === 'waitlisted' ? 'Added to waitlist.' : 'Enrollment requested.'}
+        </p>
+      ) : null}
     </main>
   )
 }
