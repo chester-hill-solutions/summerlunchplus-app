@@ -249,7 +249,6 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
             'address',
             'agreement',
             'checkbox',
-            'no-input-text',
           ],
         },
         options: { label: 'Options JSON', type: 'json', required: true },
