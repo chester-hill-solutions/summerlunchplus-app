@@ -326,8 +326,20 @@ export default function EnrollPage() {
 
   return (
     <main className="flex w-full flex-col gap-6 px-6 py-10">
+      <div className="flex gap-2">
+        <Button asChild variant="outline">
+          <Link to="/home">Family Workshops</Link>
+        </Button>
+        <Button asChild>
+          <Link to="/enroll">Manage Enrollments</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link to="/home?tab=manage-family">Manage Family</Link>
+        </Button>
+      </div>
+
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold">Enroll in a workshop</h1>
+        <h1 className="text-2xl font-semibold">Manage Enrollments</h1>
         <p className="text-sm text-muted-foreground">Step 1: select a semester. Step 2: complete pre-survey. Step 3: choose one workshop.</p>
       </div>
 
