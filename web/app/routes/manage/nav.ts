@@ -7,6 +7,7 @@ export type ManageNavItem = {
 export type ManageNavSection = {
   key: 'class-management' | 'form-management' | 'user-management' | 'system'
   label: string
+  stickerSrc: string
   defaultCollapsed: boolean
   items: ManageNavItem[]
 }
@@ -21,6 +22,7 @@ export const manageSections: ManageNavSection[] = [
   {
     key: 'class-management',
     label: 'Class Management',
+    stickerSrc: '/stickers/salad_on_plate.png',
     defaultCollapsed: false,
     items: [
       { to: '/manage/class-attendance', label: 'Class attendance', description: 'Attendance by class and student.' },
@@ -34,6 +36,7 @@ export const manageSections: ManageNavSection[] = [
   {
     key: 'form-management',
     label: 'Form Management',
+    stickerSrc: '/stickers/stocks.png',
     defaultCollapsed: false,
     items: [
       { to: '/manage/form', label: 'Forms', description: 'Onboarding forms configuration.' },
@@ -47,6 +50,7 @@ export const manageSections: ManageNavSection[] = [
   {
     key: 'user-management',
     label: 'User Management',
+    stickerSrc: '/stickers/green_hair_orange_girl.png',
     defaultCollapsed: true,
     items: [
       { to: '/manage/families', label: 'Families', description: 'Guardian/child relationships.' },
@@ -58,6 +62,7 @@ export const manageSections: ManageNavSection[] = [
   {
     key: 'system',
     label: 'System',
+    stickerSrc: '/stickers/radish.png',
     defaultCollapsed: true,
     items: [
       { to: '/manage/login-event', label: 'Login events', description: 'Successful sign-in metadata and source context.' },

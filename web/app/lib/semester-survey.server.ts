@@ -7,14 +7,6 @@ type SemesterSurveyForm = {
   required: boolean
 }
 
-const LEGACY_PREFIX_BY_KIND: Record<SemesterSurveyKind, string> = {
-  pre_survey: 'Pre-Semester Survey - ',
-  post_survey: 'Post-Semester Survey - ',
-}
-
-export const getLegacySemesterSurveyFormName = (semesterId: string, kind: SemesterSurveyKind) =>
-  `${LEGACY_PREFIX_BY_KIND[kind]}${semesterId}`
-
 export const resolveSemesterSurveyForm = async (
   semesterId: string,
   kind: SemesterSurveyKind
@@ -35,15 +27,8 @@ export const resolveSemesterSurveyForm = async (
     }
   }
 
-  const legacyName = getLegacySemesterSurveyFormName(semesterId, kind)
-  const { data: legacyForm } = await adminClient
-    .from('form')
-    .select('id')
-    .eq('name', legacyName)
-    .maybeSingle()
-
   return {
-    formId: legacyForm?.id ?? null,
+    formId: null,
     required: true,
   }
 }

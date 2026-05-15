@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { NavLink, Outlet, redirect, useLoaderData } from 'react-router'
 
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, House, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
@@ -33,6 +33,7 @@ export default function TeamLayout() {
             {
               key: 'user-management' as const,
               label: 'User Management',
+              stickerSrc: '/stickers/green_hair_orange_girl.png',
               defaultCollapsed: false,
               items: manageSections
                 .find(section => section.key === 'user-management')
@@ -42,6 +43,7 @@ export default function TeamLayout() {
     [isStaff]
   )
 
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(teamNavSections.map(section => [section.key, section.defaultCollapsed]))
   )
@@ -54,71 +56,129 @@ export default function TeamLayout() {
   }
 
   return (
-    <main className="flex w-full flex-col gap-6 px-6 py-8 lg:flex-row">
-      <aside className="w-full lg:w-56 lg:shrink-0">
-        <div className="rounded-lg border bg-card p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-muted-foreground">Manage</h2>
+    <main className="flex w-full">
+      <aside
+        className={cn(
+          'shrink-0 border-r bg-card transition-[width] duration-200',
+          sidebarCollapsed ? 'w-16' : 'w-64'
+        )}
+      >
+        <div className="sticky top-0 flex h-[calc(100vh-4rem)] flex-col p-2">
+          <div className={cn('flex items-center', sidebarCollapsed ? 'justify-center' : 'justify-between')}>
+            {!sidebarCollapsed ? (
+              <NavLink
+                to={overviewPage.to}
+                end
+                className={({ isActive }) =>
+                  cn(
+                    'flex flex-1 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors',
+                    isActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
+                  )
+                }
+              >
+                <House className="size-5" />
+                <span>{overviewPage.label}</span>
+              </NavLink>
+            ) : null}
 
-          <nav className="mt-3 space-y-1">
-            <NavLink
-              to={overviewPage.to}
-              end
-              className={({ isActive }) =>
-                cn(
-                  'block rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                  isActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
-                )
-              }
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(prev => !prev)}
+              className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
-              {overviewPage.label}
-            </NavLink>
-          </nav>
-
-          <div className="mt-3 space-y-2">
-            {teamNavSections.map(section => {
-              if (!section.items.length) return null
-              const isCollapsed = collapsedSections[section.key] ?? section.defaultCollapsed
-
-              return (
-                <div key={section.key}>
-                  <button
-                    type="button"
-                    onClick={() => toggleSection(section.key)}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted"
-                  >
-                    <span>{section.label}</span>
-                    {isCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
-                  </button>
-
-                  {!isCollapsed ? (
-                    <nav className="mt-1 space-y-1">
-                      {section.items.map(item => (
-                        <NavLink
-                          key={item.to}
-                          to={item.to}
-                          end={item.to === '/manage'}
-                          className={({ isActive }) =>
-                            cn(
-                              'block rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                              isActive
-                                ? 'bg-primary/10 text-primary'
-                                : 'text-foreground hover:bg-muted'
-                            )
-                          }
-                        >
-                          {item.label}
-                        </NavLink>
-                      ))}
-                    </nav>
-                  ) : null}
-                </div>
-              )
-            })}
+              {sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+            </button>
           </div>
+
+          {sidebarCollapsed ? (
+            <div className="mt-3 space-y-2">
+              {teamNavSections.map(section => {
+                if (!section.items.length) return null
+                return (
+                  <div key={section.key} className="group relative">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-center rounded-md p-0 hover:bg-muted"
+                      aria-label={section.label}
+                    >
+                      <img src={section.stickerSrc} alt={section.label} className="size-20 object-contain" />
+                    </button>
+
+                    <div className="invisible absolute left-full top-0 z-50 ml-2 w-64 rounded-lg border bg-card p-2 opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100">
+                      <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {section.label}
+                      </p>
+                      <nav className="space-y-1">
+                        {section.items.map(item => (
+                          <NavLink
+                            key={item.to}
+                            to={item.to}
+                            end={item.to === '/manage'}
+                            className={({ isActive }) =>
+                              cn(
+                                'block rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                                isActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
+                              )
+                            }
+                          >
+                            {item.label}
+                          </NavLink>
+                        ))}
+                      </nav>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {teamNavSections.map(section => {
+                if (!section.items.length) return null
+                const isCollapsed = collapsedSections[section.key] ?? section.defaultCollapsed
+
+                return (
+                  <div key={section.key}>
+                    <button
+                      type="button"
+                      onClick={() => toggleSection(section.key)}
+                      className="flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted"
+                    >
+                      <span className="flex items-center gap-2">
+                        <img src={section.stickerSrc} alt={section.label} className="size-10 object-contain" />
+                        {section.label}
+                      </span>
+                      {isCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
+                    </button>
+
+                    {!isCollapsed ? (
+                      <nav className="mt-1 space-y-1">
+                        {section.items.map(item => (
+                          <NavLink
+                            key={item.to}
+                            to={item.to}
+                            end={item.to === '/manage'}
+                            className={({ isActive }) =>
+                              cn(
+                                'block rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                                isActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
+                              )
+                            }
+                          >
+                            {item.label}
+                          </NavLink>
+                        ))}
+                      </nav>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </aside>
 
-      <section className="min-w-0 flex-1 space-y-6">
+      <section className="min-w-0 flex-1 space-y-6 p-6">
         <Outlet />
       </section>
     </main>
