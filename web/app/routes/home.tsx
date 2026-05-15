@@ -556,6 +556,9 @@ export default function Home() {
         <Button asChild variant={tab === 'family-workshops' ? 'default' : 'outline'}>
           <Link to="/home">Family Workshops</Link>
         </Button>
+        <Button asChild variant="outline">
+          <Link to="/enroll">Manage Enrollments</Link>
+        </Button>
         <Button asChild variant={tab === 'manage-family' ? 'default' : 'outline'}>
           <Link to="/home?tab=manage-family">Manage Family</Link>
         </Button>
@@ -585,18 +588,13 @@ export default function Home() {
             <section className="rounded-lg border bg-card p-6 text-center shadow-sm space-y-4">
               <h2 className="text-xl font-semibold">Your family has not enrolled in any workshops</h2>
               <Button asChild>
-                <Link to="/enroll">Enroll in a workshop</Link>
+                <Link to="/enroll">Manage enrollments</Link>
               </Button>
             </section>
           ) : (
             <>
               <section className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-lg font-semibold">Enrolled workshops</h2>
-                  <Button asChild variant="outline" size="sm">
-                    <Link to="/enroll">Enroll in a workshop</Link>
-                  </Button>
-                </div>
+                <h2 className="text-lg font-semibold">Enrolled workshops</h2>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -624,7 +622,18 @@ export default function Home() {
                             </a>
                           </TableCell>
                           <TableCell>{semester?.name ?? (semester ? `${formatDate(semester.starts_at)} - ${formatDate(semester.ends_at)}` : enrollment.semester_id.slice(0, 8))}</TableCell>
-                          <TableCell className="capitalize">{enrollment.status}</TableCell>
+                          <TableCell>
+                            {enrollment.status === 'pending' ? (
+                              <span
+                                className="cursor-help capitalize"
+                                title="Your enrollment is under review. Thank you for your patience."
+                              >
+                                {enrollment.status}
+                              </span>
+                            ) : (
+                              <span className="capitalize">{enrollment.status}</span>
+                            )}
+                          </TableCell>
                           <TableCell>{next ? formatDateTime(next.starts_at) : 'No upcoming class'}</TableCell>
                           <TableCell>{`Present: ${attendance.present} · Absent: ${attendance.absent}`}</TableCell>
                         </TableRow>

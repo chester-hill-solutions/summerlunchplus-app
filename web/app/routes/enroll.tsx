@@ -66,6 +66,9 @@ const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveF
   return family.profileId
 }
 
+const semesterSurveyPath = (semesterId: string) =>
+  `/semester-surveys/${semesterId}/pre?returnTo=${encodeURIComponent(`/enroll?semester=${semesterId}`)}`
+
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   const { supabase, headers } = createClient(request)
@@ -174,7 +177,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         {
           required,
           completed: Boolean(formId && completedPreSurveyFormIds.has(formId)),
-          preSurveyPath: formId ? `/semester-surveys/${semesterId}/pre` : null,
+          preSurveyPath: formId ? semesterSurveyPath(semesterId) : null,
         },
       ]
     })
@@ -265,12 +268,12 @@ export async function action({ request }: Route.ActionArgs) {
     : { data: { id: 'not-required' } }
 
   if (preSurveyForm.required && !preSurveySubmission?.id) {
-    return {
-      ok: false,
-      error: 'Please complete the pre-semester survey before enrolling.',
-      surveyPath: `/semester-surveys/${workshopRow.semester_id}/pre`,
-    } satisfies ActionData
-  }
+      return {
+        ok: false,
+        error: 'Please complete the pre-semester survey before enrolling.',
+        surveyPath: semesterSurveyPath(workshopRow.semester_id),
+      } satisfies ActionData
+    }
 
   const { data: workshopEnrollments } = await supabase
     .from('workshop_enrollment')
@@ -323,8 +326,20 @@ export default function EnrollPage() {
 
   return (
     <main className="flex w-full flex-col gap-6 px-6 py-10">
+      <div className="flex gap-2">
+        <Button asChild variant="outline">
+          <Link to="/home">Family Workshops</Link>
+        </Button>
+        <Button asChild>
+          <Link to="/enroll">Manage Enrollments</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link to="/home?tab=manage-family">Manage Family</Link>
+        </Button>
+      </div>
+
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold">Enroll in a workshop</h1>
+        <h1 className="text-2xl font-semibold">Manage Enrollments</h1>
         <p className="text-sm text-muted-foreground">Step 1: select a semester. Step 2: complete pre-survey. Step 3: choose one workshop.</p>
       </div>
 

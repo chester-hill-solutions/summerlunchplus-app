@@ -573,7 +573,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                   <button
                     type="button"
                     onClick={() => updateSort(column)}
-                    className="flex items-center gap-1 font-semibold"
+                    className="flex items-center gap-1 font-semibold hover:underline hover:underline-offset-4"
                   >
                     {(columnMeta[column]?.label ?? column).replace(/_/g, ' ')}
                     {getDirectionIndicator(sortColumn === column ? sortStage : 0)}
@@ -700,10 +700,12 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                       const personLink = personLinkForCell(tableName, column, row)
                       const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
                       const filterable = columnMeta[column]?.filterable ?? true
+                      const cellValue = getCellValue(column, row, tableName)
 
                       return (
                         <td
                           key={`cell-${rowIndex}-${column}`}
+                          title={cellValue}
                           className={
                             isNumericColumn(column)
                               ? 'w-24 cursor-pointer whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums hover:bg-muted/30'
@@ -711,7 +713,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                           }
                           onClick={() => {
                             if (!filterable) return
-                            appendFilter(column, getCellValue(column, row, tableName))
+                            appendFilter(column, cellValue)
                           }}
                         >
                           {isFormNameLink ? (
@@ -725,7 +727,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               onClick={event => event.stopPropagation()}
                               className="underline decoration-dotted underline-offset-2 hover:text-primary"
                             >
-                              {getCellValue(column, row, tableName)}
+                              {cellValue}
                             </Link>
                           ) : isFormAnswersLink ? (
                             <Link
@@ -738,7 +740,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               onClick={event => event.stopPropagation()}
                               className="underline decoration-dotted underline-offset-2 hover:text-primary"
                             >
-                              {getCellValue(column, row, tableName)}
+                              {cellValue}
                             </Link>
                           ) : personLink ? (
                             <Link
@@ -746,10 +748,10 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               onClick={event => event.stopPropagation()}
                               className="underline decoration-dotted underline-offset-2 hover:text-primary"
                             >
-                              {getCellValue(column, row, tableName)}
+                              {cellValue}
                             </Link>
                           ) : (
-                            getCellValue(column, row, tableName)
+                            cellValue
                           )}
                         </td>
                       )
