@@ -1,6 +1,7 @@
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import { Button } from '@/components/ui/button'
+import AuthStickerBackground from '@/components/auth/sticker-background'
 import {
   Card,
   CardContent,
@@ -1178,8 +1179,8 @@ export default function SignUpDetails() {
   const disableContinue = loading || (isAdditionalGuardianStep && wantsAdditionalGuardian && !additionalGuardianFieldsComplete)
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-3xl">
+    <AuthStickerBackground maxWidthClassName="max-w-3xl" dense>
+      <div className="w-full">
         <Card>
           <CardHeader>
             <CardTitle className="text-2xl">{currentForm?.name ?? 'Sign-up details'}</CardTitle>
@@ -1323,6 +1324,6 @@ export default function SignUpDetails() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </AuthStickerBackground>
   )
 }

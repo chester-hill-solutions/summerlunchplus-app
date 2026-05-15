@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { recordLoginEvent } from '@/lib/login-events.server'
+import AuthStickerBackground from '@/components/auth/sticker-background'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -71,8 +72,8 @@ export default function Login() {
   const loading = fetcher.state === 'submitting'
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-md">
+    <AuthStickerBackground dense>
+      <div className="w-full">
         <div className="flex flex-col gap-6">
           <Card>
             <CardHeader>
@@ -120,6 +121,6 @@ export default function Login() {
           </Card>
         </div>
       </div>
-    </div>
+    </AuthStickerBackground>
   )
 }
