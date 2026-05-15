@@ -89,12 +89,14 @@ type AuthStickerBackgroundProps = {
   children: ReactNode
   maxWidthClassName?: string
   dense?: boolean
+  scrollContent?: boolean
 }
 
 export default function AuthStickerBackground({
   children,
   maxWidthClassName = 'max-w-md',
   dense = false,
+  scrollContent = false,
 }: AuthStickerBackgroundProps) {
   const allStickers = dense ? createDenseStickers() : STICKERS
 
@@ -116,7 +118,13 @@ export default function AuthStickerBackground({
         ))}
       </div>
 
-      <div className={`relative z-30 w-full max-h-[calc(100svh-2rem)] overflow-y-auto ${maxWidthClassName}`}>{children}</div>
+      <div
+        className={`relative z-30 w-full ${
+          scrollContent ? 'max-h-[calc(100svh-2rem)] overflow-y-auto md:max-h-[calc(100svh-4rem)]' : ''
+        } ${maxWidthClassName}`}
+      >
+        {children}
+      </div>
     </div>
   )
 }

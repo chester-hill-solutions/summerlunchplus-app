@@ -1179,7 +1179,7 @@ export default function SignUpDetails() {
   const disableContinue = loading || (isAdditionalGuardianStep && wantsAdditionalGuardian && !additionalGuardianFieldsComplete)
 
   return (
-    <AuthStickerBackground maxWidthClassName="max-w-3xl" dense>
+    <AuthStickerBackground maxWidthClassName="max-w-3xl" dense scrollContent>
       <div className="w-full">
         <Card>
           <CardHeader>

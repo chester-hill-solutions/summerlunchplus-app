@@ -268,7 +268,7 @@ export default function WaitingOnGuardianPage() {
   const loading = fetcher.state === 'submitting'
 
   return (
-    <AuthStickerBackground maxWidthClassName="max-w-3xl" dense>
+    <AuthStickerBackground maxWidthClassName="max-w-3xl" dense scrollContent>
       <div className="w-full">
         <Card>
           <CardHeader>
