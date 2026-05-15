@@ -37,6 +37,8 @@ type LoaderData = {
   rows: Record<string, unknown>[]
   label: string
   tableName: string
+  tableVariant?: 'default' | 'pivot'
+  columnMeta?: Record<string, { label?: string; truncate?: boolean; filterable?: boolean }>
   canEditStatus?: boolean
   editorConfig?: EditorConfig
   foreignKeyOptions?: Record<string, ForeignKeyOption[]>
@@ -166,6 +168,8 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     rows = [],
     label = 'Table',
     tableName = '',
+    tableVariant = 'default',
+    columnMeta = {},
     canEditStatus,
     editorConfig,
     foreignKeyOptions = {},
@@ -552,7 +556,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                     onClick={() => updateSort(column)}
                     className="flex items-center gap-1 font-semibold"
                   >
-                    {column.replace(/_/g, ' ')}
+                    {(columnMeta[column]?.label ?? column).replace(/_/g, ' ')}
                     {getDirectionIndicator(sortColumn === column ? sortStage : 0)}
                   </button>
                 </th>
@@ -562,29 +566,31 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
             <tr className="bg-muted/10">
               {columns.map(column => (
                 <th key={`filter-${column}`} className="px-4 py-1">
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={filters[column] ?? ''}
-                      onChange={event => updateFilter(column, event.target.value)}
-                      placeholder="Filter"
-                      className={
-                        isNumericColumn(column)
-                          ? 'w-full max-w-24 rounded border border-border px-2 py-1 pr-7 text-xs'
-                          : 'w-full rounded border border-border px-2 py-1 pr-7 text-xs'
-                      }
-                    />
-                    {filters[column] ? (
-                      <button
-                        type="button"
-                        onClick={() => updateFilter(column, '')}
-                        className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                        aria-label={`Clear ${column} filter`}
-                      >
-                        x
-                      </button>
-                    ) : null}
-                  </div>
+                  {columnMeta[column]?.filterable === false ? null : (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={filters[column] ?? ''}
+                        onChange={event => updateFilter(column, event.target.value)}
+                        placeholder="Filter"
+                        className={
+                          isNumericColumn(column)
+                            ? 'w-full max-w-24 rounded border border-border px-2 py-1 pr-7 text-xs'
+                            : 'w-full rounded border border-border px-2 py-1 pr-7 text-xs'
+                        }
+                      />
+                      {filters[column] ? (
+                        <button
+                          type="button"
+                          onClick={() => updateFilter(column, '')}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                          aria-label={`Clear ${column} filter`}
+                        >
+                          x
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
                 </th>
               ))}
               {canInlineUpdate ? <th className="px-4 py-1" /> : null}
@@ -639,15 +645,21 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                       const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
                       const isFormAnswersLink = tableName === 'form' && column === 'answers' && typeof row.id === 'string'
                       const personLink = personLinkForCell(tableName, column, row)
+                      const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
+                      const filterable = columnMeta[column]?.filterable ?? true
+
                       return (
                         <td
                           key={`cell-${rowIndex}-${column}`}
                           className={
                             isNumericColumn(column)
                               ? 'w-24 cursor-pointer whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums hover:bg-muted/30'
-                              : 'max-w-xs cursor-pointer truncate px-4 py-2 font-mono hover:bg-muted/30'
+                              : `${shouldTruncate ? 'max-w-xs truncate' : 'whitespace-nowrap'} cursor-pointer px-4 py-2 font-mono hover:bg-muted/30`
                           }
-                          onClick={() => appendFilter(column, getCellValue(column, row, tableName))}
+                          onClick={() => {
+                            if (!filterable) return
+                            appendFilter(column, getCellValue(column, row, tableName))
+                          }}
                         >
                           {isFormNameLink ? (
                             <Link
