@@ -3,7 +3,6 @@ import { Form, Link, redirect, useActionData, useLoaderData, useSearchParams } f
 import type { Route } from './+types/home'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
@@ -305,30 +304,33 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === 'set_primary_child') {
-    const guardianId = String(formData.get('guardian_id') ?? '')
     const childId = String(formData.get('child_id') ?? '')
-    if (!guardianId || !childId) return { error: 'Guardian and child are required.' } satisfies ActionData
-    if (!family.guardians.some(guardian => guardian.id === guardianId)) return { error: 'Invalid guardian.' } satisfies ActionData
+    if (!childId) return { error: 'Child is required.' } satisfies ActionData
     if (!family.children.some(child => child.id === childId)) return { error: 'Invalid child.' } satisfies ActionData
+
+    const guardianIds = family.guardians.map(guardian => guardian.id)
+    if (!guardianIds.length) {
+      return { error: 'No guardians found for this family.' } satisfies ActionData
+    }
 
     await adminClient
       .from('person_guardian_child')
       .update({ primary_child: false })
-      .eq('guardian_profile_id', guardianId)
+      .in('guardian_profile_id', guardianIds)
 
-    const { error } = await adminClient
+    const { data: updatedRows, error } = await adminClient
       .from('person_guardian_child')
-      .upsert(
-        {
-          guardian_profile_id: guardianId,
-          child_profile_id: childId,
-          primary_child: true,
-        },
-        { onConflict: 'guardian_profile_id,child_profile_id' }
-      )
+      .update({ primary_child: true })
+      .in('guardian_profile_id', guardianIds)
+      .eq('child_profile_id', childId)
+      .select('id')
 
     if (error) return { error: error.message } satisfies ActionData
-    return { ok: true, message: 'Primary child updated.' } satisfies ActionData
+    if (!updatedRows?.length) {
+      return { error: 'Selected child is not linked to this family.' } satisfies ActionData
+    }
+
+    return { ok: true, message: 'Primary child updated for the family.' } satisfies ActionData
   }
 
   if (intent === 'add_child') {
@@ -456,6 +458,20 @@ export async function action({ request }: Route.ActionArgs) {
     if (!email) return { error: 'Email is required.' } satisfies ActionData
     if (!family.familyProfileIds.includes(profileId)) return { error: 'Profile is not in this family.' } satisfies ActionData
 
+    const { data: profileRow } = await adminClient
+      .from('profile')
+      .select('id, user_id')
+      .eq('id', profileId)
+      .maybeSingle()
+
+    if (!profileRow?.id) {
+      return { error: 'Profile not found.' } satisfies ActionData
+    }
+
+    if (profileRow.user_id) {
+      return { error: 'This account is already active and does not need a new invite.' } satisfies ActionData
+    }
+
     await adminClient.from('profile').update({ email }).eq('id', profileId)
 
     const inviteResult = await sendInvite({
@@ -495,6 +511,19 @@ export default function Home() {
   const actionData = useActionData<ActionData>()
   const [searchParams] = useSearchParams()
   const tab = searchParams.get('tab') === 'manage-family' ? 'manage-family' : 'family-workshops'
+  const title = tab === 'manage-family' ? 'Manage Family' : 'Family Workshops'
+  const subtitle =
+    tab === 'manage-family'
+      ? 'Add family members, set one primary child, and manage invitation access.'
+      : 'Track enrollments and view upcoming or past class attendance.'
+
+  const inviteByEmail = new Map<string, InviteRow>()
+  for (const invite of invites) {
+    const key = invite.invitee_email.toLowerCase()
+    if (!inviteByEmail.has(key)) {
+      inviteByEmail.set(key, invite)
+    }
+  }
 
   const workshopEnrollments = enrollments.filter(enrollment => Boolean(enrollment.workshop_id))
   const hasWorkshopEnrollment = workshopEnrollments.length > 0
@@ -523,11 +552,6 @@ export default function Home() {
 
   return (
     <main className="w-full px-6 py-10 space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-3xl font-semibold">Family Workshops</h1>
-        <p className="text-sm text-muted-foreground">Track enrollments, review classes, and manage your family account.</p>
-      </header>
-
       <div className="flex gap-2">
         <Button asChild variant={tab === 'family-workshops' ? 'default' : 'outline'}>
           <Link to="/home">Family Workshops</Link>
@@ -536,6 +560,11 @@ export default function Home() {
           <Link to="/home?tab=manage-family">Manage Family</Link>
         </Button>
       </div>
+
+      <header className="space-y-1">
+        <h1 className="text-3xl font-semibold">{title}</h1>
+        <p className="text-sm text-muted-foreground">{subtitle}</p>
+      </header>
 
       {actionData?.error ? <p className="text-sm text-destructive">{actionData.error}</p> : null}
       {actionData?.ok && actionData.message ? <p className="text-sm text-emerald-600">{actionData.message}</p> : null}
@@ -688,178 +717,133 @@ export default function Home() {
 
           <section className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
             <h2 className="text-lg font-semibold">Family members</h2>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Guardians</h3>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Primary child</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {familyProfiles.filter(profile => profile.role === 'guardian').map(guardian => (
-                      <TableRow key={guardian.id}>
-                        <TableCell>{personName(guardian)}</TableCell>
-                        <TableCell>{guardian.email ?? 'No email'}</TableCell>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Invite status</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {familyProfiles
+                  .slice()
+                  .sort((a, b) => {
+                    const roleA = a.role === 'guardian' ? 0 : 1
+                    const roleB = b.role === 'guardian' ? 0 : 1
+                    if (roleA !== roleB) return roleA - roleB
+                    return personName(a).localeCompare(personName(b))
+                  })
+                  .map(profile => {
+                    const isGuardian = profile.role === 'guardian'
+                    const isStudent = profile.role === 'student'
+                    const isPrimaryChild = isStudent && family.guardians.some(guardian => guardian.primaryChildId === profile.id)
+                    const invite = profile.email ? inviteByEmail.get(profile.email.toLowerCase()) : null
+                    const inviteStatus = profile.user_id
+                      ? 'Active account'
+                      : invite?.status
+                        ? `Invite ${invite.status}`
+                        : 'No invite sent'
+
+                    return (
+                      <TableRow key={profile.id}>
                         <TableCell>
-                          {family.primaryChildByGuardian.get(guardian.id) ? (
-                            <Form method="post" className="flex items-center gap-2">
-                              <input type="hidden" name="intent" value="set_primary_child" />
-                              <input type="hidden" name="guardian_id" value={guardian.id} />
-                              <select name="child_id" defaultValue={family.primaryChildByGuardian.get(guardian.id)} className="h-8 rounded border border-input bg-background px-2 text-xs">
-                                {familyProfiles
-                                  .filter(profile => profile.role === 'student')
-                                  .map(child => (
-                                    <option key={child.id} value={child.id}>
-                                      {personName(child)}
-                                    </option>
-                                  ))}
-                              </select>
-                              <Button type="submit" variant="outline" size="sm">Save</Button>
-                            </Form>
+                          <div className="flex items-center gap-2">
+                            <span>{personName(profile)}</span>
+                            {isPrimaryChild ? (
+                              <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                                Primary child
+                              </span>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="capitalize">{profile.role}</TableCell>
+                        <TableCell>{profile.email ?? 'No email'}</TableCell>
+                        <TableCell className="capitalize">{inviteStatus}</TableCell>
+                        <TableCell>
+                          {family.profileRole === 'guardian' ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {isStudent ? (
+                                <Form method="post" className="flex items-center gap-2">
+                                  <input type="hidden" name="intent" value="set_primary_child" />
+                                  <input type="hidden" name="child_id" value={profile.id} />
+                                  <Button type="submit" variant="outline" size="sm" disabled={isPrimaryChild}>
+                                    {isPrimaryChild ? 'Primary' : 'Set primary'}
+                                  </Button>
+                                </Form>
+                              ) : null}
+                              {!profile.user_id && (isStudent || isGuardian) ? (
+                                <Form method="post" className="flex items-center gap-2">
+                                  <input type="hidden" name="intent" value="send_or_resend_invite" />
+                                  <input type="hidden" name="profile_id" value={profile.id} />
+                                  <input type="hidden" name="role" value={isGuardian ? 'guardian' : 'student'} />
+                                  <Input
+                                    name="email"
+                                    type="email"
+                                    defaultValue={profile.email ?? ''}
+                                    placeholder={isGuardian ? 'guardian@gmail.com' : 'child@gmail.com'}
+                                    className="h-8 w-52"
+                                    required
+                                  />
+                                  <Button type="submit" variant="outline" size="sm">
+                                    {invite?.status === 'pending' ? 'Resend invite' : 'Send invite'}
+                                  </Button>
+                                </Form>
+                              ) : null}
+                            </div>
                           ) : (
-                            <Form method="post" className="flex items-center gap-2">
-                              <input type="hidden" name="intent" value="set_primary_child" />
-                              <input type="hidden" name="guardian_id" value={guardian.id} />
-                              <select name="child_id" className="h-8 rounded border border-input bg-background px-2 text-xs">
-                                {familyProfiles
-                                  .filter(profile => profile.role === 'student')
-                                  .map(child => (
-                                    <option key={child.id} value={child.id}>
-                                      {personName(child)}
-                                    </option>
-                                  ))}
-                              </select>
-                              <Button type="submit" variant="outline" size="sm">Set</Button>
-                            </Form>
+                            <span className="text-xs text-muted-foreground">View only</span>
                           )}
                         </TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    )
+                  })}
 
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Children</h3>
-                <Table>
-                  <TableHeader>
+                {family.profileRole === 'guardian' ? (
+                  <>
                     <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Invite</TableHead>
+                      <TableCell className="font-medium">Add child</TableCell>
+                      <TableCell>student</TableCell>
+                      <TableCell colSpan={3}>
+                        <Form method="post" className="flex flex-wrap items-center gap-2">
+                          <input type="hidden" name="intent" value="add_child" />
+                          <Input name="firstname" placeholder="First name" className="h-8 w-32" />
+                          <Input name="surname" placeholder="Surname" className="h-8 w-32" />
+                          <Input name="email" type="email" placeholder="Email (optional)" className="h-8 w-52" />
+                          <Button type="submit" size="sm">Add</Button>
+                        </Form>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {familyProfiles.filter(profile => profile.role === 'student').map(child => (
-                      <TableRow key={child.id}>
-                        <TableCell>{personName(child)}</TableCell>
-                        <TableCell>{child.email ?? 'No email'}</TableCell>
-                        <TableCell>
-                          <Form method="post" className="flex items-center gap-2">
-                            <input type="hidden" name="intent" value="send_or_resend_invite" />
-                            <input type="hidden" name="profile_id" value={child.id} />
-                            <input type="hidden" name="role" value="student" />
-                            <Input name="email" type="email" defaultValue={child.email ?? ''} placeholder="child@gmail.com" className="h-8 w-56" required />
-                            <Button type="submit" variant="outline" size="sm">
-                              {child.user_id ? 'Resend' : 'Send initial invite'}
-                            </Button>
-                          </Form>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          </section>
 
-          {family.profileRole === 'guardian' ? (
-            <section className="rounded-lg border bg-card p-4 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold">Invite another guardian</h2>
-              <Form method="post" className="grid gap-3 md:grid-cols-4">
-                <input type="hidden" name="intent" value="add_guardian" />
-                <div className="grid gap-1">
-                  <Label htmlFor="guardian-firstname">First name</Label>
-                  <Input id="guardian-firstname" name="firstname" />
-                </div>
-                <div className="grid gap-1">
-                  <Label htmlFor="guardian-surname">Surname</Label>
-                  <Input id="guardian-surname" name="surname" />
-                </div>
-                <div className="grid gap-1">
-                  <Label htmlFor="guardian-email">Email</Label>
-                  <Input id="guardian-email" name="email" type="email" required />
-                </div>
-                <div className="grid gap-1">
-                  <Label htmlFor="guardian-child">Link to child</Label>
-                  <select id="guardian-child" name="child_id" className="h-10 rounded border border-input bg-background px-2" required>
-                    <option value="">Select child</option>
-                    {familyProfiles
-                      .filter(profile => profile.role === 'student')
-                      .map(child => (
-                        <option key={child.id} value={child.id}>
-                          {personName(child)}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-                <div className="md:col-span-4">
-                  <Button type="submit">Invite guardian</Button>
-                </div>
-              </Form>
-
-              <h2 className="text-lg font-semibold">Add child</h2>
-              <Form method="post" className="grid gap-3 md:grid-cols-3">
-                <input type="hidden" name="intent" value="add_child" />
-                <div className="grid gap-1">
-                  <Label htmlFor="child-firstname">First name</Label>
-                  <Input id="child-firstname" name="firstname" />
-                </div>
-                <div className="grid gap-1">
-                  <Label htmlFor="child-surname">Surname</Label>
-                  <Input id="child-surname" name="surname" />
-                </div>
-                <div className="grid gap-1">
-                  <Label htmlFor="child-email">Email (optional)</Label>
-                  <Input id="child-email" name="email" type="email" />
-                </div>
-                <div className="md:col-span-3">
-                  <Button type="submit">Add child</Button>
-                </div>
-              </Form>
-            </section>
-          ) : null}
-
-          <section className="rounded-lg border bg-card p-4 shadow-sm space-y-2">
-            <h2 className="text-lg font-semibold">Invites</h2>
-            {invites.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No invites yet.</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Sent</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {invites.map(invite => (
-                    <TableRow key={invite.id}>
-                      <TableCell>{invite.invitee_email}</TableCell>
-                      <TableCell className="capitalize">{invite.role}</TableCell>
-                      <TableCell className="capitalize">{invite.status}</TableCell>
-                      <TableCell>{formatDate(invite.created_at)}</TableCell>
+                    <TableRow>
+                      <TableCell className="font-medium">Add guardian</TableCell>
+                      <TableCell>guardian</TableCell>
+                      <TableCell colSpan={3}>
+                        <Form method="post" className="flex flex-wrap items-center gap-2">
+                          <input type="hidden" name="intent" value="add_guardian" />
+                          <Input name="firstname" placeholder="First name" className="h-8 w-32" />
+                          <Input name="surname" placeholder="Surname" className="h-8 w-32" />
+                          <Input name="email" type="email" placeholder="guardian@gmail.com" className="h-8 w-52" required />
+                          <select name="child_id" className="h-8 rounded border border-input bg-background px-2 text-xs" required>
+                            <option value="">Link to child</option>
+                            {familyProfiles
+                              .filter(profile => profile.role === 'student')
+                              .map(child => (
+                                <option key={child.id} value={child.id}>
+                                  {personName(child)}
+                                </option>
+                              ))}
+                          </select>
+                          <Button type="submit" size="sm">Add</Button>
+                        </Form>
+                      </TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+                  </>
+                ) : null}
+              </TableBody>
+            </Table>
           </section>
         </div>
       )}

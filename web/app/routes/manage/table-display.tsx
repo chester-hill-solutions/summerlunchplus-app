@@ -118,6 +118,44 @@ const rowKeyFor = (row: Record<string, unknown>, editorConfig?: EditorConfig) =>
   return editorConfig.primaryKey.map(key => String(row[key] ?? '')).join('::')
 }
 
+const personLinkForCell = (
+  tableName: string,
+  column: string,
+  row: Record<string, unknown>
+) => {
+  const profileId =
+    (typeof row.profile_id === 'string' && row.profile_id) ||
+    (typeof row.id === 'string' && (tableName === 'profile' || tableName === 'participants') ? row.id : '')
+
+  if (column === 'profile_display' && profileId) {
+    return `/manage/person?profileId=${encodeURIComponent(profileId)}`
+  }
+  if (column === 'guardian_display' && typeof row.guardian_profile_id === 'string') {
+    return `/manage/person?profileId=${encodeURIComponent(row.guardian_profile_id)}`
+  }
+  if (column === 'child_display' && typeof row.child_profile_id === 'string') {
+    return `/manage/person?profileId=${encodeURIComponent(row.child_profile_id)}`
+  }
+  if ((tableName === 'profile' || tableName === 'participants') && ['email', 'firstname', 'surname', 'role', 'is_user'].includes(column) && profileId) {
+    return `/manage/person?profileId=${encodeURIComponent(profileId)}`
+  }
+
+  const userIdColumns: Record<string, string> = {
+    user_email: 'user_id',
+    assigned_by_email: 'assigned_by',
+    recorded_by_email: 'recorded_by',
+    decided_by_email: 'decided_by',
+    inviter_user_email: 'inviter_user_id',
+    invitee_user_email: 'invitee_user_id',
+  }
+  const userIdColumn = userIdColumns[column]
+  if (userIdColumn && typeof row[userIdColumn] === 'string' && row[userIdColumn]) {
+    return `/manage/person?userId=${encodeURIComponent(String(row[userIdColumn]))}`
+  }
+
+  return null
+}
+
 type TableDisplayProps = {
   headerActions?: ReactNode
 }
@@ -599,6 +637,8 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                       }
 
                       const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
+                      const isFormAnswersLink = tableName === 'form' && column === 'answers' && typeof row.id === 'string'
+                      const personLink = personLinkForCell(tableName, column, row)
                       return (
                         <td
                           key={`cell-${rowIndex}-${column}`}
@@ -617,6 +657,27 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                                   returnTo: `${location.pathname}${location.search}`,
                                 }).toString(),
                               }}
+                              onClick={event => event.stopPropagation()}
+                              className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                            >
+                              {getCellValue(column, row, tableName)}
+                            </Link>
+                          ) : isFormAnswersLink ? (
+                            <Link
+                              to={{
+                                pathname: `/manage/form/${row.id}/answers`,
+                                search: new URLSearchParams({
+                                  returnTo: `${location.pathname}${location.search}`,
+                                }).toString(),
+                              }}
+                              onClick={event => event.stopPropagation()}
+                              className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                            >
+                              {getCellValue(column, row, tableName)}
+                            </Link>
+                          ) : personLink ? (
+                            <Link
+                              to={personLink}
                               onClick={event => event.stopPropagation()}
                               className="underline decoration-dotted underline-offset-2 hover:text-primary"
                             >

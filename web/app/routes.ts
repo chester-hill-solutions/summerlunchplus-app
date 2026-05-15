@@ -31,6 +31,7 @@ export default [
   route("manage", "routes/manage/team.tsx", [
     index("routes/manage/index.tsx"),
     route("participants", "routes/manage/participants.tsx"),
+    route("person", "routes/manage/person.tsx"),
     route("team", "routes/manage/team-members.tsx"),
     route("families", "routes/manage/families.tsx"),
     route("workshop", "routes/manage/workshop.tsx"),
@@ -39,6 +40,7 @@ export default [
     route("class-attendance", "routes/manage/class-attendance.tsx"),
     route("workshop-enrollment", "routes/manage/workshop-enrollment.tsx"),
     route("form", "routes/manage/form.tsx"),
+    route("form/:formID/answers", "routes/manage/form.$id.answers.tsx"),
     route("form/:formID", "routes/manage/form.$id.tsx"),
     route("form-question", "routes/manage/form-question.tsx"),
     route("form-question-map", "routes/manage/form-question-map.tsx"),
