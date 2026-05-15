@@ -17,6 +17,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const allowlist = new Set([
     "/login",
     "/sign-up",
+    "/sign-up/terms",
     "/sign-up/invite",
     "/forgot-password",
     "/auth/sign-up-details",

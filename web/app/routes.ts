@@ -15,6 +15,7 @@ export default [
     "routes/sign-up/layout.tsx",
     [
       index("routes/sign-up/index.tsx"),
+      route("terms", "routes/sign-up/terms.tsx"),
       route("invite", "routes/sign-up/invite.tsx"),
     ]
   ),
@@ -50,6 +51,8 @@ export default [
     route("form/:formID/answers", "routes/manage/form.$id.answers.tsx"),
     route("form/:formID", "routes/manage/form.$id.tsx"),
     route("form-question", "routes/manage/form-question.tsx"),
+    route("sign-up-terms/new", "routes/manage/sign-up-terms.new.tsx"),
+    route("sign-up-terms/:termId/edit", "routes/manage/sign-up-terms.$termId.edit.tsx"),
     route("sign-up-terms", "routes/manage/sign-up-terms.tsx"),
     route("sign-up-terms-consent", "routes/manage/sign-up-terms-consent.tsx"),
     route("form-question-map", "routes/manage/form-question-map.tsx"),

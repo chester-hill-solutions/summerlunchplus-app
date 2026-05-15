@@ -25,16 +25,20 @@ import {
 import { useState } from 'react'
 
 type LoaderData = {
+  prefillEmail: string
+  prefillRole: 'guardian' | 'student' | ''
   terms: {
-    id: string
     title: string
-    content: string
     version: number
   } | null
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { supabase, headers } = createClient(request)
+  const url = new URL(request.url)
+  const rawEmail = normalizeEmail(url.searchParams.get('email') ?? url.searchParams.get('invitee_email') ?? '')
+  const roleParam = url.searchParams.get('role')
+  const prefillRole = roleParam === 'guardian' || roleParam === 'student' ? roleParam : ''
 
   const { data } = await supabase.auth.getUser()
 
@@ -44,18 +48,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const { data: activeTerms } = await supabase
     .from('sign_up_terms')
-    .select('id, title, content, version')
+    .select('title, version')
     .eq('is_active', true)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
   return {
+    prefillEmail: rawEmail,
+    prefillRole,
     terms: activeTerms
       ? {
-          id: activeTerms.id,
           title: activeTerms.title,
-          content: activeTerms.content,
           version: activeTerms.version,
         }
       : null,
@@ -152,11 +156,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 }
 
 export default function SignUp() {
-  const { terms } = useLoaderData<typeof loader>()
+  const { terms, prefillEmail, prefillRole } = useLoaderData<typeof loader>()
   const fetcher = useFetcher<typeof action>()
   const error = fetcher.data?.error
   const loading = fetcher.state === 'submitting'
-  const [role, setRole] = useState<'guardian' | 'student' | ''>('')
+  const [role, setRole] = useState<'guardian' | 'student' | ''>(prefillRole)
+  const [email, setEmail] = useState(prefillEmail)
+
+  const termsParams = new URLSearchParams()
+  if (email) termsParams.set('email', email)
+  if (role) termsParams.set('role', role)
+  const termsTo = `/sign-up/terms${termsParams.toString() ? `?${termsParams.toString()}` : ''}`
 
   return (
     <Card>
@@ -167,16 +177,10 @@ export default function SignUp() {
       <CardContent>
         {!role ? (
           <div className="flex gap-4 justify-center">
-            <Button
-              className="px-8 py-6"
-                onClick={() => setRole('guardian')}
-              >
-                I am a Guardian
-              </Button>
-            <Button
-              className="px-8 py-6"
-              onClick={() => setRole('student')}
-            >
+            <Button className="px-8 py-6" onClick={() => setRole('guardian')}>
+              I am a Guardian
+            </Button>
+            <Button className="px-8 py-6" onClick={() => setRole('student')}>
               I am a Student
             </Button>
           </div>
@@ -192,6 +196,8 @@ export default function SignUp() {
                 placeholder="name@gmail.com"
                 pattern={ALLOWED_EMAIL_PATTERN}
                 title="Use a valid Gmail address"
+                value={email}
+                onChange={event => setEmail(event.target.value)}
                 required
               />
             </div>
@@ -209,10 +215,7 @@ export default function SignUp() {
               />
             </div>
             <div className="grid gap-2 rounded-md border border-border bg-muted/30 p-3 text-sm">
-              <p className="font-medium text-foreground">{terms?.title ?? 'Terms and Consent'}</p>
-              <p className="max-h-48 overflow-y-auto whitespace-pre-wrap text-muted-foreground">
-                {terms?.content ?? 'Please review and accept our terms to continue.'}
-              </p>
+              <p className="text-muted-foreground">Please review the terms before creating your account.</p>
               <label className="flex items-start gap-2 text-foreground">
                 <input
                   id="terms-consent"
@@ -221,7 +224,13 @@ export default function SignUp() {
                   required
                   className="mt-0.5 h-4 w-4"
                 />
-                <span>I have read and agree to these terms.</span>
+                <span>
+                  I have read and agree to the{' '}
+                  <Link to={termsTo} className="underline underline-offset-4">
+                    Terms and Conditions
+                  </Link>
+                  .
+                </span>
               </label>
             </div>
             {error && <p className="text-sm text-red-500">{error}</p>}
