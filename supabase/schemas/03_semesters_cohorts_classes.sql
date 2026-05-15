@@ -66,6 +66,7 @@ create table public.class_attendance (
   class_id uuid not null references public.class (id) on update cascade on delete cascade,
   profile_id uuid not null references public.profile (id) on update cascade on delete cascade,
   status public.class_attendance_status,
+  camera_on boolean,
   recorded_by uuid references auth.users (id) on update cascade on delete set null,
   notes text,
   created_at timestamptz not null default now(),
