@@ -11,7 +11,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Form, Link, redirect, useFetcher, useLoaderData } from 'react-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 
 import { requireAuth } from '@/lib/auth.server'
@@ -237,6 +237,7 @@ export default function ManageFormFlowEditorPage() {
   const { form, questions, returnTo } = useLoaderData() as LoaderData
   const fetcher = useFetcher<{ success?: boolean; error?: string }>()
   const [selectedQuestionCode, setSelectedQuestionCode] = useState<string>(questions[0]?.question_code ?? '')
+  const inspectorRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!questions.find(q => q.question_code === selectedQuestionCode)) {
@@ -245,6 +246,19 @@ export default function ManageFormFlowEditorPage() {
   }, [questions, selectedQuestionCode])
 
   const selectedQuestion = questions.find(q => q.question_code === selectedQuestionCode) ?? null
+
+  const jumpToInspector = () => {
+    inspectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const onNodeClick = (_: unknown, node: Node) => {
+    setSelectedQuestionCode(node.id)
+    if (typeof window !== 'undefined' && window.innerWidth < 1280) {
+      window.setTimeout(() => {
+        jumpToInspector()
+      }, 50)
+    }
+  }
 
   const { nodes, edges } = useMemo(() => {
     const baseNodes: Node<NodeData>[] = questions.map(question => ({
@@ -310,10 +324,40 @@ export default function ManageFormFlowEditorPage() {
           <h1 className="text-2xl font-semibold">{form.name}</h1>
           <p className="text-sm text-muted-foreground">Visual editor for question flow and visibility logic.</p>
         </div>
-        <Link to={returnTo} className="rounded-md border border-input px-3 py-2 text-sm hover:bg-muted">
-          Back to forms
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to={{
+              pathname: `/manage/form/${form.id}/answers`,
+              search: new URLSearchParams({ returnTo }).toString(),
+            }}
+            className="rounded-md border border-input px-3 py-2 text-sm hover:bg-muted"
+          >
+            View answers
+          </Link>
+          <Link to={returnTo} className="rounded-md border border-input px-3 py-2 text-sm hover:bg-muted">
+            Back to forms
+          </Link>
+        </div>
       </div>
+
+      <>
+
+      {selectedQuestion ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 xl:hidden">
+          <div className="flex items-center justify-between gap-3">
+            <p>
+              Selected <span className="font-semibold">{selectedQuestion.question_code}</span>. Inspector is below on smaller screens.
+            </p>
+            <button
+              type="button"
+              onClick={jumpToInspector}
+              className="rounded border border-amber-400 px-2 py-1 text-xs font-medium hover:bg-amber-100"
+            >
+              Jump to inspector
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         <div className="h-[72vh] min-h-[540px] overflow-hidden rounded-lg border bg-card">
@@ -324,7 +368,7 @@ export default function ManageFormFlowEditorPage() {
             nodesDraggable={false}
             nodesConnectable={false}
             elementsSelectable
-            onNodeClick={(_, node) => setSelectedQuestionCode(node.id)}
+            onNodeClick={onNodeClick}
           >
             <Background gap={16} size={1} />
             <MiniMap pannable zoomable />
@@ -332,7 +376,7 @@ export default function ManageFormFlowEditorPage() {
           </ReactFlow>
         </div>
 
-        <div className="rounded-lg border bg-card p-4">
+        <div ref={inspectorRef} className="rounded-lg border bg-card p-4">
           <h2 className="text-base font-semibold">Question Inspector</h2>
           {!selectedQuestion ? (
             <p className="mt-2 text-sm text-muted-foreground">Select a question node to edit its settings.</p>
@@ -435,6 +479,7 @@ export default function ManageFormFlowEditorPage() {
           Tip: open this editor directly with <code>/manage/form/&lt;form-id&gt;</code>.
         </p>
       </Form>
+      </>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'r
 
 import { Combobox } from '@/components/ui/combobox'
 import { Constants, type Database } from '@/lib/database.types'
+import { getOffsetMinutesForLocalDateTime, toLocalDateTimeInputValue } from '@/lib/datetime'
 
 type TimestampLabelValue = {
   timestamp: unknown
@@ -36,6 +37,8 @@ type LoaderData = {
   rows: Record<string, unknown>[]
   label: string
   tableName: string
+  tableVariant?: 'default' | 'pivot'
+  columnMeta?: Record<string, { label?: string; truncate?: boolean; filterable?: boolean }>
   canEditStatus?: boolean
   editorConfig?: EditorConfig
   foreignKeyOptions?: Record<string, ForeignKeyOption[]>
@@ -104,13 +107,8 @@ const getDirectionIndicator = (stage: 0 | 1 | 2) => {
   return ''
 }
 
-const toLocalDateTimeValue = (value: unknown) => {
-  if (typeof value !== 'string' || !value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value.slice(0, 16)
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-  return local.toISOString().slice(0, 16)
-}
+const toLocalDateTimeValue = (value: unknown) =>
+  typeof value === 'string' && value ? toLocalDateTimeInputValue(value) : ''
 
 const toDateValue = (value: unknown) => {
   if (typeof value !== 'string' || !value) return ''
@@ -120,6 +118,50 @@ const toDateValue = (value: unknown) => {
 const rowKeyFor = (row: Record<string, unknown>, editorConfig?: EditorConfig) => {
   if (!editorConfig?.primaryKey.length) return ''
   return editorConfig.primaryKey.map(key => String(row[key] ?? '')).join('::')
+}
+
+const personLinkForCell = (
+  tableName: string,
+  column: string,
+  row: Record<string, unknown>
+) => {
+  const profileId =
+    (typeof row.profile_id === 'string' && row.profile_id) ||
+    (typeof row.id === 'string' && (tableName === 'profile' || tableName === 'participants') ? row.id : '')
+
+  if (column === 'profile_display' && profileId) {
+    return `/manage/person?profileId=${encodeURIComponent(profileId)}`
+  }
+  if (column === 'subject_profile_display' && typeof row.subject_profile_id === 'string') {
+    return `/manage/person?profileId=${encodeURIComponent(row.subject_profile_id)}`
+  }
+  if (column === 'suspicious_signal' && profileId) {
+    return `/manage/person/discrepancies?profileId=${encodeURIComponent(profileId)}`
+  }
+  if (column === 'guardian_display' && typeof row.guardian_profile_id === 'string') {
+    return `/manage/person?profileId=${encodeURIComponent(row.guardian_profile_id)}`
+  }
+  if (column === 'child_display' && typeof row.child_profile_id === 'string') {
+    return `/manage/person?profileId=${encodeURIComponent(row.child_profile_id)}`
+  }
+  if ((tableName === 'profile' || tableName === 'participants') && ['email', 'firstname', 'surname', 'role', 'is_user'].includes(column) && profileId) {
+    return `/manage/person?profileId=${encodeURIComponent(profileId)}`
+  }
+
+  const userIdColumns: Record<string, string> = {
+    user_email: 'user_id',
+    assigned_by_email: 'assigned_by',
+    recorded_by_email: 'recorded_by',
+    decided_by_email: 'decided_by',
+    inviter_user_email: 'inviter_user_id',
+    invitee_user_email: 'invitee_user_id',
+  }
+  const userIdColumn = userIdColumns[column]
+  if (userIdColumn && typeof row[userIdColumn] === 'string' && row[userIdColumn]) {
+    return `/manage/person?userId=${encodeURIComponent(String(row[userIdColumn]))}`
+  }
+
+  return null
 }
 
 type TableDisplayProps = {
@@ -132,6 +174,8 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     rows = [],
     label = 'Table',
     tableName = '',
+    tableVariant = 'default',
+    columnMeta = {},
     canEditStatus,
     editorConfig,
     foreignKeyOptions = {},
@@ -320,7 +364,11 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     const formData = new FormData()
     formData.set('intent', 'insert-row')
     for (const fieldName of fieldKeys) {
-      formData.set(`field_${fieldName}`, createValues[fieldName] ?? '')
+      const value = createValues[fieldName] ?? ''
+      formData.set(`field_${fieldName}`, value)
+      if (editorConfig.fields[fieldName]?.type === 'datetime') {
+        formData.set(`field_${fieldName}__tz_offset`, value ? getOffsetMinutesForLocalDateTime(value) : '')
+      }
     }
     editorFetcher.submit(formData, { method: 'post' })
   }
@@ -330,7 +378,11 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     const formData = new FormData()
     formData.set('intent', 'update-row')
     for (const fieldName of fieldKeys) {
-      formData.set(`field_${fieldName}`, editValues[fieldName] ?? '')
+      const value = editValues[fieldName] ?? ''
+      formData.set(`field_${fieldName}`, value)
+      if (editorConfig.fields[fieldName]?.type === 'datetime') {
+        formData.set(`field_${fieldName}__tz_offset`, value ? getOffsetMinutesForLocalDateTime(value) : '')
+      }
     }
     for (const keyColumn of editorConfig.primaryKey) {
       formData.set(`pk_${keyColumn}`, String(row[keyColumn] ?? ''))
@@ -496,8 +548,8 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
 
       {editorFetcher.data?.error ? <p className="text-sm text-destructive">{editorFetcher.data.error}</p> : null}
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="w-full table-auto text-sm">
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="min-w-max w-full table-auto text-sm">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground">
             <tr>
               {columns.map(column => (
@@ -510,7 +562,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                     onClick={() => updateSort(column)}
                     className="flex items-center gap-1 font-semibold"
                   >
-                    {column.replace(/_/g, ' ')}
+                    {(columnMeta[column]?.label ?? column).replace(/_/g, ' ')}
                     {getDirectionIndicator(sortColumn === column ? sortStage : 0)}
                   </button>
                 </th>
@@ -520,29 +572,31 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
             <tr className="bg-muted/10">
               {columns.map(column => (
                 <th key={`filter-${column}`} className="px-4 py-1">
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={filters[column] ?? ''}
-                      onChange={event => updateFilter(column, event.target.value)}
-                      placeholder="Filter"
-                      className={
-                        isNumericColumn(column)
-                          ? 'w-full max-w-24 rounded border border-border px-2 py-1 pr-7 text-xs'
-                          : 'w-full rounded border border-border px-2 py-1 pr-7 text-xs'
-                      }
-                    />
-                    {filters[column] ? (
-                      <button
-                        type="button"
-                        onClick={() => updateFilter(column, '')}
-                        className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                        aria-label={`Clear ${column} filter`}
-                      >
-                        x
-                      </button>
-                    ) : null}
-                  </div>
+                  {columnMeta[column]?.filterable === false ? null : (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={filters[column] ?? ''}
+                        onChange={event => updateFilter(column, event.target.value)}
+                        placeholder="Filter"
+                        className={
+                          isNumericColumn(column)
+                            ? 'w-full max-w-24 rounded border border-border px-2 py-1 pr-7 text-xs'
+                            : 'w-full rounded border border-border px-2 py-1 pr-7 text-xs'
+                        }
+                      />
+                      {filters[column] ? (
+                        <button
+                          type="button"
+                          onClick={() => updateFilter(column, '')}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                          aria-label={`Clear ${column} filter`}
+                        >
+                          x
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
                 </th>
               ))}
               {canInlineUpdate ? <th className="px-4 py-1" /> : null}
@@ -555,7 +609,16 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
 
               return (
                 <Fragment key={`fragment-${rowKey || rowIndex}`}>
-                  <tr key={`row-${rowIndex}`} className={rowIndex % 2 === 0 ? 'bg-card' : ''}>
+                  <tr
+                    key={`row-${rowIndex}`}
+                    className={
+                      typeof row._row_class === 'string'
+                        ? row._row_class
+                        : rowIndex % 2 === 0
+                          ? 'bg-card'
+                          : ''
+                    }
+                  >
                     {columns.map(column => {
                       if (isClassAttendance && column === 'status' && canEditStatus) {
                         const statusValue = typeof row.status === 'string' ? row.status : ''
@@ -595,15 +658,23 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                       }
 
                       const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
+                      const isFormAnswersLink = tableName === 'form' && column === 'answers' && typeof row.id === 'string'
+                      const personLink = personLinkForCell(tableName, column, row)
+                      const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
+                      const filterable = columnMeta[column]?.filterable ?? true
+
                       return (
                         <td
                           key={`cell-${rowIndex}-${column}`}
                           className={
                             isNumericColumn(column)
                               ? 'w-24 cursor-pointer whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums hover:bg-muted/30'
-                              : 'max-w-xs cursor-pointer truncate px-4 py-2 font-mono hover:bg-muted/30'
+                              : `${shouldTruncate ? 'max-w-xs truncate' : 'whitespace-nowrap'} cursor-pointer px-4 py-2 font-mono hover:bg-muted/30`
                           }
-                          onClick={() => appendFilter(column, getCellValue(column, row, tableName))}
+                          onClick={() => {
+                            if (!filterable) return
+                            appendFilter(column, getCellValue(column, row, tableName))
+                          }}
                         >
                           {isFormNameLink ? (
                             <Link
@@ -613,6 +684,27 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                                   returnTo: `${location.pathname}${location.search}`,
                                 }).toString(),
                               }}
+                              onClick={event => event.stopPropagation()}
+                              className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                            >
+                              {getCellValue(column, row, tableName)}
+                            </Link>
+                          ) : isFormAnswersLink ? (
+                            <Link
+                              to={{
+                                pathname: `/manage/form/${row.id}/answers`,
+                                search: new URLSearchParams({
+                                  returnTo: `${location.pathname}${location.search}`,
+                                }).toString(),
+                              }}
+                              onClick={event => event.stopPropagation()}
+                              className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                            >
+                              {getCellValue(column, row, tableName)}
+                            </Link>
+                          ) : personLink ? (
+                            <Link
+                              to={personLink}
                               onClick={event => event.stopPropagation()}
                               className="underline decoration-dotted underline-offset-2 hover:text-primary"
                             >

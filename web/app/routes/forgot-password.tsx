@@ -1,5 +1,6 @@
 
 import { createClient } from '@/lib/supabase/server'
+import AuthStickerBackground from '@/components/auth/sticker-background'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -41,7 +42,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     )
   }
 
-  return redirect('/forgot-password?success')
+  return redirect('/forgot-password?success', { headers })
 }
 
 export default function ForgotPassword() {
@@ -53,7 +54,7 @@ export default function ForgotPassword() {
   const loading = fetcher.state === 'submitting'
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+    <AuthStickerBackground dense>
       <div className="w-full">
         <div className="flex flex-col gap-6">
           {success ? (
@@ -107,6 +108,6 @@ export default function ForgotPassword() {
           )}
         </div>
       </div>
-    </div>
+    </AuthStickerBackground>
   )
 }

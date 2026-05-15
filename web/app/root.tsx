@@ -1,4 +1,4 @@
-import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData } from "react-router";
+import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, redirect, useLoaderData } from "react-router";
 import { useEffect, useRef } from "react";
 
 import type { Route } from "./+types/root";
@@ -17,6 +17,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const allowlist = new Set([
     "/login",
     "/sign-up",
+    "/sign-up/terms",
     "/sign-up/invite",
     "/forgot-password",
     "/auth/sign-up-details",
@@ -35,13 +36,30 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
-  const { supabase } = createClient(request);
+  const { supabase, headers } = createClient(request);
   const { data: userData, error: userError } = await supabase.auth.getUser();
 
   const user = userData?.user ?? null;
 
   if (userError || !user) {
     return { user: null, role: null, supabaseUrl, supabaseAnonKey };
+  }
+
+  const { data: profile } = await supabase
+    .from('profile')
+    .select('password_set')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const passwordSetupAllowlist = new Set([
+    '/sign-up/invite',
+    '/auth/confirm',
+    '/auth/error',
+    '/logout',
+  ])
+
+  if (profile && !profile.password_set && !passwordSetupAllowlist.has(pathname)) {
+    throw redirect('/sign-up/invite', { headers })
   }
 
   const { data: claimsData } = await supabase.auth.getClaims();
@@ -97,13 +115,16 @@ export default function App() {
     const access_token = params.get("access_token");
     const refresh_token = params.get("refresh_token");
     const type = params.get("type");
+    const next = new URLSearchParams(window.location.search).get("next");
+    const nextPath = next?.startsWith("/") ? next : null;
 
     if (!access_token || !refresh_token) return;
     hashHandledRef.current = true;
 
     const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
     supabase.auth
-      .setSession({ access_token, refresh_token })
+      .signOut({ scope: "local" })
+      .then(() => supabase.auth.setSession({ access_token, refresh_token }))
       .then(({ error }) => {
         if (error) {
           console.error("Unable to hydrate session", error.message);
@@ -111,7 +132,13 @@ export default function App() {
         }
         const cleanUrl = window.location.pathname + window.location.search;
         window.history.replaceState({}, "", cleanUrl);
-        const destination = type === "invite" ? "/sign-up/invite" : "/login";
+        const destination =
+          nextPath ??
+          (type === "invite"
+            ? "/sign-up/invite"
+            : type === "recovery"
+              ? "/update-password"
+              : "/login");
         window.location.replace(destination);
       });
   }, [supabaseAnonKey, supabaseUrl]);

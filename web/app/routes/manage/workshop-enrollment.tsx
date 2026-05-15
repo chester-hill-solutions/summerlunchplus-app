@@ -1,4 +1,5 @@
 import { requireAuth } from '@/lib/auth.server'
+import { adminClient } from '@/lib/supabase/adminClient'
 import { Constants, type Database } from '@/lib/database.types'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
@@ -9,11 +10,154 @@ import { createTableLoader } from './table-loader'
 
 const baseLoader = createTableLoader('class-enrollment')
 
+const ENROLLMENT_STATUS_ORDER: Record<Database['public']['Enums']['workshop_enrollment_status'], number> = {
+  pending: 0,
+  waitlisted: 1,
+  revoked: 2,
+  approved: 3,
+  rejected: 4,
+}
+
+const toTime = (value: unknown) => {
+  if (typeof value !== 'string' || !value) return Number.POSITIVE_INFINITY
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+}
+
 export async function loader(args: Route.LoaderArgs) {
   const auth = await requireAuth(args.request)
   const base = await baseLoader(args)
+
+  const rows = (base.rows ?? []) as Array<Record<string, unknown>>
+  const workshopIds = Array.from(
+    new Set(rows.map(row => (typeof row.workshop_id === 'string' ? row.workshop_id : '')).filter(Boolean))
+  )
+  const profileIds = Array.from(
+    new Set(rows.map(row => (typeof row.profile_id === 'string' ? row.profile_id : '')).filter(Boolean))
+  )
+
+  const approvedByWorkshopId = rows.reduce((acc, row) => {
+    const workshopId = typeof row.workshop_id === 'string' ? row.workshop_id : ''
+    const status = typeof row.status === 'string' ? row.status : ''
+    if (!workshopId || status !== 'approved') {
+      return acc
+    }
+    acc.set(workshopId, (acc.get(workshopId) ?? 0) + 1)
+    return acc
+  }, new Map<string, number>())
+
+  let workshopCapacityById = new Map<string, number>()
+  if (workshopIds.length) {
+    const { data: workshopRows, error: workshopError } = await adminClient
+      .from('workshop')
+      .select('id, capacity')
+      .in('id', workshopIds)
+
+    if (!workshopError) {
+      workshopCapacityById = (workshopRows ?? []).reduce((acc, workshop) => {
+        if (!workshop.id) {
+          return acc
+        }
+        acc.set(workshop.id, workshop.capacity)
+        return acc
+      }, new Map<string, number>())
+    }
+  }
+
+  let openSignalsByProfileId = new Map<string, Array<{ severity: string; summary: string }>>()
+
+  if (profileIds.length) {
+    const { data: openSignals, error: openSignalsError } = await adminClient
+      .from('suspicious_signal')
+      .select('family_profile_ids, severity, summary')
+      .eq('status', 'open')
+
+    if (!openSignalsError) {
+      openSignalsByProfileId = (openSignals ?? []).reduce(
+        (acc, signal) => {
+          for (const profileId of signal.family_profile_ids ?? []) {
+            if (!profileIds.includes(profileId)) continue
+            const existing = acc.get(profileId) ?? []
+            existing.push({ severity: signal.severity, summary: signal.summary })
+            acc.set(profileId, existing)
+          }
+          return acc
+        },
+        new Map<string, Array<{ severity: string; summary: string }>>()
+      )
+    }
+  }
+
+  const enrichedRows: Array<Record<string, unknown>> = rows.map(row => {
+    const workshopId = typeof row.workshop_id === 'string' ? row.workshop_id : ''
+    const approved = workshopId ? approvedByWorkshopId.get(workshopId) ?? 0 : 0
+    const capacity = workshopId ? workshopCapacityById.get(workshopId) ?? null : null
+
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    const profileSignals = profileId ? openSignalsByProfileId.get(profileId) ?? [] : []
+    const baseRow = {
+      ...row,
+      enrolled_capacity: capacity === null ? `${approved}/-` : `${approved}/${capacity}`,
+    }
+
+    if (!profileSignals.length) {
+      return baseRow
+    }
+
+    const hasHigh = profileSignals.some(signal => signal.severity === 'high')
+    const primarySignal = profileSignals[0]
+    const countLabel = profileSignals.length === 1 ? '1 open signal' : `${profileSignals.length} open signals`
+
+    return {
+      ...baseRow,
+      _row_class: hasHigh ? 'bg-amber-50' : 'bg-amber-50/70',
+      _row_signal_summary: `${countLabel}: ${primarySignal.summary}`,
+    }
+  })
+
+  enrichedRows.sort((left, right) => {
+    const leftStatus =
+      typeof left.status === 'string'
+        ? (left.status as Database['public']['Enums']['workshop_enrollment_status'])
+        : 'rejected'
+    const rightStatus =
+      typeof right.status === 'string'
+        ? (right.status as Database['public']['Enums']['workshop_enrollment_status'])
+        : 'rejected'
+
+    const statusDiff = ENROLLMENT_STATUS_ORDER[leftStatus] - ENROLLMENT_STATUS_ORDER[rightStatus]
+    if (statusDiff !== 0) {
+      return statusDiff
+    }
+
+    const timeDiff = toTime(left.requested_at) - toTime(right.requested_at)
+    if (timeDiff !== 0) {
+      return timeDiff
+    }
+
+    const leftId = typeof left.id === 'string' ? left.id : ''
+    const rightId = typeof right.id === 'string' ? right.id : ''
+    return leftId.localeCompare(rightId)
+  })
+
+  const columns = base.columns.includes('enrolled_capacity')
+    ? base.columns
+    : [
+        ...base.columns.slice(0, 2),
+        'enrolled_capacity',
+        ...base.columns.slice(2),
+      ]
+
   return {
     ...base,
+    columns,
+    rows: enrichedRows,
+    columnMeta: {
+      ...(base.columnMeta ?? {}),
+      enrolled_capacity: {
+        label: 'enrolled/capacity',
+      },
+    },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
   }
 }

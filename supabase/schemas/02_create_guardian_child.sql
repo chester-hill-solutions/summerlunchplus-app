@@ -49,16 +49,37 @@ create policy person_guardian_child_read_auth_admin
   to supabase_auth_admin
   using (true);
 
-create policy profile_read_guardian_child
+create or replace function public.profile_in_same_family(target_profile_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+set row_security = off
+as $$
+  with recursive connected(profile_id) as (
+    select public.current_profile_id()
+    union
+    select
+      case
+        when pgc.guardian_profile_id = connected.profile_id then pgc.child_profile_id
+        else pgc.guardian_profile_id
+      end
+    from public.person_guardian_child pgc
+    join connected
+      on pgc.guardian_profile_id = connected.profile_id
+      or pgc.child_profile_id = connected.profile_id
+  )
+  select exists (
+    select 1
+    from connected
+    where connected.profile_id = target_profile_id
+  );
+$$;
+
+create policy profile_read_family
   on public.profile
   for select
-  using (
-    id in (
-      select pgc.child_profile_id
-      from public.person_guardian_child pgc
-      where pgc.guardian_profile_id = public.current_profile_id()
-    )
-  );
+  using (public.profile_in_same_family(id));
 
 grant all on table public.person_guardian_child to supabase_auth_admin;
 revoke all on table public.person_guardian_child from authenticated, anon, public;

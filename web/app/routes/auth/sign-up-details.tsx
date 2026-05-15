@@ -1,6 +1,7 @@
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import { Button } from '@/components/ui/button'
+import AuthStickerBackground from '@/components/auth/sticker-background'
 import {
   Card,
   CardContent,
@@ -14,6 +15,7 @@ import { isAllowedEmailDomain, normalizeEmail } from '@/lib/email-domain'
 import { getProfileSignUpCompletionWithContext } from '@/lib/onboarding.server'
 import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import { getSignUpFlowContext } from '@/lib/sign-up-flow-context.server'
+import { refreshSuspiciousSignalsForProfile } from '@/lib/suspicious-signals.server'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { redirect, useFetcher, useLoaderData } from 'react-router'
 import { type FormEventHandler, useEffect, useMemo, useRef, useState } from 'react'
@@ -127,6 +129,10 @@ const parseFormValue = (question: FormQuestionData, formData: FormData) => {
 
   if (question.type === 'checkbox') {
     return formData.has(fieldName)
+  }
+
+  if (question.type === 'no-input-text') {
+    return null
   }
 
   const rawValue = (formData.get(fieldName) as string | null)?.trim() ?? ''
@@ -484,6 +490,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const role = formData.get('role') as 'guardian' | 'student'
   const pid = formData.get('pid') as string
   const formId = formData.get('form_id') as string
+  const clientTimezone = typeof formData.get('client_timezone') === 'string' ? String(formData.get('client_timezone')) : null
+  const clientOffsetMinutes = typeof formData.get('client_offset_minutes') === 'string' ? String(formData.get('client_offset_minutes')) : null
+  const clientLocale = typeof formData.get('client_locale') === 'string' ? String(formData.get('client_locale')) : null
   if (!formId) {
     return { error: 'Form is missing' }
   }
@@ -605,6 +614,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const isRequired = !isOptional
     let value = submittedAnswers[question.question_code]
 
+    if (question.type === 'no-input-text') {
+      continue
+    }
+
     if (inputType === 'email' && typeof value === 'string') {
       const normalized = normalizeEmail(value)
       if (!isAllowedEmailDomain(normalized)) {
@@ -676,6 +689,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const requestMetadata = extractRequestMetadata(request)
+  const metadata: Record<string, Json> = { source: 'signup_details' }
+  if (clientTimezone) metadata.client_timezone = clientTimezone
+  if (clientOffsetMinutes) metadata.client_offset_minutes = clientOffsetMinutes
+  if (clientLocale) metadata.client_locale = clientLocale
+
   const { data: submission, error: submissionError } = await supabase
     .from('form_submission')
     .insert({
@@ -688,7 +706,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       accept_language: requestMetadata.acceptLanguage,
       referer: requestMetadata.referer,
       origin: requestMetadata.origin,
-      metadata: { source: 'signup_details' },
+      metadata,
     })
     .select('id')
     .single()
@@ -1000,6 +1018,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
+  if (pid) {
+    try {
+      await refreshSuspiciousSignalsForProfile(pid)
+    } catch (error) {
+      console.error('[suspicious-signal] refresh failed', error)
+    }
+  }
+
   return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&form_id=${formId}`, { headers })
 }
 
@@ -1111,11 +1137,20 @@ export default function SignUpDetails() {
   )
 
   const [wantsAdditionalGuardian, setWantsAdditionalGuardian] = useState<boolean>(hasAdditionalGuardianAnswers)
+  const [clientTimezone, setClientTimezone] = useState('')
+  const [clientOffsetMinutes, setClientOffsetMinutes] = useState('')
+  const [clientLocale, setClientLocale] = useState('')
 
   useEffect(() => {
     if (!isAdditionalGuardianStep) return
     setWantsAdditionalGuardian(hasAdditionalGuardianAnswers)
   }, [isAdditionalGuardianStep, currentForm?.formId, hasAdditionalGuardianAnswers])
+
+  useEffect(() => {
+    setClientTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || '')
+    setClientOffsetMinutes(String(new Date().getTimezoneOffset()))
+    setClientLocale(typeof navigator !== 'undefined' ? navigator.language : '')
+  }, [])
 
   const clearAdditionalGuardianFields = () => {
     setAnswerState(current => {
@@ -1144,8 +1179,8 @@ export default function SignUpDetails() {
   const disableContinue = loading || (isAdditionalGuardianStep && wantsAdditionalGuardian && !additionalGuardianFieldsComplete)
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-3xl">
+    <AuthStickerBackground maxWidthClassName="max-w-3xl" dense scrollContent>
+      <div className="w-full">
         <Card>
           <CardHeader>
             <CardTitle className="text-2xl">{currentForm?.name ?? 'Sign-up details'}</CardTitle>
@@ -1175,6 +1210,9 @@ export default function SignUpDetails() {
                 <input type="hidden" name="role" value={role} />
                 <input type="hidden" name="pid" value={pid} />
                 <input type="hidden" name="form_id" value={currentForm.formId} />
+                <input type="hidden" name="client_timezone" value={clientTimezone} />
+                <input type="hidden" name="client_offset_minutes" value={clientOffsetMinutes} />
+                <input type="hidden" name="client_locale" value={clientLocale} />
                 <p className="text-sm text-slate-500">
                   Step {currentFormIndex ?? 1} of {totalFormSteps}
                 </p>
@@ -1286,6 +1324,6 @@ export default function SignUpDetails() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </AuthStickerBackground>
   )
 }

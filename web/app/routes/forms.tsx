@@ -1,4 +1,5 @@
 import { redirect, useFetcher, useLoaderData } from "react-router";
+import { useState } from "react";
 
 import type { Route } from "./+types/forms";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { enforceOnboardingGuard } from "@/lib/auth.server";
+import { getOffsetMinutesForLocalDate, localDateToUtcIso, parseOffsetMinutes } from "@/lib/datetime";
 import { createClient } from "@/lib/supabase/server";
 
 type FormRow = {
@@ -66,6 +68,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   const name = formData.get("name");
   const dueAt = formData.get("due_at");
+  const dueAtOffsetRaw = formData.get("due_at__tz_offset");
   const isRequired = formData.get("is_required") === "on";
   const autoAssign = formData.getAll("auto_assign") as string[];
 
@@ -76,12 +79,31 @@ export async function action({ request }: Route.ActionArgs) {
     });
   }
 
+  let dueAtIso: string | null = null;
+  if (typeof dueAt === "string" && dueAt.length > 0) {
+    const dueAtOffset = parseOffsetMinutes(typeof dueAtOffsetRaw === "string" ? dueAtOffsetRaw : "");
+    if (dueAtOffset === null) {
+      return new Response(JSON.stringify({ error: "Invalid due date timezone" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    dueAtIso = localDateToUtcIso(dueAt, dueAtOffset);
+    if (!dueAtIso) {
+      return new Response(JSON.stringify({ error: "Invalid due date" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
   const { supabase, headers } = createClient(request);
 
   const { error } = await supabase.from("form").insert({
     name: name.trim(),
     is_required: isRequired,
-    due_at: typeof dueAt === "string" && dueAt.length > 0 ? new Date(dueAt).toISOString() : null,
+    due_at: dueAtIso,
     auto_assign: autoAssign,
   });
 
@@ -107,6 +129,8 @@ const ALL_ROLES: { value: string; label: string }[] = [
 
 function CreateFormCard() {
   const fetcher = useFetcher();
+  const [dueAt, setDueAt] = useState("");
+
   return (
     <Card>
       <CardHeader>
@@ -116,13 +140,18 @@ function CreateFormCard() {
       <CardContent>
         <fetcher.Form method="post" className="space-y-4">
           <input type="hidden" name="intent" value="create_form" />
+          <input
+            type="hidden"
+            name="due_at__tz_offset"
+            value={dueAt ? getOffsetMinutesForLocalDate(dueAt) : ""}
+          />
           <div className="space-y-2">
             <Label htmlFor="name">Name</Label>
             <Input id="name" name="name" required />
           </div>
           <div className="space-y-2">
             <Label htmlFor="due_at">Due date (optional)</Label>
-            <Input id="due_at" name="due_at" type="date" />
+            <Input id="due_at" name="due_at" type="date" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
           </div>
           <div className="flex items-center gap-2">
             <input id="is_required" name="is_required" type="checkbox" defaultChecked className="h-4 w-4" />

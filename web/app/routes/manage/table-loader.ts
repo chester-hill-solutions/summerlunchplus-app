@@ -326,6 +326,8 @@ export function createTableLoader(tableName: string) {
       rows,
       label: definition.label,
       tableName,
+      tableVariant: 'default' as const,
+      columnMeta: {},
       editorConfig,
       foreignKeyOptions: fkOptions,
     }

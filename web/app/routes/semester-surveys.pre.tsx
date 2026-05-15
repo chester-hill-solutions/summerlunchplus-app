@@ -49,6 +49,10 @@ const parseFormValue = (question: FormQuestionData, formData: FormData) => {
     return formData.has(fieldName)
   }
 
+  if (question.type === 'no-input-text') {
+    return null
+  }
+
   const rawValue = (formData.get(fieldName) as string | null)?.trim() ?? ''
   if (!rawValue) return null
   return rawValue
@@ -197,6 +201,10 @@ export async function action({ request, params }: Route.ActionArgs) {
     const isOptional = question.metadata.optional === true
     const isRequired = !isOptional
 
+    if (question.type === 'no-input-text') {
+      continue
+    }
+
     if (question.type === 'checkbox' && isRequired) {
       if (value !== true) {
         return { error: `Please answer "${question.prompt}"` } satisfies ActionData
@@ -283,7 +291,7 @@ export default function SemesterPreSurveyPage() {
                   key={question.question_code}
                   question={question}
                   value={answers[question.question_code]}
-                  required={!isOptional}
+                  required={!isOptional && question.type !== 'no-input-text'}
                 />
               )
             })}

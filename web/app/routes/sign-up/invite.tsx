@@ -30,26 +30,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     .from('profile')
     .select('id, email, password_set')
     .eq('user_id', userData.user.id)
-    .single()
+    .maybeSingle()
 
-  if (!profile?.email) {
+  const email = profile?.email ?? userData.user.email ?? null
+
+  if (!email) {
     throw redirect('/login', { headers })
   }
 
-  if (profile.password_set) {
+  if (profile?.password_set) {
     throw redirect('/auth/sign-up-details', { headers })
   }
 
   const { data: invite } = await supabase
     .from('invites')
     .select('id, role, status')
-    .eq('invitee_email', profile.email)
+    .eq('invitee_email', email)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
   return {
-    email: profile.email,
+    email,
     role: invite?.role ?? 'guardian',
     inviteId: invite?.id ?? null,
   }

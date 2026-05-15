@@ -1,17 +1,14 @@
-import { Link, redirect, useFetcher, useLoaderData } from 'react-router'
+import { Form, Link, redirect, useActionData, useLoaderData, useSearchParams } from 'react-router'
 
 import type { Route } from './+types/home'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
-import {
-  buildWorkshopCapacityMap,
-  getWorkshopEnrollmentAction,
-  type WorkshopCapacitySnapshot,
-} from '@/lib/workshop-capacity'
 import { createClient } from '@/lib/supabase/server'
+import { normalizeEmail } from '@/lib/email-domain'
 import {
   Table,
   TableBody,
@@ -21,8 +18,162 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
+type FamilyProfile = {
+  id: string
+  role: 'guardian' | 'student' | string
+  firstname: string | null
+  surname: string | null
+  email: string | null
+  user_id: string | null
+}
+
+type InviteRow = {
+  id: string
+  invitee_email: string
+  role: 'guardian' | 'student'
+  status: string
+  created_at: string
+}
+
+type EnrollmentRow = {
+  id: string
+  workshop_id: string | null
+  semester_id: string
+  status: string
+  requested_at: string
+  profile_id: string | null
+}
+
+type WorkshopRow = {
+  id: string
+  description: string | null
+  semester_id: string
+}
+
+type ClassRow = {
+  id: string
+  workshop_id: string | null
+  starts_at: string
+  ends_at: string
+}
+
+type AttendanceRow = {
+  class_id: string
+  profile_id: string
+  status: 'unknown' | 'present' | 'absent' | null
+}
+
+type LoaderData = {
+  family: Awaited<ReturnType<typeof resolveFamilyGraph>>
+  familyProfiles: FamilyProfile[]
+  invites: InviteRow[]
+  workshopsById: Record<string, WorkshopRow>
+  semesterById: Record<string, { id: string; name: string | null; starts_at: string; ends_at: string }>
+  enrollments: EnrollmentRow[]
+  classesByWorkshop: Record<string, ClassRow[]>
+  attendanceByClass: Record<string, AttendanceRow[]>
+  nextClass:
+    | {
+        workshopId: string
+        workshopLabel: string
+        starts_at: string
+        ends_at: string
+      }
+    | null
+}
+
+type ActionData = {
+  ok?: boolean
+  error?: string
+  message?: string
+}
+
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+
+const formatDateTime = (value: string) =>
+  new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value))
+
+const personName = (profile: { firstname: string | null; surname: string | null; email: string | null }) => {
+  const full = [profile.firstname, profile.surname].filter(Boolean).join(' ').trim()
+  return full || profile.email || 'Unnamed'
+}
+
+const sendInvite = async ({
+  email,
+  role,
+  origin,
+  inviterProfileId,
+  inviterRole,
+  inviterEmail,
+  inviterUserId,
+}: {
+  email: string
+  role: 'guardian' | 'student'
+  origin: string
+  inviterProfileId: string
+  inviterRole: 'guardian' | 'student'
+  inviterEmail: string
+  inviterUserId: string
+}) => {
+  const redirectTo = `${origin}/auth/sign-up-details?role=${role}`
+  const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
+    redirectTo,
+    data: {
+      inviter_profile_id: inviterProfileId,
+      inviter_role: inviterRole,
+      inviter_email: inviterEmail,
+      role,
+    },
+  })
+
+  let inviteeUserId = inviteData?.user?.id ?? null
+  if (inviteError) {
+    const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+      type: 'invite',
+      email,
+      options: {
+        redirectTo,
+        data: {
+          inviter_profile_id: inviterProfileId,
+          inviter_role: inviterRole,
+          inviter_email: inviterEmail,
+          role,
+        },
+      },
+    })
+    if (linkError) {
+      return { error: inviteError.message ?? linkError.message ?? 'Unable to send invite', inviteeUserId: null }
+    }
+    inviteeUserId = linkData?.user?.id ?? inviteeUserId
+  }
+
+  const { error: inviteTableError } = await adminClient
+    .from('invites')
+    .upsert(
+      {
+        inviter_user_id: inviterUserId,
+        invitee_user_id: inviteeUserId,
+        invitee_email: email,
+        role,
+        status: 'pending',
+        confirmed_at: null,
+      },
+      { onConflict: 'invitee_email' }
+    )
+
+  if (inviteTableError) {
+    return { error: inviteTableError.message, inviteeUserId }
+  }
+
+  return { error: null, inviteeUserId }
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await enforceOnboardingGuard(request)
@@ -31,521 +182,671 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const { supabase } = createClient(request)
-  const now = new Date().toISOString()
+  const now = Date.now()
 
   const family = await resolveFamilyGraph(supabase, auth.user.id)
 
-  const { data: workshops, error: workshopError } = await supabase
-    .from('workshop')
-    .select('id, description, enrollment_open_at, enrollment_close_at, semester_id, capacity, wait_list_capacity')
-    .gte('enrollment_close_at', now)
-    .order('enrollment_open_at', { ascending: true })
-  if (workshopError) {
-    throw new Error(workshopError.message)
-  }
+  const { data: familyProfilesRaw } = await adminClient
+    .from('profile')
+    .select('id, role, firstname, surname, email, user_id')
+    .in('id', family.familyProfileIds)
 
-  const { data: classes } = await supabase
-    .from('class')
-    .select('workshop_id, starts_at, ends_at')
+  const familyProfiles = (familyProfilesRaw ?? []) as FamilyProfile[]
 
-  const { data: enrollments } = await supabase
-    .from('workshop_enrollment')
-    .select('workshop_id, status, semester_id, profile_id')
-    .in('profile_id', family.familyProfileIds)
-
-  const workshopIds = (workshops ?? []).map(workshop => workshop.id)
-  const { data: workshopEnrollments } = workshopIds.length
-    ? await supabase
-        .from('workshop_enrollment')
-        .select('workshop_id, status')
-        .in('workshop_id', workshopIds)
+  const familyEmails = familyProfiles.map(profile => profile.email).filter((email): email is string => Boolean(email))
+  const { data: invitesRaw } = familyEmails.length
+    ? await adminClient
+        .from('invites')
+        .select('id, invitee_email, role, status, created_at')
+        .in('invitee_email', familyEmails)
+        .in('role', ['guardian', 'student'])
+        .order('created_at', { ascending: false })
     : { data: [] }
 
-  const workshopCapacityById = Object.fromEntries(
-    Array.from(
-      buildWorkshopCapacityMap(workshops ?? [], workshopEnrollments ?? []).entries(),
-      ([workshopId, snapshot]) => [workshopId, snapshot]
-    )
-  )
+  const invites = (invitesRaw ?? []) as InviteRow[]
 
-  const semesterIds = Array.from(
-    new Set((workshops ?? []).map(workshop => workshop.semester_id).filter(Boolean))
-  )
-  const { data: semesters } = semesterIds.length
+  const { data: enrollmentsRaw } = await supabase
+    .from('workshop_enrollment')
+    .select('id, workshop_id, semester_id, status, requested_at, profile_id')
+    .in('profile_id', family.familyProfileIds)
+    .order('requested_at', { ascending: false })
+
+  const enrollments = (enrollmentsRaw ?? []) as EnrollmentRow[]
+  const workshopIds = Array.from(new Set(enrollments.map(row => row.workshop_id).filter((id): id is string => Boolean(id))))
+
+  const { data: workshopsRaw } = workshopIds.length
+    ? await supabase
+        .from('workshop')
+        .select('id, description, semester_id')
+        .in('id', workshopIds)
+    : { data: [] }
+  const workshops = (workshopsRaw ?? []) as WorkshopRow[]
+
+  const semesterIds = Array.from(new Set(workshops.map(row => row.semester_id)))
+  const { data: semestersRaw } = semesterIds.length
     ? await supabase
         .from('semester')
-        .select('id, starts_at, ends_at')
+        .select('id, name, starts_at, ends_at')
         .in('id', semesterIds)
     : { data: [] }
 
-  const targetProfileId =
-    family.profileRole === 'guardian'
-      ? family.primaryChildByGuardian.get(family.profileId) ?? null
-      : family.profileId
+  const workshopsById = Object.fromEntries(workshops.map(workshop => [workshop.id, workshop]))
+  const semesterById = Object.fromEntries((semestersRaw ?? []).map(semester => [semester.id, semester])) as LoaderData['semesterById']
 
-  const preSurveyNames = semesterIds.map(semesterId => `Pre-Semester Survey - ${semesterId}`)
-  const { data: preSurveyForms } = preSurveyNames.length
-    ? await adminClient.from('form').select('id, name').in('name', preSurveyNames)
+  const { data: classesRaw } = workshopIds.length
+    ? await supabase
+        .from('class')
+        .select('id, workshop_id, starts_at, ends_at')
+        .in('workshop_id', workshopIds)
+        .order('starts_at', { ascending: true })
     : { data: [] }
-
-  const preSurveyFormBySemester = new Map<string, string>()
-  for (const row of preSurveyForms ?? []) {
-    const semesterId = row.name.replace('Pre-Semester Survey - ', '')
-    preSurveyFormBySemester.set(semesterId, row.id)
-  }
-
-  const preSurveyFormIds = Array.from(preSurveyFormBySemester.values())
-  const { data: preSurveySubmissions } =
-    targetProfileId && preSurveyFormIds.length
-      ? await adminClient
-          .from('form_submission')
-          .select('form_id')
-          .eq('profile_id', targetProfileId)
-          .in('form_id', preSurveyFormIds)
-      : { data: [] }
-
-  const completedPreSurveyFormIds = new Set(
-    (preSurveySubmissions ?? []).map(submission => submission.form_id).filter(Boolean)
-  )
-
-  const preSurveyBySemester = Object.fromEntries(
-    semesterIds.map(semesterId => {
-      const formId = preSurveyFormBySemester.get(semesterId)
-      return [
-        semesterId,
-        {
-          required: true,
-          completed: Boolean(formId && completedPreSurveyFormIds.has(formId)),
-          preSurveyPath: formId ? `/semester-surveys/${semesterId}/pre` : null,
-        },
-      ]
-    })
-  )
-
-  const bounds = (classes || []).reduce<Record<string, { start: string; end: string }>>((acc, classRow) => {
-    if (!classRow?.workshop_id) return acc
-    const current = acc[classRow.workshop_id]
-    const start = current?.start ?? classRow.starts_at
-    const end = current?.end ?? classRow.ends_at
-    acc[classRow.workshop_id] = {
-      start: start && start < classRow.starts_at ? start : classRow.starts_at,
-      end: end && end > classRow.ends_at ? end : classRow.ends_at,
-    }
+  const classes = (classesRaw ?? []) as ClassRow[]
+  const classesByWorkshop = classes.reduce<Record<string, ClassRow[]>>((acc, classRow) => {
+    if (!classRow.workshop_id) return acc
+    if (!acc[classRow.workshop_id]) acc[classRow.workshop_id] = []
+    acc[classRow.workshop_id].push(classRow)
     return acc
   }, {})
 
+  const classIds = classes.map(classRow => classRow.id)
+  const { data: attendanceRaw } = classIds.length
+    ? await adminClient
+        .from('class_attendance')
+        .select('class_id, profile_id, status')
+        .in('class_id', classIds)
+        .in('profile_id', family.familyProfileIds)
+    : { data: [] }
+  const attendanceByClass = ((attendanceRaw ?? []) as AttendanceRow[]).reduce<Record<string, AttendanceRow[]>>((acc, row) => {
+    if (!acc[row.class_id]) acc[row.class_id] = []
+    acc[row.class_id].push(row)
+    return acc
+  }, {})
+
+  const approvedWorkshopIds = new Set(
+    enrollments.filter(enrollment => enrollment.status === 'approved').map(enrollment => enrollment.workshop_id).filter(Boolean)
+  )
+
+  const nextClassCandidate = classes
+    .filter(classRow => Boolean(classRow.workshop_id) && approvedWorkshopIds.has(classRow.workshop_id) && new Date(classRow.starts_at).getTime() > now)
+    .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0]
+
+  const nextClass = nextClassCandidate?.workshop_id
+    ? {
+        workshopId: nextClassCandidate.workshop_id,
+        workshopLabel: workshopsById[nextClassCandidate.workshop_id]?.description ?? 'Workshop',
+        starts_at: nextClassCandidate.starts_at,
+        ends_at: nextClassCandidate.ends_at,
+      }
+    : null
+
   return {
-    user: auth.user,
-    role: auth.claims.role,
-    now,
     family,
-    workshops: (workshops || []).map(workshop => ({
-      ...workshop,
-      workshop_start: bounds[workshop.id]?.start ?? '',
-      workshop_end: bounds[workshop.id]?.end ?? '',
-    })),
-    semesters: semesters ?? [],
-    preSurveyBySemester,
-    enrollments: enrollments ?? [],
-    workshopCapacityById,
-  }
+    familyProfiles,
+    invites,
+    workshopsById,
+    semesterById,
+    enrollments,
+    classesByWorkshop,
+    attendanceByClass,
+    nextClass,
+  } satisfies LoaderData
 }
 
 export async function action({ request }: Route.ActionArgs) {
+  const auth = await enforceOnboardingGuard(request)
   const { supabase } = createClient(request)
+  const family = await resolveFamilyGraph(supabase, auth.user.id)
   const formData = await request.formData()
-  const workshopId = formData.get('workshopId') as string
-  const { data: currentUser } = await supabase.auth.getUser()
+  const intent = String(formData.get('intent') ?? '')
 
-  if (!currentUser?.user?.id) {
-    return { error: 'Authentication required' }
+  if (family.profileRole !== 'guardian') {
+    return { error: 'Only guardians can manage family membership.' } satisfies ActionData
   }
 
-  const family = await resolveFamilyGraph(supabase, currentUser.user.id)
+  if (intent === 'set_primary_child') {
+    const childId = String(formData.get('child_id') ?? '')
+    if (!childId) return { error: 'Child is required.' } satisfies ActionData
+    if (!family.children.some(child => child.id === childId)) return { error: 'Invalid child.' } satisfies ActionData
 
-  const { data: workshopRow, error: workshopError } = await supabase
-    .from('workshop')
-    .select('id, semester_id, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity')
-    .eq('id', workshopId)
-    .single()
-
-  if (workshopError || !workshopRow?.semester_id) {
-    return { error: workshopError?.message ?? 'Unable to find workshop' }
-  }
-
-  const nowIso = new Date().toISOString()
-  const enrollmentOpenAt = workshopRow.enrollment_open_at
-  const enrollmentCloseAt = workshopRow.enrollment_close_at
-  const isOpen = (!enrollmentOpenAt || nowIso >= enrollmentOpenAt) && (!enrollmentCloseAt || nowIso <= enrollmentCloseAt)
-  if (!isOpen) {
-    return { error: 'Enrollment is closed for this workshop' }
-  }
-
-  const { data: existingEnrollment } = await supabase
-    .from('workshop_enrollment')
-    .select('id')
-    .eq('semester_id', workshopRow.semester_id)
-    .in('profile_id', family.familyProfileIds)
-    .limit(1)
-    .maybeSingle()
-
-  if (existingEnrollment?.id) {
-    return { error: 'Family already enrolled for this semester' }
-  }
-
-  const primaryChildId = family.primaryChildByGuardian.get(family.profileId)
-  if (family.profileRole === 'guardian' && !primaryChildId) {
-    return { error: 'Primary child not found for guardian' }
-  }
-
-  const targetProfileId = primaryChildId ?? family.profileId
-
-  const preSurveyFormName = `Pre-Semester Survey - ${workshopRow.semester_id}`
-  const { data: preSurveyForm } = await adminClient
-    .from('form')
-    .select('id')
-    .eq('name', preSurveyFormName)
-    .maybeSingle()
-
-  if (!preSurveyForm?.id) {
-    return {
-      error: 'Pre-semester survey is not configured for this semester yet.',
+    const guardianIds = family.guardians.map(guardian => guardian.id)
+    if (!guardianIds.length) {
+      return { error: 'No guardians found for this family.' } satisfies ActionData
     }
+
+    await adminClient
+      .from('person_guardian_child')
+      .update({ primary_child: false })
+      .in('guardian_profile_id', guardianIds)
+
+    const { data: updatedRows, error } = await adminClient
+      .from('person_guardian_child')
+      .update({ primary_child: true })
+      .in('guardian_profile_id', guardianIds)
+      .eq('child_profile_id', childId)
+      .select('id')
+
+    if (error) return { error: error.message } satisfies ActionData
+    if (!updatedRows?.length) {
+      return { error: 'Selected child is not linked to this family.' } satisfies ActionData
+    }
+
+    return { ok: true, message: 'Primary child updated for the family.' } satisfies ActionData
   }
 
-    const { data: preSurveySubmission } = await adminClient
-      .from('form_submission')
+  if (intent === 'add_child') {
+    const firstname = String(formData.get('firstname') ?? '').trim() || null
+    const surname = String(formData.get('surname') ?? '').trim() || null
+    const rawEmail = String(formData.get('email') ?? '').trim()
+    const email = rawEmail ? normalizeEmail(rawEmail) : null
+
+    const { data: childRow, error: childError } = await adminClient
+      .from('profile')
+      .insert({
+        role: 'student',
+        firstname,
+        surname,
+        email,
+      })
+      .select('id, email')
+      .single()
+
+    if (childError || !childRow?.id) {
+      return { error: childError?.message ?? 'Unable to add child.' } satisfies ActionData
+    }
+
+    await adminClient
+      .from('person_guardian_child')
+      .upsert(
+        {
+          guardian_profile_id: family.profileId,
+          child_profile_id: childRow.id,
+          primary_child: !family.primaryChildByGuardian.get(family.profileId),
+        },
+        { onConflict: 'guardian_profile_id,child_profile_id' }
+      )
+
+    if (email) {
+      const inviteResult = await sendInvite({
+        email,
+        role: 'student',
+        origin: new URL(request.url).origin,
+        inviterProfileId: family.profileId,
+        inviterRole: 'guardian',
+        inviterEmail: auth.user.email ?? '',
+        inviterUserId: auth.user.id,
+      })
+      if (inviteResult.error) {
+        return { error: inviteResult.error } satisfies ActionData
+      }
+      if (inviteResult.inviteeUserId) {
+        await adminClient.from('profile').update({ user_id: inviteResult.inviteeUserId }).eq('id', childRow.id)
+      }
+    }
+
+    return { ok: true, message: email ? 'Child added and invite sent.' : 'Child added.' } satisfies ActionData
+  }
+
+  if (intent === 'add_guardian') {
+    const childId = String(formData.get('child_id') ?? '')
+    const rawEmail = String(formData.get('email') ?? '').trim()
+    const email = normalizeEmail(rawEmail)
+    const firstname = String(formData.get('firstname') ?? '').trim() || null
+    const surname = String(formData.get('surname') ?? '').trim() || null
+
+    if (!childId) return { error: 'Select a child for this guardian.' } satisfies ActionData
+    if (!family.children.some(child => child.id === childId)) return { error: 'Invalid child.' } satisfies ActionData
+    if (!email) return { error: 'Guardian email is required.' } satisfies ActionData
+
+    const { data: guardianProfile, error: guardianError } = await adminClient
+      .from('profile')
+      .upsert(
+        {
+          role: 'guardian',
+          email,
+          firstname,
+          surname,
+        },
+        { onConflict: 'email' }
+      )
       .select('id')
-      .eq('form_id', preSurveyForm.id)
-      .eq('profile_id', targetProfileId)
-      .order('submitted_at', { ascending: false })
-      .limit(1)
+      .single()
+
+    if (guardianError || !guardianProfile?.id) {
+      return { error: guardianError?.message ?? 'Unable to create guardian.' } satisfies ActionData
+    }
+
+    await adminClient
+      .from('person_guardian_child')
+      .upsert(
+        {
+          guardian_profile_id: guardianProfile.id,
+          child_profile_id: childId,
+          primary_child: false,
+        },
+        { onConflict: 'guardian_profile_id,child_profile_id' }
+      )
+
+    const inviteResult = await sendInvite({
+      email,
+      role: 'guardian',
+      origin: new URL(request.url).origin,
+      inviterProfileId: family.profileId,
+      inviterRole: 'guardian',
+      inviterEmail: auth.user.email ?? '',
+      inviterUserId: auth.user.id,
+    })
+
+    if (inviteResult.error) {
+      return { error: inviteResult.error } satisfies ActionData
+    }
+
+    if (inviteResult.inviteeUserId) {
+      await adminClient.from('profile').update({ user_id: inviteResult.inviteeUserId }).eq('id', guardianProfile.id)
+    }
+
+    return { ok: true, message: 'Guardian added and invite sent.' } satisfies ActionData
+  }
+
+  if (intent === 'send_or_resend_invite') {
+    const profileId = String(formData.get('profile_id') ?? '')
+    const role = String(formData.get('role') ?? '')
+    const rawEmail = String(formData.get('email') ?? '').trim()
+    const email = normalizeEmail(rawEmail)
+
+    if (!profileId) return { error: 'Profile is required.' } satisfies ActionData
+    if (role !== 'guardian' && role !== 'student') return { error: 'Invalid role.' } satisfies ActionData
+    if (!email) return { error: 'Email is required.' } satisfies ActionData
+    if (!family.familyProfileIds.includes(profileId)) return { error: 'Profile is not in this family.' } satisfies ActionData
+
+    const { data: profileRow } = await adminClient
+      .from('profile')
+      .select('id, user_id')
+      .eq('id', profileId)
       .maybeSingle()
 
-  if (!preSurveySubmission?.id) {
-    return {
-      error: 'Please complete the pre-semester family survey before enrolling.',
-      surveyPath: `/semester-surveys/${workshopRow.semester_id}/pre`,
+    if (!profileRow?.id) {
+      return { error: 'Profile not found.' } satisfies ActionData
     }
+
+    if (profileRow.user_id) {
+      return { error: 'This account is already active and does not need a new invite.' } satisfies ActionData
+    }
+
+    await adminClient.from('profile').update({ email }).eq('id', profileId)
+
+    const inviteResult = await sendInvite({
+      email,
+      role,
+      origin: new URL(request.url).origin,
+      inviterProfileId: family.profileId,
+      inviterRole: 'guardian',
+      inviterEmail: auth.user.email ?? '',
+      inviterUserId: auth.user.id,
+    })
+
+    if (inviteResult.error) return { error: inviteResult.error } satisfies ActionData
+
+    if (inviteResult.inviteeUserId) {
+      await adminClient.from('profile').update({ user_id: inviteResult.inviteeUserId }).eq('id', profileId)
+    }
+
+    return { ok: true, message: 'Invite sent.' } satisfies ActionData
   }
 
-  const { data: workshopEnrollments } = await supabase
-    .from('workshop_enrollment')
-    .select('workshop_id, status')
-    .eq('workshop_id', workshopId)
-
-  const capacitySnapshot = buildWorkshopCapacityMap(
-    [
-      {
-        id: workshopId,
-        capacity: workshopRow.capacity,
-        wait_list_capacity: workshopRow.wait_list_capacity,
-      },
-    ],
-    workshopEnrollments ?? []
-  ).get(workshopId)
-
-  if (!capacitySnapshot) {
-    return { error: 'Unable to evaluate workshop capacity' }
-  }
-
-  const nextAction = getWorkshopEnrollmentAction(capacitySnapshot)
-  if (nextAction === 'full') {
-    return { error: 'This workshop and its waitlist are full' }
-  }
-
-  const targetStatus = nextAction === 'waitlist' ? 'waitlisted' : 'pending'
-
-  const { error } = await supabase.from('workshop_enrollment').upsert(
-    {
-      workshop_id: workshopId,
-      semester_id: workshopRow.semester_id,
-      profile_id: targetProfileId,
-      status: targetStatus,
-    },
-    { onConflict: 'semester_id,profile_id' }
-  )
-
-  if (error) {
-    return { error: error.message }
-  }
-
-  return {
-    success: true,
-    successMessage: targetStatus === 'waitlisted' ? 'Added to waitlist.' : 'Enrollment request submitted.',
-  }
-}
-
-type WorkshopRow = {
-  id: string
-  description: string
-  enrollment_open_at: string
-  enrollment_close_at: string
-  semester_id: string
-  capacity: number
-  wait_list_capacity: number
-  workshop_start: string
-  workshop_end: string
-}
-
-type LoaderData = {
-  user: Awaited<ReturnType<typeof enforceOnboardingGuard>>['user']
-  role: string | null
-  now: string
-  family: Awaited<ReturnType<typeof resolveFamilyGraph>>
-  workshops: WorkshopRow[]
-  semesters: { id: string; starts_at: string; ends_at: string }[]
-  preSurveyBySemester: Record<string, { required: boolean; completed: boolean; preSurveyPath: string | null }>
-  enrollments: { workshop_id: string | null; status: string; semester_id: string; profile_id: string | null }[]
-  workshopCapacityById: Record<string, WorkshopCapacitySnapshot>
+  return { error: 'Unknown action.' } satisfies ActionData
 }
 
 export default function Home() {
-  const { workshops, enrollments, now, family, semesters, preSurveyBySemester, workshopCapacityById } = useLoaderData<LoaderData>()
-  const fetcher = useFetcher<typeof action>()
-  const statusByWorkshop = new Map<string, string>()
-  const enrollmentBySemester = new Map<string, string>()
-  const childById = new Map(family.children.map(child => [child.id, child]))
-  const semesterById = new Map(semesters.map(semester => [semester.id, semester]))
-  const workshopsBySemester = workshops.reduce<Record<string, WorkshopRow[]>>((acc, workshop) => {
-    const key = workshop.semester_id
-    if (!acc[key]) acc[key] = []
-    acc[key].push(workshop)
-    return acc
-  }, {})
+  const {
+    family,
+    familyProfiles,
+    invites,
+    workshopsById,
+    semesterById,
+    enrollments,
+    classesByWorkshop,
+    attendanceByClass,
+    nextClass,
+  } = useLoaderData<LoaderData>()
+  const actionData = useActionData<ActionData>()
+  const [searchParams] = useSearchParams()
+  const tab = searchParams.get('tab') === 'manage-family' ? 'manage-family' : 'family-workshops'
+  const title = tab === 'manage-family' ? 'Manage Family' : 'Family Workshops'
+  const subtitle =
+    tab === 'manage-family'
+      ? 'Add family members, set one primary child, and manage invitation access.'
+      : 'Track enrollments and view upcoming or past class attendance.'
 
-  const semesterSections = Object.entries(workshopsBySemester).sort((a, b) => {
-    const first = semesterById.get(a[0])
-    const second = semesterById.get(b[0])
-    if (!first || !second) return a[0].localeCompare(b[0])
-    return first.starts_at.localeCompare(second.starts_at)
-  })
-
-  for (const enrollment of enrollments) {
-    if (!enrollment.workshop_id) continue
-    const current = statusByWorkshop.get(enrollment.workshop_id)
-    if (current !== 'approved') {
-      statusByWorkshop.set(enrollment.workshop_id, enrollment.status)
-    }
-    if (enrollment.semester_id && !enrollmentBySemester.has(enrollment.semester_id)) {
-      enrollmentBySemester.set(enrollment.semester_id, enrollment.status)
+  const inviteByEmail = new Map<string, InviteRow>()
+  for (const invite of invites) {
+    const key = invite.invitee_email.toLowerCase()
+    if (!inviteByEmail.has(key)) {
+      inviteByEmail.set(key, invite)
     }
   }
 
-  return (
-    <main className="w-full px-6 py-12">
-      <header className="mb-4">
-        <h1 className="text-3xl font-semibold">Summer Workshops</h1>
-        <p className="text-sm text-muted-foreground">Choose a workshop and complete enrollment while the window is open.</p>
-      </header>
-      <section className="mb-6 rounded-lg border bg-card p-4 shadow-sm">
-        <h2 className="text-lg font-semibold">Family</h2>
-        <div className="mt-2 grid gap-4 md:grid-cols-2">
-          <div>
-            <p className="text-sm font-medium text-slate-900">Guardians</p>
-            {family.guardians.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No guardians linked.</p>
-            ) : (
-              <ul className="mt-2 space-y-1 text-sm text-slate-700">
-                {family.guardians.map(guardian => (
-                  <li key={guardian.id}>
-                    {guardian.firstname ?? 'Guardian'} {guardian.surname ?? ''}
-                    {guardian.primaryChildId && (
-                      <span className="text-xs text-muted-foreground">
-                        {' '}
-                        · Primary child:{' '}
-                        {(() => {
-                          const child = childById.get(guardian.primaryChildId)
-                          if (!child) return 'Assigned'
-                          return `${child.firstname ?? 'Child'} ${child.surname ?? ''}`.trim()
-                        })()}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div>
-            <p className="text-sm font-medium text-slate-900">Children</p>
-            {family.children.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No children linked.</p>
-            ) : (
-              <ul className="mt-2 space-y-1 text-sm text-slate-700">
-                {family.children.map(child => (
-                  <li key={child.id}>
-                    {child.firstname ?? 'Child'} {child.surname ?? ''}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      </section>
-      <div className="space-y-8">
-        {semesterSections.map(([semesterId, semesterWorkshops]) => {
-          const semester = semesterById.get(semesterId)
-          const preSurveyStatus = preSurveyBySemester[semesterId]
-          const preSurveyComplete = !preSurveyStatus?.required || preSurveyStatus.completed
+  const workshopEnrollments = enrollments.filter(enrollment => Boolean(enrollment.workshop_id))
+  const hasWorkshopEnrollment = workshopEnrollments.length > 0
 
-          return (
-            <section key={semesterId} className="space-y-3">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-slate-900">Semester {semesterId.slice(0, 8)}</h2>
-                  <p className="text-sm text-slate-500">
-                    {semester
-                      ? `${formatDate(semester.starts_at)} - ${formatDate(semester.ends_at)}`
-                      : 'Schedule unavailable'}
-                  </p>
+  const upcomingAndPastByWorkshop = Object.fromEntries(
+    Object.entries(classesByWorkshop).map(([workshopId, classes]) => {
+      const now = Date.now()
+      const upcoming = classes.filter(classRow => new Date(classRow.starts_at).getTime() > now)
+      const past = classes.filter(classRow => new Date(classRow.starts_at).getTime() <= now)
+      return [workshopId, { upcoming, past }]
+    })
+  ) as Record<string, { upcoming: ClassRow[]; past: ClassRow[] }>
+
+  const attendanceSummaryForWorkshop = (workshopId: string) => {
+    const classes = classesByWorkshop[workshopId] ?? []
+    let present = 0
+    let absent = 0
+    for (const classRow of classes) {
+      for (const record of attendanceByClass[classRow.id] ?? []) {
+        if (record.status === 'present') present += 1
+        if (record.status === 'absent') absent += 1
+      }
+    }
+    return { present, absent }
+  }
+
+  return (
+    <main className="w-full px-6 py-10 space-y-6">
+      <div className="flex gap-2">
+        <Button asChild variant={tab === 'family-workshops' ? 'default' : 'outline'}>
+          <Link to="/home">Family Workshops</Link>
+        </Button>
+        <Button asChild variant={tab === 'manage-family' ? 'default' : 'outline'}>
+          <Link to="/home?tab=manage-family">Manage Family</Link>
+        </Button>
+      </div>
+
+      <header className="space-y-1">
+        <h1 className="text-3xl font-semibold">{title}</h1>
+        <p className="text-sm text-muted-foreground">{subtitle}</p>
+      </header>
+
+      {actionData?.error ? <p className="text-sm text-destructive">{actionData.error}</p> : null}
+      {actionData?.ok && actionData.message ? <p className="text-sm text-emerald-600">{actionData.message}</p> : null}
+
+      {tab === 'family-workshops' ? (
+        <div className="space-y-6">
+          {nextClass ? (
+            <section className="rounded-lg border bg-card p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Next class</p>
+              <p className="mt-1 text-lg font-semibold">{nextClass.workshopLabel}</p>
+              <p className="text-sm text-muted-foreground">
+                {formatDateTime(nextClass.starts_at)} - {formatDateTime(nextClass.ends_at)}
+              </p>
+            </section>
+          ) : null}
+
+          {!hasWorkshopEnrollment ? (
+            <section className="rounded-lg border bg-card p-6 text-center shadow-sm space-y-4">
+              <h2 className="text-xl font-semibold">Your family has not enrolled in any workshops</h2>
+              <Button asChild>
+                <Link to="/enroll">Enroll in a workshop</Link>
+              </Button>
+            </section>
+          ) : (
+            <>
+              <section className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-lg font-semibold">Enrolled workshops</h2>
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/enroll">Enroll in a workshop</Link>
+                  </Button>
                 </div>
-                {!preSurveyComplete ? (
-                  <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 md:max-w-xs">
-                    <p className="font-medium">Pre-survey required</p>
-                    <p className="mt-1">Complete it before enrolling in this semester.</p>
-                    {preSurveyStatus?.preSurveyPath ? (
-                      <Button variant="outline" size="sm" className="mt-2" asChild>
-                        <Link to={preSurveyStatus.preSurveyPath}>Complete pre-survey</Link>
-                      </Button>
-                    ) : (
-                      <p className="mt-2 text-xs">Survey setup is pending. Please contact staff.</p>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Workshop</TableHead>
-                    <TableHead>Seats</TableHead>
-                    <TableHead>Waitlist</TableHead>
-                    <TableHead>Enrollment starts</TableHead>
-                    <TableHead>Enrollment ends</TableHead>
-                    <TableHead>Workshop starts</TableHead>
-                    <TableHead>Workshop ends</TableHead>
-                    <TableHead>Enroll</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {semesterWorkshops.map(workshop => {
-                    const enrollmentStatus = statusByWorkshop.get(workshop.id)
-                    const isOpen = now >= workshop.enrollment_open_at && now <= workshop.enrollment_close_at
-                    const capacitySnapshot = workshopCapacityById[workshop.id]
-                    const enrollmentAction = capacitySnapshot
-                      ? getWorkshopEnrollmentAction(capacitySnapshot)
-                      : 'enroll'
-                    const semesterStatus = enrollmentBySemester.get(workshop.semester_id)
-                    const familyEnrolledThisSemester = Boolean(semesterStatus)
-                    const isPending = enrollmentStatus === 'pending'
-                    const isWaitlisted = enrollmentStatus === 'waitlisted'
-                    const isApproved = enrollmentStatus === 'approved'
-                    const disabled =
-                      !preSurveyComplete ||
-                      !isOpen ||
-                      isPending ||
-                      isWaitlisted ||
-                      isApproved ||
-                      familyEnrolledThisSemester ||
-                      enrollmentAction === 'full'
-                    const rowAccentClass = isPending
-                      ? 'bg-amber-50/60'
-                      : isWaitlisted
-                      ? 'bg-sky-50/60'
-                      : ''
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Workshop</TableHead>
+                      <TableHead>Semester</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Next class</TableHead>
+                      <TableHead>Attendance</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {workshopEnrollments.map(enrollment => {
+                      const workshopId = enrollment.workshop_id as string
+                      const workshop = workshopsById[workshopId]
+                      const semester = semesterById[enrollment.semester_id]
+                      const upcoming = upcomingAndPastByWorkshop[workshopId]?.upcoming ?? []
+                      const next = upcoming[0]
+                      const attendance = attendanceSummaryForWorkshop(workshopId)
+
+                      return (
+                        <TableRow key={enrollment.id}>
+                          <TableCell>
+                            <a href={`#workshop-${workshopId}`} className="underline decoration-dotted underline-offset-2 hover:text-primary">
+                              {workshop?.description ?? 'Workshop'}
+                            </a>
+                          </TableCell>
+                          <TableCell>{semester?.name ?? (semester ? `${formatDate(semester.starts_at)} - ${formatDate(semester.ends_at)}` : enrollment.semester_id.slice(0, 8))}</TableCell>
+                          <TableCell className="capitalize">{enrollment.status}</TableCell>
+                          <TableCell>{next ? formatDateTime(next.starts_at) : 'No upcoming class'}</TableCell>
+                          <TableCell>{`Present: ${attendance.present} · Absent: ${attendance.absent}`}</TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </section>
+
+              {workshopEnrollments.map(enrollment => {
+                const workshopId = enrollment.workshop_id as string
+                const workshop = workshopsById[workshopId]
+                const grouped = upcomingAndPastByWorkshop[workshopId] ?? { upcoming: [], past: [] }
+
+                return (
+                  <section key={`detail-${enrollment.id}`} id={`workshop-${workshopId}`} className="rounded-lg border bg-card p-4 shadow-sm space-y-4">
+                    <h3 className="text-lg font-semibold">{workshop?.description ?? 'Workshop'} classes</h3>
+
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Upcoming classes</h4>
+                      {grouped.upcoming.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No upcoming classes scheduled.</p>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Starts</TableHead>
+                              <TableHead>Ends</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {grouped.upcoming.map(classRow => (
+                              <TableRow key={classRow.id}>
+                                <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
+                                <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Past classes & attendance</h4>
+                      {grouped.past.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No past classes yet.</p>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Class date</TableHead>
+                              <TableHead>Present</TableHead>
+                              <TableHead>Absent</TableHead>
+                              <TableHead>Unknown</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {grouped.past.map(classRow => {
+                              const records = attendanceByClass[classRow.id] ?? []
+                              const present = records.filter(record => record.status === 'present').length
+                              const absent = records.filter(record => record.status === 'absent').length
+                              const unknown = records.filter(record => record.status === 'unknown' || record.status === null).length
+
+                              return (
+                                <TableRow key={classRow.id}>
+                                  <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
+                                  <TableCell>{present}</TableCell>
+                                  <TableCell>{absent}</TableCell>
+                                  <TableCell>{unknown}</TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+                  </section>
+                )
+              })}
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {family.profileRole !== 'guardian' ? (
+            <section className="rounded-lg border bg-card p-4 shadow-sm">
+              <p className="text-sm text-muted-foreground">Only guardians can modify family members. Students can still view family details.</p>
+            </section>
+          ) : null}
+
+          <section className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
+            <h2 className="text-lg font-semibold">Family members</h2>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Invite status</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {familyProfiles
+                  .slice()
+                  .sort((a, b) => {
+                    const roleA = a.role === 'guardian' ? 0 : 1
+                    const roleB = b.role === 'guardian' ? 0 : 1
+                    if (roleA !== roleB) return roleA - roleB
+                    return personName(a).localeCompare(personName(b))
+                  })
+                  .map(profile => {
+                    const isGuardian = profile.role === 'guardian'
+                    const isStudent = profile.role === 'student'
+                    const isPrimaryChild = isStudent && family.guardians.some(guardian => guardian.primaryChildId === profile.id)
+                    const invite = profile.email ? inviteByEmail.get(profile.email.toLowerCase()) : null
+                    const inviteStatus = profile.user_id
+                      ? 'Active account'
+                      : invite?.status
+                        ? `Invite ${invite.status}`
+                        : 'No invite sent'
 
                     return (
-                      <TableRow key={workshop.id} className={rowAccentClass}>
+                      <TableRow key={profile.id}>
                         <TableCell>
-                          <p className="font-medium text-slate-900">{workshop.description}</p>
-                        </TableCell>
-                        <TableCell>
-                          {capacitySnapshot
-                            ? `${capacitySnapshot.approvedCount} / ${capacitySnapshot.capacity}`
-                            : `0 / ${workshop.capacity}`}
-                        </TableCell>
-                        <TableCell>
-                          {capacitySnapshot
-                            ? `${capacitySnapshot.waitlistedCount} / ${capacitySnapshot.waitListCapacity}`
-                            : `0 / ${workshop.wait_list_capacity}`}
-                        </TableCell>
-                        <TableCell>{formatDate(workshop.enrollment_open_at)}</TableCell>
-                        <TableCell>{formatDate(workshop.enrollment_close_at)}</TableCell>
-                        <TableCell>{workshop.workshop_start ? formatDate(workshop.workshop_start) : 'TBD'}</TableCell>
-                        <TableCell>{workshop.workshop_end ? formatDate(workshop.workshop_end) : 'TBD'}</TableCell>
-                        <TableCell>
-                          {isPending ? (
-                            <div className="flex flex-col gap-1">
-                              <span className="inline-flex w-fit items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
-                                Pending Review
+                          <div className="flex items-center gap-2">
+                            <span>{personName(profile)}</span>
+                            {isPrimaryChild ? (
+                              <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                                Primary child
                               </span>
-                              <p className="text-xs text-amber-900">Staff will review this request soon.</p>
-                            </div>
-                          ) : isWaitlisted ? (
-                            <div className="flex flex-col gap-1">
-                              <span className="inline-flex w-fit items-center rounded-full border border-sky-300 bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-900">
-                                On Waitlist
-                              </span>
-                              <p className="text-xs text-sky-900">You will be notified if a seat opens up.</p>
-                            </div>
-                          ) : isApproved ? (
-                            <div className="flex flex-col gap-1">
-                              <span className="inline-flex w-fit items-center rounded-full border border-emerald-300 bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-900">
-                                Enrolled
-                              </span>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="capitalize">{profile.role}</TableCell>
+                        <TableCell>{profile.email ?? 'No email'}</TableCell>
+                        <TableCell className="capitalize">{inviteStatus}</TableCell>
+                        <TableCell>
+                          {family.profileRole === 'guardian' ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {isStudent ? (
+                                <Form method="post" className="flex items-center gap-2">
+                                  <input type="hidden" name="intent" value="set_primary_child" />
+                                  <input type="hidden" name="child_id" value={profile.id} />
+                                  <Button type="submit" variant="outline" size="sm" disabled={isPrimaryChild}>
+                                    {isPrimaryChild ? 'Primary' : 'Set primary'}
+                                  </Button>
+                                </Form>
+                              ) : null}
+                              {!profile.user_id && (isStudent || isGuardian) ? (
+                                <Form method="post" className="flex items-center gap-2">
+                                  <input type="hidden" name="intent" value="send_or_resend_invite" />
+                                  <input type="hidden" name="profile_id" value={profile.id} />
+                                  <input type="hidden" name="role" value={isGuardian ? 'guardian' : 'student'} />
+                                  <Input
+                                    name="email"
+                                    type="email"
+                                    defaultValue={profile.email ?? ''}
+                                    placeholder={isGuardian ? 'guardian@gmail.com' : 'child@gmail.com'}
+                                    className="h-8 w-52"
+                                    required
+                                  />
+                                  <Button type="submit" variant="outline" size="sm">
+                                    {invite?.status === 'pending' ? 'Resend invite' : 'Send invite'}
+                                  </Button>
+                                </Form>
+                              ) : null}
                             </div>
                           ) : (
-                            <fetcher.Form method="post" className="flex flex-col gap-1">
-                              <input type="hidden" name="workshopId" value={workshop.id} />
-                              <Button
-                                type="submit"
-                                variant={disabled ? 'ghost' : 'default'}
-                                size="sm"
-                                disabled={disabled}
-                              >
-                                {familyEnrolledThisSemester
-                                  ? 'Already Enrolled'
-                                  : !preSurveyComplete
-                                  ? 'Complete Pre-Survey'
-                                  : isOpen
-                                  ? enrollmentAction === 'waitlist'
-                                    ? 'Join Waitlist'
-                                    : enrollmentAction === 'full'
-                                    ? 'Full'
-                                    : 'Enroll'
-                                  : 'Closed'}
-                              </Button>
-                              <p className="text-xs text-muted-foreground">
-                                {familyEnrolledThisSemester
-                                  ? 'Family already enrolled this semester'
-                                  : !preSurveyComplete
-                                  ? 'Pre-semester family survey required'
-                                  : enrollmentAction === 'full'
-                                  ? 'Workshop and waitlist are full'
-                                  : `Status: ${enrollmentStatus ?? 'not enrolled'}`}
-                              </p>
-                            </fetcher.Form>
+                            <span className="text-xs text-muted-foreground">View only</span>
                           )}
                         </TableCell>
                       </TableRow>
                     )
                   })}
-                </TableBody>
-              </Table>
-            </section>
-          )
-        })}
-      </div>
-      {fetcher.data?.error ? (
-        <div className="pt-3">
-          <p className="text-sm text-destructive">{fetcher.data.error}</p>
-          {fetcher.data.surveyPath ? (
-            <Button variant="outline" size="sm" asChild>
-              <Link to={fetcher.data.surveyPath}>Complete pre-semester survey</Link>
-            </Button>
-          ) : null}
+
+                {family.profileRole === 'guardian' ? (
+                  <>
+                    <TableRow>
+                      <TableCell className="font-medium">Add child</TableCell>
+                      <TableCell>student</TableCell>
+                      <TableCell colSpan={3}>
+                        <Form method="post" className="flex flex-wrap items-center gap-2">
+                          <input type="hidden" name="intent" value="add_child" />
+                          <Input name="firstname" placeholder="First name" className="h-8 w-32" />
+                          <Input name="surname" placeholder="Surname" className="h-8 w-32" />
+                          <Input name="email" type="email" placeholder="Email (optional)" className="h-8 w-52" />
+                          <Button type="submit" size="sm">Add</Button>
+                        </Form>
+                      </TableCell>
+                    </TableRow>
+
+                    <TableRow>
+                      <TableCell className="font-medium">Add guardian</TableCell>
+                      <TableCell>guardian</TableCell>
+                      <TableCell colSpan={3}>
+                        <Form method="post" className="flex flex-wrap items-center gap-2">
+                          <input type="hidden" name="intent" value="add_guardian" />
+                          <Input name="firstname" placeholder="First name" className="h-8 w-32" />
+                          <Input name="surname" placeholder="Surname" className="h-8 w-32" />
+                          <Input name="email" type="email" placeholder="guardian@gmail.com" className="h-8 w-52" required />
+                          <select name="child_id" className="h-8 rounded border border-input bg-background px-2 text-xs" required>
+                            <option value="">Link to child</option>
+                            {familyProfiles
+                              .filter(profile => profile.role === 'student')
+                              .map(child => (
+                                <option key={child.id} value={child.id}>
+                                  {personName(child)}
+                                </option>
+                              ))}
+                          </select>
+                          <Button type="submit" size="sm">Add</Button>
+                        </Form>
+                      </TableCell>
+                    </TableRow>
+                  </>
+                ) : null}
+              </TableBody>
+            </Table>
+          </section>
         </div>
-      ) : null}
-      {fetcher.data?.successMessage ? <p className="pt-3 text-sm text-emerald-600">{fetcher.data.successMessage}</p> : null}
+      )}
     </main>
   )
 }

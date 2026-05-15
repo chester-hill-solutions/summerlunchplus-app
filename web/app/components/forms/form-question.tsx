@@ -92,6 +92,14 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
     </fieldset>
   )
 
+  if (question.type === 'no-input-text') {
+    return (
+      <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+        {question.prompt}
+      </div>
+    )
+  }
+
   if (question.type === 'single_choice' || question.type === 'agreement') {
     if (ui === 'select') {
       return (

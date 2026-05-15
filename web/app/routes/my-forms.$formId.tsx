@@ -220,9 +220,12 @@ export async function action({ request, params }: Route.ActionArgs) {
     });
   }
 
-  const answers = (questions ?? []).map((q) => {
+  const answers = (questions ?? []).flatMap((q) => {
     const base = Array.isArray(q.form_question) ? q.form_question[0] : q.form_question;
     const type = base?.type ?? "text";
+    if (type === "no-input-text") {
+      return [];
+    }
     const key = `q-${q.question_code}`;
     const rawValue =
       type === "multi_choice"
@@ -238,7 +241,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     } else {
       payload = { text: normalized };
     }
-    return { submission_id: submissionRows.id, question_code: q.question_code, value: payload };
+    return [{ submission_id: submissionRows.id, question_code: q.question_code, value: payload }];
   });
 
   if (answers.length > 0) {
@@ -321,7 +324,7 @@ export default function MyFormDetail() {
             ) : (
               <div className="space-y-5">
                 {questions.map((q) => (
-                  <FormQuestion key={q.question_code} question={q} required />
+                  <FormQuestion key={q.question_code} question={q} required={q.type !== 'no-input-text'} />
                 ))}
               </div>
             )}

@@ -641,6 +641,93 @@ export type Database = {
         }
         Relationships: []
       }
+      sign_up_terms: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          is_active: boolean
+          slug: string
+          title: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          slug: string
+          title: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          slug?: string
+          title?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      sign_up_terms_consent: {
+        Row: {
+          accepted_at: string
+          email: string
+          id: string
+          metadata: Json
+          profile_id: string | null
+          role: Database["public"]["Enums"]["app_role"]
+          sign_up_terms_id: string
+          terms_content: string
+          terms_version: number
+          user_id: string | null
+        }
+        Insert: {
+          accepted_at?: string
+          email: string
+          id?: string
+          metadata?: Json
+          profile_id?: string | null
+          role: Database["public"]["Enums"]["app_role"]
+          sign_up_terms_id: string
+          terms_content: string
+          terms_version: number
+          user_id?: string | null
+        }
+        Update: {
+          accepted_at?: string
+          email?: string
+          id?: string
+          metadata?: Json
+          profile_id?: string | null
+          role?: Database["public"]["Enums"]["app_role"]
+          sign_up_terms_id?: string
+          terms_content?: string
+          terms_version?: number
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sign_up_terms_consent_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sign_up_terms_consent_sign_up_terms_id_fkey"
+            columns: ["sign_up_terms_id"]
+            isOneToOne: false
+            referencedRelation: "sign_up_terms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       role_permission: {
         Row: {
           permission: Database["public"]["Enums"]["app_permissions"]
@@ -729,6 +816,62 @@ export type Database = {
             columns: ["form_id"]
             isOneToOne: true
             referencedRelation: "form"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      suspicious_signal: {
+        Row: {
+          created_at: string
+          details: Json
+          family_profile_ids: string[]
+          id: string
+          resolution_note: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          severity: string
+          signal_type: string
+          status: string
+          subject_profile_id: string
+          summary: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          details?: Json
+          family_profile_ids?: string[]
+          id?: string
+          resolution_note?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity: string
+          signal_type: string
+          status?: string
+          subject_profile_id: string
+          summary: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          details?: Json
+          family_profile_ids?: string[]
+          id?: string
+          resolution_note?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity?: string
+          signal_type?: string
+          status?: string
+          subject_profile_id?: string
+          summary?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suspicious_signal_subject_profile_id_fkey"
+            columns: ["subject_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
             referencedColumns: ["id"]
           },
         ]
@@ -951,13 +1094,14 @@ export type Database = {
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
-        | "number"
         | "single_choice"
         | "multi_choice"
         | "date"
         | "address"
         | "agreement"
         | "checkbox"
+        | "number"
+        | "no-input-text"
       gift_card_asset_status: "available" | "sent" | "used" | "invalid"
       gift_card_upload_status:
         | "uploaded"
@@ -1162,13 +1306,14 @@ export const Constants = {
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
-        "number",
         "single_choice",
         "multi_choice",
         "date",
         "address",
         "agreement",
         "checkbox",
+        "number",
+        "no-input-text",
       ],
       gift_card_asset_status: ["available", "sent", "used", "invalid"],
       gift_card_upload_status: [

@@ -1,12 +1,13 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import AuthStickerBackground from '@/components/auth/sticker-background'
 import { useSearchParams } from 'react-router'
 
 export default function Page() {
   let [searchParams] = useSearchParams()
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+    <AuthStickerBackground dense>
       <div className="w-full">
         <div className="flex flex-col gap-6">
           <Card>
@@ -25,6 +26,6 @@ export default function Page() {
           </Card>
         </div>
       </div>
-    </div>
+    </AuthStickerBackground>
   )
 }

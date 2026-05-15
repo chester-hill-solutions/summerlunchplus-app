@@ -1,7 +1,13 @@
-import { Link, Form, redirect, useActionData, useLoaderData } from 'react-router'
-import { useMemo, useState } from 'react'
+import { Link, Form, redirect, useActionData, useLoaderData, useNavigation } from 'react-router'
+import { useEffect, useMemo, useState } from 'react'
 
 import { requireAuth } from '@/lib/auth.server'
+import {
+  getOffsetMinutesForLocalDateTime,
+  localDateTimeToUtcIso,
+  parseOffsetMinutes,
+  toLocalDateTimeInputValue,
+} from '@/lib/datetime'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
 
@@ -45,18 +51,16 @@ const safeReturnTo = (input: string | null) => {
   return input
 }
 
-const parseDateTime = (value: string) => {
-  const date = new Date(value)
+const parseDateTimeWithOffset = (value: string, rawOffset: FormDataEntryValue | null) => {
+  const offset = parseOffsetMinutes(typeof rawOffset === 'string' ? rawOffset : '')
+  if (offset === null) return null
+
+  const utcIso = localDateTimeToUtcIso(value, offset)
+  if (!utcIso) return null
+
+  const date = new Date(utcIso)
   if (Number.isNaN(date.getTime())) return null
   return date
-}
-
-const toLocalDateTimeInput = (value: string | null) => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-  return local.toISOString().slice(0, 16)
 }
 
 const toInteger = (value: string) => {
@@ -115,7 +119,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     semesters: semesters ?? [],
     returnTo: safeReturnTo(url.searchParams.get('returnTo')),
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local time',
   }
 }
 
@@ -155,9 +158,9 @@ export async function action({ request }: ActionFunctionArgs) {
     return { error: 'Capacity values must be non-negative whole numbers.', values, byday } satisfies ActionData
   }
 
-  const classStartAt = parseDateTime(values.class_start_at)
-  const classEndAt = parseDateTime(values.class_end_at)
-  const until = parseDateTime(values.until)
+  const classStartAt = parseDateTimeWithOffset(values.class_start_at, formData.get('class_start_at__tz_offset'))
+  const classEndAt = parseDateTimeWithOffset(values.class_end_at, formData.get('class_end_at__tz_offset'))
+  const until = parseDateTimeWithOffset(values.until, formData.get('until__tz_offset'))
 
   if (!classStartAt || !classEndAt) {
     return { error: 'Class start and end are required.', values, byday } satisfies ActionData
@@ -172,8 +175,12 @@ export async function action({ request }: ActionFunctionArgs) {
     return { error: 'Select at least one recurring weekday.', values, byday } satisfies ActionData
   }
 
-  const enrollmentOpenAt = values.enrollment_open_at ? parseDateTime(values.enrollment_open_at) : null
-  const enrollmentCloseAt = values.enrollment_close_at ? parseDateTime(values.enrollment_close_at) : null
+  const enrollmentOpenAt = values.enrollment_open_at
+    ? parseDateTimeWithOffset(values.enrollment_open_at, formData.get('enrollment_open_at__tz_offset'))
+    : null
+  const enrollmentCloseAt = values.enrollment_close_at
+    ? parseDateTimeWithOffset(values.enrollment_close_at, formData.get('enrollment_close_at__tz_offset'))
+    : null
   if (values.enrollment_open_at && !enrollmentOpenAt) {
     return { error: 'Enrollment open datetime is invalid.', values, byday } satisfies ActionData
   }
@@ -227,8 +234,11 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function WorkshopSetupPage() {
-  const { semesters, returnTo, timezone } = useLoaderData<typeof loader>()
+  const { semesters, returnTo } = useLoaderData<typeof loader>()
   const actionData = useActionData<typeof action>() as ActionData | undefined
+  const navigation = useNavigation()
+  const [timezone, setTimezone] = useState('Local time')
+  const isSubmitting = navigation.state === 'submitting'
 
   const [selectedSemesterId, setSelectedSemesterId] = useState(actionData?.values?.semester_id ?? '')
   const [enrollmentOpenAtValue, setEnrollmentOpenAtValue] = useState(actionData?.values?.enrollment_open_at ?? '')
@@ -246,6 +256,11 @@ export default function WorkshopSetupPage() {
   const [selectedByDay, setSelectedByDay] = useState<ByDay[]>(actionData?.byday?.length ? actionData.byday : defaultByDay)
   const [manuallyChangedByDay, setManuallyChangedByDay] = useState(Boolean(actionData?.byday?.length))
   const [startValue, setStartValue] = useState(initialStart)
+  const [classEndValue, setClassEndValue] = useState(actionData?.values?.class_end_at ?? '')
+
+  useEffect(() => {
+    setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local time')
+  }, [])
 
   const onSemesterChange = (semesterId: string) => {
     setSelectedSemesterId(semesterId)
@@ -256,9 +271,9 @@ export default function WorkshopSetupPage() {
       setUntilValue('')
       return
     }
-    setEnrollmentOpenAtValue(toLocalDateTimeInput(semester.enrollment_open_at))
-    setEnrollmentCloseAtValue(toLocalDateTimeInput(semester.enrollment_close_at))
-    setUntilValue(toLocalDateTimeInput(semester.ends_at))
+    setEnrollmentOpenAtValue(toLocalDateTimeInputValue(semester.enrollment_open_at))
+    setEnrollmentCloseAtValue(toLocalDateTimeInputValue(semester.enrollment_close_at))
+    setUntilValue(toLocalDateTimeInputValue(semester.ends_at))
   }
 
   const selectedSemester = semesters.find(item => item.id === selectedSemesterId)
@@ -295,6 +310,31 @@ export default function WorkshopSetupPage() {
 
       <Form method="post" className="space-y-6 rounded-lg border bg-card p-5">
         <input type="hidden" name="return_to" value={returnTo} />
+        <input
+          type="hidden"
+          name="enrollment_open_at__tz_offset"
+          value={enrollmentOpenAtValue ? getOffsetMinutesForLocalDateTime(enrollmentOpenAtValue) : ''}
+        />
+        <input
+          type="hidden"
+          name="enrollment_close_at__tz_offset"
+          value={enrollmentCloseAtValue ? getOffsetMinutesForLocalDateTime(enrollmentCloseAtValue) : ''}
+        />
+        <input
+          type="hidden"
+          name="class_start_at__tz_offset"
+          value={startValue ? getOffsetMinutesForLocalDateTime(startValue) : ''}
+        />
+        <input
+          type="hidden"
+          name="class_end_at__tz_offset"
+          value={classEndValue ? getOffsetMinutesForLocalDateTime(classEndValue) : ''}
+        />
+        <input
+          type="hidden"
+          name="until__tz_offset"
+          value={untilValue ? getOffsetMinutesForLocalDateTime(untilValue) : ''}
+        />
 
         <section className="space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Workshop details</h2>
@@ -425,7 +465,8 @@ export default function WorkshopSetupPage() {
                 name="class_end_at"
                 type="datetime-local"
                 required
-                defaultValue={actionData?.values?.class_end_at ?? ''}
+                value={classEndValue}
+                onChange={event => setClassEndValue(event.target.value)}
                 className="h-10 rounded border border-input bg-background px-2"
               />
             </label>
@@ -478,9 +519,10 @@ export default function WorkshopSetupPage() {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
+            disabled={isSubmitting}
             className="inline-flex h-11 items-center rounded-md bg-[var(--brand-pink)] px-5 text-sm font-semibold text-white shadow-sm transition hover:brightness-95"
           >
-            Create workshop and classes
+            {isSubmitting ? 'Creating workshop...' : 'Create workshop and classes'}
           </button>
           <p className="text-xs text-muted-foreground">
             We create classes on your selected weekdays, starting from your first class, until the “Repeat until” date/time.
