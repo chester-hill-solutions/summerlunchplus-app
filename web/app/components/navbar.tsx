@@ -22,7 +22,7 @@ export function Navbar({ user, role }: NavbarProps) {
           summerlunch+
         </Link>
 
-        {user ? <AuthenticatedNav role={role} email={user.email ?? null} /> : <UnauthenticatedNav />}
+        {user ? <AuthenticatedNav role={role} email={user.email ?? null} userId={user.id} /> : <UnauthenticatedNav />}
       </div>
     </header>
   )
@@ -41,7 +41,7 @@ function UnauthenticatedNav() {
   )
 }
 
-function AuthenticatedNav({ role, email }: { role: string | null; email: string | null }) {
+function AuthenticatedNav({ role, email, userId }: { role: string | null; email: string | null; userId: string }) {
   return (
     <div className="flex items-center gap-2">
       {import.meta.env.DEV && (
@@ -55,7 +55,7 @@ function AuthenticatedNav({ role, email }: { role: string | null; email: string 
           <Link to="/manage">Manage</Link>
         </Button>
       )}
-      <IconButton to="/profile" label="Profile">
+      <IconButton to={`/profile/${userId}`} label="Profile">
         <UserIcon className="size-5" />
       </IconButton>
       <IconButton to="/logout" label="Logout">
