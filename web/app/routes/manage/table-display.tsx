@@ -132,6 +132,12 @@ const personLinkForCell = (
   if (column === 'profile_display' && profileId) {
     return `/manage/person?profileId=${encodeURIComponent(profileId)}`
   }
+  if (column === 'subject_profile_display' && typeof row.subject_profile_id === 'string') {
+    return `/manage/person?profileId=${encodeURIComponent(row.subject_profile_id)}`
+  }
+  if (column === 'suspicious_signal' && profileId) {
+    return `/manage/person/discrepancies?profileId=${encodeURIComponent(profileId)}`
+  }
   if (column === 'guardian_display' && typeof row.guardian_profile_id === 'string') {
     return `/manage/person?profileId=${encodeURIComponent(row.guardian_profile_id)}`
   }
@@ -542,8 +548,8 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
 
       {editorFetcher.data?.error ? <p className="text-sm text-destructive">{editorFetcher.data.error}</p> : null}
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="w-full table-auto text-sm">
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="min-w-max w-full table-auto text-sm">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground">
             <tr>
               {columns.map(column => (
@@ -603,7 +609,16 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
 
               return (
                 <Fragment key={`fragment-${rowKey || rowIndex}`}>
-                  <tr key={`row-${rowIndex}`} className={rowIndex % 2 === 0 ? 'bg-card' : ''}>
+                  <tr
+                    key={`row-${rowIndex}`}
+                    className={
+                      typeof row._row_class === 'string'
+                        ? row._row_class
+                        : rowIndex % 2 === 0
+                          ? 'bg-card'
+                          : ''
+                    }
+                  >
                     {columns.map(column => {
                       if (isClassAttendance && column === 'status' && canEditStatus) {
                         const statusValue = typeof row.status === 'string' ? row.status : ''

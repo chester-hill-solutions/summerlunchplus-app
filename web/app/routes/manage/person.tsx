@@ -1,77 +1,22 @@
-import { Link, redirect, useLoaderData } from 'react-router'
+import { Link, NavLink, Outlet, redirect, useLoaderData, useLocation } from 'react-router'
 
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { Button } from '@/components/ui/button'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 
 import type { LoaderFunctionArgs } from 'react-router'
+import type { PersonLoaderData, ProfileRow, SuspiciousSignalRow } from './person.shared'
+import { profileLabel } from './person.shared'
 
-type ProfileRow = {
-  id: string
-  user_id: string | null
-  role: string | null
-  firstname: string | null
-  surname: string | null
-  email: string | null
-  phone: string | null
-  street_address: string | null
-  city: string | null
-  province: string | null
-  postcode: string | null
-  date_of_birth: string | null
-}
-
-type LoaderData = {
-  profile: ProfileRow
-  familyProfiles: ProfileRow[]
-  primaryChildByGuardian: Record<string, string>
-  enrollments: Array<{
-    id: string
-    profile_id: string | null
-    workshop_id: string | null
-    semester_id: string
-    status: string
-    requested_at: string
-  }>
-  workshopById: Record<string, { id: string; description: string | null; semester_id: string }>
-  semesterById: Record<string, { id: string; name: string | null; starts_at: string; ends_at: string }>
-  classByWorkshop: Record<string, Array<{ id: string; starts_at: string; ends_at: string }>>
-  attendanceByClass: Record<string, Array<{ profile_id: string; status: string | null }>>
-}
-
-const formatDate = (value: string | null) => {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
-}
-
-const formatDateTime = (value: string | null) => {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
-}
-
-const profileLabel = (profile: ProfileRow) => {
-  const fullName = [profile.firstname, profile.surname].filter(Boolean).join(' ').trim()
-  return fullName || profile.email || profile.id.slice(0, 8)
-}
+const personTabs = [
+  { to: '/manage/person', label: 'Overview' },
+  { to: '/manage/person/family', label: 'Family' },
+  { to: '/manage/person/enrollments', label: 'Enrollments' },
+  { to: '/manage/person/attendance', label: 'Attendance' },
+  { to: '/manage/person/discrepancies', label: 'Discrepancies' },
+]
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const auth = await requireAuth(request)
@@ -125,12 +70,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const familyProfileIds = Array.from(seen)
 
-  const { data: familyProfilesRaw } = await adminClient
-    .from('profile')
-    .select('id, user_id, role, firstname, surname, email, phone, street_address, city, province, postcode, date_of_birth')
-    .in('id', familyProfileIds)
+  const [{ data: familyProfilesRaw }, { data: enrollmentRowsRaw }, { data: suspiciousSignalsRaw }] = await Promise.all([
+    adminClient
+      .from('profile')
+      .select('id, user_id, role, firstname, surname, email, phone, street_address, city, province, postcode, date_of_birth')
+      .in('id', familyProfileIds),
+    adminClient
+      .from('workshop_enrollment')
+      .select('id, profile_id, workshop_id, semester_id, status, requested_at')
+      .in('profile_id', familyProfileIds)
+      .order('requested_at', { ascending: false }),
+    adminClient
+      .from('suspicious_signal')
+      .select('id, subject_profile_id, family_profile_ids, signal_type, severity, summary, details, status, created_at, resolved_at, resolution_note')
+      .order('created_at', { ascending: false })
+      .limit(200),
+  ])
 
   const familyProfiles = (familyProfilesRaw ?? []) as ProfileRow[]
+  const enrollments = (enrollmentRowsRaw ?? []) as PersonLoaderData['enrollments']
+  const suspiciousSignals = ((suspiciousSignalsRaw ?? []) as SuspiciousSignalRow[]).filter(signal =>
+    signal.family_profile_ids?.some(profileId => familyProfileIds.includes(profileId))
+  )
 
   const primaryChildByGuardian: Record<string, string> = {}
   for (const edge of edges) {
@@ -139,13 +100,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  const { data: enrollmentRowsRaw } = await adminClient
-    .from('workshop_enrollment')
-    .select('id, profile_id, workshop_id, semester_id, status, requested_at')
-    .in('profile_id', familyProfileIds)
-    .order('requested_at', { ascending: false })
-
-  const enrollments = (enrollmentRowsRaw ?? []) as LoaderData['enrollments']
   const workshopIds = Array.from(new Set(enrollments.map(row => row.workshop_id).filter((id): id is string => Boolean(id))))
 
   const { data: workshopsRaw } = workshopIds.length
@@ -155,7 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .in('id', workshopIds)
     : { data: [] }
 
-  const workshopById = Object.fromEntries((workshopsRaw ?? []).map(workshop => [workshop.id, workshop])) as LoaderData['workshopById']
+  const workshopById = Object.fromEntries((workshopsRaw ?? []).map(workshop => [workshop.id, workshop])) as PersonLoaderData['workshopById']
 
   const semesterIds = Array.from(new Set((workshopsRaw ?? []).map(workshop => workshop.semester_id).filter(Boolean)))
   const { data: semestersRaw } = semesterIds.length
@@ -165,7 +119,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .in('id', semesterIds)
     : { data: [] }
 
-  const semesterById = Object.fromEntries((semestersRaw ?? []).map(semester => [semester.id, semester])) as LoaderData['semesterById']
+  const semesterById = Object.fromEntries((semestersRaw ?? []).map(semester => [semester.id, semester])) as PersonLoaderData['semesterById']
 
   const { data: classesRaw } = workshopIds.length
     ? await adminClient
@@ -175,7 +129,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .order('starts_at', { ascending: true })
     : { data: [] }
 
-  const classByWorkshop = (classesRaw ?? []).reduce<LoaderData['classByWorkshop']>((acc, classRow) => {
+  const classByWorkshop = (classesRaw ?? []).reduce<PersonLoaderData['classByWorkshop']>((acc, classRow) => {
     if (!classRow.workshop_id) return acc
     if (!acc[classRow.workshop_id]) acc[classRow.workshop_id] = []
     acc[classRow.workshop_id].push({ id: classRow.id, starts_at: classRow.starts_at, ends_at: classRow.ends_at })
@@ -191,7 +145,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .in('profile_id', familyProfileIds)
     : { data: [] }
 
-  const attendanceByClass = (attendanceRaw ?? []).reduce<LoaderData['attendanceByClass']>((acc, row) => {
+  const attendanceByClass = (attendanceRaw ?? []).reduce<PersonLoaderData['attendanceByClass']>((acc, row) => {
     if (!acc[row.class_id]) acc[row.class_id] = []
     acc[row.class_id].push({ profile_id: row.profile_id, status: row.status })
     return acc
@@ -206,140 +160,52 @@ export async function loader({ request }: LoaderFunctionArgs) {
     semesterById,
     classByWorkshop,
     attendanceByClass,
-  } satisfies LoaderData
+    suspiciousSignals,
+  } satisfies PersonLoaderData
 }
 
-export default function ManagePersonDashboardPage() {
-  const { profile, familyProfiles, primaryChildByGuardian, enrollments, workshopById, semesterById, classByWorkshop, attendanceByClass } =
-    useLoaderData() as LoaderData
-
-  const profileById = new Map(familyProfiles.map(item => [item.id, item]))
+export default function ManagePersonLayoutPage() {
+  const data = useLoaderData() as PersonLoaderData
+  const { profile, suspiciousSignals } = data
+  const location = useLocation()
+  const openSignalCount = suspiciousSignals.filter(signal => signal.status === 'open').length
 
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">{profileLabel(profile)}</h1>
-          <p className="text-sm text-muted-foreground">Dense participant dashboard for profile, family graph, enrollments, and class activity.</p>
+          <p className="text-sm text-muted-foreground">
+            Review participant details, family links, enrollments, attendance, and discrepancy alerts.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {openSignalCount > 0 ? `${openSignalCount} open discrepancy signal${openSignalCount === 1 ? '' : 's'}` : 'No open discrepancy signals'}
+          </p>
         </div>
         <Button asChild variant="outline" size="sm">
           <Link to="/manage/participants">Back to participants</Link>
         </Button>
       </div>
 
-      <section className="rounded-lg border bg-card p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Personal information</h2>
-        <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
-          <p><span className="font-medium">Profile ID:</span> {profile.id}</p>
-          <p><span className="font-medium">User ID:</span> {profile.user_id ?? '-'}</p>
-          <p><span className="font-medium">Role:</span> {profile.role ?? '-'}</p>
-          <p><span className="font-medium">Email:</span> {profile.email ?? '-'}</p>
-          <p><span className="font-medium">Phone:</span> {profile.phone ?? '-'}</p>
-          <p><span className="font-medium">DOB:</span> {formatDate(profile.date_of_birth)}</p>
-          <p className="md:col-span-2"><span className="font-medium">Address:</span> {[profile.street_address, profile.city, profile.province, profile.postcode].filter(Boolean).join(', ') || '-'}</p>
-        </div>
-      </section>
-
-      <section className="rounded-lg border bg-card p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Family members</h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>User linked</TableHead>
-              <TableHead>Primary child</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {familyProfiles
-              .slice()
-              .sort((a, b) => profileLabel(a).localeCompare(profileLabel(b)))
-              .map(member => {
-                const primaryChildId = primaryChildByGuardian[member.id]
-                const primaryChild = primaryChildId ? profileById.get(primaryChildId) : null
-                return (
-                  <TableRow key={member.id}>
-                    <TableCell>
-                      <Link to={`/manage/person?profileId=${member.id}`} className="underline decoration-dotted underline-offset-2 hover:text-primary">
-                        {profileLabel(member)}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="capitalize">{member.role ?? '-'}</TableCell>
-                    <TableCell>{member.email ?? '-'}</TableCell>
-                    <TableCell>{member.user_id ? 'Yes' : 'No'}</TableCell>
-                    <TableCell>{primaryChild ? profileLabel(primaryChild) : '-'}</TableCell>
-                  </TableRow>
-                )
-              })}
-          </TableBody>
-        </Table>
-      </section>
-
-      <section className="rounded-lg border bg-card p-4 space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Workshop enrollments</h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Profile</TableHead>
-              <TableHead>Semester</TableHead>
-              <TableHead>Workshop</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Requested</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {enrollments.map(enrollment => {
-              const enrolledProfile = enrollment.profile_id ? profileById.get(enrollment.profile_id) : null
-              const workshop = enrollment.workshop_id ? workshopById[enrollment.workshop_id] : null
-              const semester = semesterById[enrollment.semester_id]
-              return (
-                <TableRow key={enrollment.id}>
-                  <TableCell>{enrolledProfile ? profileLabel(enrolledProfile) : '-'}</TableCell>
-                  <TableCell>{semester?.name ?? enrollment.semester_id.slice(0, 8)}</TableCell>
-                  <TableCell>{workshop?.description ?? '-'}</TableCell>
-                  <TableCell className="capitalize">{enrollment.status}</TableCell>
-                  <TableCell>{formatDateTime(enrollment.requested_at)}</TableCell>
-                </TableRow>
+      <nav className="flex flex-wrap gap-2 border-b pb-2">
+        {personTabs.map(tab => (
+          <NavLink
+            key={tab.to}
+            to={{ pathname: tab.to, search: location.search }}
+            end={tab.to === '/manage/person'}
+            className={({ isActive }) =>
+              cn(
+                'rounded-md px-3 py-1.5 text-sm',
+                isActive ? 'bg-primary/10 font-semibold text-primary' : 'text-muted-foreground hover:bg-muted'
               )
-            })}
-          </TableBody>
-        </Table>
-      </section>
+            }
+          >
+            {tab.label}
+          </NavLink>
+        ))}
+      </nav>
 
-      <section className="rounded-lg border bg-card p-4 space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Class schedule and attendance</h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Workshop</TableHead>
-              <TableHead>Class starts</TableHead>
-              <TableHead>Class ends</TableHead>
-              <TableHead>Attendance present</TableHead>
-              <TableHead>Attendance absent</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {Object.entries(classByWorkshop).flatMap(([workshopId, classes]) =>
-              classes.map(classRow => {
-                const attendanceRows = attendanceByClass[classRow.id] ?? []
-                const present = attendanceRows.filter(row => row.status === 'present').length
-                const absent = attendanceRows.filter(row => row.status === 'absent').length
-                return (
-                  <TableRow key={classRow.id}>
-                    <TableCell>{workshopById[workshopId]?.description ?? workshopId.slice(0, 8)}</TableCell>
-                    <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
-                    <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
-                    <TableCell>{present}</TableCell>
-                    <TableCell>{absent}</TableCell>
-                  </TableRow>
-                )
-              })
-            )}
-          </TableBody>
-        </Table>
-      </section>
+      <Outlet context={data} />
     </div>
   )
 }
