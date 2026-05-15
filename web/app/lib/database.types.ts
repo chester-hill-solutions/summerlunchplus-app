@@ -71,6 +71,7 @@ export type Database = {
       }
       class_attendance: {
         Row: {
+          camera_on: boolean | null
           class_id: string
           created_at: string
           id: string
@@ -81,6 +82,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          camera_on?: boolean | null
           class_id: string
           created_at?: string
           id?: string
@@ -91,6 +93,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          camera_on?: boolean | null
           class_id?: string
           created_at?: string
           id?: string

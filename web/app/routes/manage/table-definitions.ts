@@ -185,8 +185,8 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'class-attendance': {
     label: 'Class Attendance',
     table: 'class_attendance',
-    select: 'id, class_id, profile_id, status, recorded_by, created_at',
-    columns: ['class_display', 'profile_display', 'status', 'recorded_by_email', 'created_at'],
+    select: 'id, class_id, profile_id, status, camera_on, recorded_by, created_at',
+    columns: ['class_display', 'profile_display', 'status', 'camera_on', 'recorded_by_email', 'created_at'],
     order: 'created_at',
     lookupMappings: [
       {

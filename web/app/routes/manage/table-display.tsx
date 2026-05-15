@@ -317,6 +317,19 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     statusFetcher.submit(formData, { method: 'post' })
   }
 
+  const updateAttendanceCameraOn = (row: Record<string, unknown>, value: string) => {
+    if (!isClassAttendance || !canEditStatus) return
+    const classId = typeof row.class_id === 'string' ? row.class_id : ''
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!classId || !profileId) return
+    const formData = new FormData()
+    formData.set('intent', 'update-camera-on')
+    formData.set('class_id', classId)
+    formData.set('profile_id', profileId)
+    formData.set('camera_on', value)
+    statusFetcher.submit(formData, { method: 'post' })
+  }
+
   const updateWorkshopEnrollmentStatus = (row: Record<string, unknown>, value: string) => {
     if (!isWorkshopEnrollment || !canEditStatus || !value) return
     const enrollmentId = typeof row.id === 'string' ? row.id : ''
@@ -633,6 +646,31 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               <option value="unknown">unknown</option>
                               <option value="present">present</option>
                               <option value="absent">absent</option>
+                            </select>
+                          </td>
+                        )
+                      }
+
+                      if (isClassAttendance && column === 'camera_on' && canEditStatus) {
+                        const rawCameraOn = row.camera_on
+                        const cameraValue =
+                          typeof rawCameraOn === 'boolean'
+                            ? String(rawCameraOn)
+                            : typeof rawCameraOn === 'string' &&
+                                (rawCameraOn === 'true' || rawCameraOn === 'false')
+                              ? rawCameraOn
+                              : ''
+
+                        return (
+                          <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2 font-mono">
+                            <select
+                              value={cameraValue}
+                              onChange={event => updateAttendanceCameraOn(row, event.target.value)}
+                              className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
+                            >
+                              <option value="">(none)</option>
+                              <option value="true">true</option>
+                              <option value="false">false</option>
                             </select>
                           </td>
                         )
