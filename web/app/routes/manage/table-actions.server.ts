@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from 'react-router'
 
 import { requireAuth } from '@/lib/auth.server'
+import { localDateTimeToUtcIso, parseOffsetMinutes } from '@/lib/datetime'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
 
@@ -14,7 +15,12 @@ const fromQualifiedTable = (supabase: ReturnType<typeof createClient>['supabase'
   return supabase.from(qualifiedTable)
 }
 
-const parseFieldValue = (rawValue: FormDataEntryValue | null, fieldType: string, nullable?: boolean) => {
+const parseFieldValue = (
+  rawValue: FormDataEntryValue | null,
+  fieldType: string,
+  nullable?: boolean,
+  rawOffset?: FormDataEntryValue | null
+) => {
   if (rawValue === null) return { value: null, valid: true }
   const value = String(rawValue).trim()
   if (!value) return { value: nullable ? null : '', valid: true }
@@ -38,11 +44,16 @@ const parseFieldValue = (rawValue: FormDataEntryValue | null, fieldType: string,
   }
 
   if (fieldType === 'datetime') {
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) {
+    const offset = parseOffsetMinutes(typeof rawOffset === 'string' ? rawOffset : '')
+    if (offset === null) {
       return { value: null, valid: false }
     }
-    return { value: date.toISOString(), valid: true }
+
+    const utcIso = localDateTimeToUtcIso(value, offset)
+    if (!utcIso) {
+      return { value: null, valid: false }
+    }
+    return { value: utcIso, valid: true }
   }
 
   return { value, valid: true }
@@ -68,7 +79,12 @@ export const createTableAction = (tableName: string) => {
 
     const payload: Record<string, unknown> = {}
     for (const [fieldName, fieldConfig] of Object.entries(definition.editor.fields)) {
-      const parsed = parseFieldValue(formData.get(`field_${fieldName}`), fieldConfig.type, fieldConfig.nullable)
+      const parsed = parseFieldValue(
+        formData.get(`field_${fieldName}`),
+        fieldConfig.type,
+        fieldConfig.nullable,
+        fieldConfig.type === 'datetime' ? formData.get(`field_${fieldName}__tz_offset`) : null
+      )
       if (!parsed.valid) {
         return { error: `Invalid value for ${fieldConfig.label ?? fieldName}.` }
       }

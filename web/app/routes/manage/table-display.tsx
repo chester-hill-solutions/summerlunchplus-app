@@ -4,6 +4,7 @@ import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'r
 
 import { Combobox } from '@/components/ui/combobox'
 import { Constants, type Database } from '@/lib/database.types'
+import { getOffsetMinutesForLocalDateTime, toLocalDateTimeInputValue } from '@/lib/datetime'
 
 type TimestampLabelValue = {
   timestamp: unknown
@@ -104,13 +105,8 @@ const getDirectionIndicator = (stage: 0 | 1 | 2) => {
   return ''
 }
 
-const toLocalDateTimeValue = (value: unknown) => {
-  if (typeof value !== 'string' || !value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value.slice(0, 16)
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-  return local.toISOString().slice(0, 16)
-}
+const toLocalDateTimeValue = (value: unknown) =>
+  typeof value === 'string' && value ? toLocalDateTimeInputValue(value) : ''
 
 const toDateValue = (value: unknown) => {
   if (typeof value !== 'string' || !value) return ''
@@ -320,7 +316,11 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     const formData = new FormData()
     formData.set('intent', 'insert-row')
     for (const fieldName of fieldKeys) {
-      formData.set(`field_${fieldName}`, createValues[fieldName] ?? '')
+      const value = createValues[fieldName] ?? ''
+      formData.set(`field_${fieldName}`, value)
+      if (editorConfig.fields[fieldName]?.type === 'datetime') {
+        formData.set(`field_${fieldName}__tz_offset`, value ? getOffsetMinutesForLocalDateTime(value) : '')
+      }
     }
     editorFetcher.submit(formData, { method: 'post' })
   }
@@ -330,7 +330,11 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     const formData = new FormData()
     formData.set('intent', 'update-row')
     for (const fieldName of fieldKeys) {
-      formData.set(`field_${fieldName}`, editValues[fieldName] ?? '')
+      const value = editValues[fieldName] ?? ''
+      formData.set(`field_${fieldName}`, value)
+      if (editorConfig.fields[fieldName]?.type === 'datetime') {
+        formData.set(`field_${fieldName}__tz_offset`, value ? getOffsetMinutesForLocalDateTime(value) : '')
+      }
     }
     for (const keyColumn of editorConfig.primaryKey) {
       formData.set(`pk_${keyColumn}`, String(row[keyColumn] ?? ''))
