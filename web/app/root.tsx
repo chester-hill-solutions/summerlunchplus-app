@@ -97,6 +97,8 @@ export default function App() {
     const access_token = params.get("access_token");
     const refresh_token = params.get("refresh_token");
     const type = params.get("type");
+    const next = new URLSearchParams(window.location.search).get("next");
+    const nextPath = next?.startsWith("/") ? next : null;
 
     if (!access_token || !refresh_token) return;
     hashHandledRef.current = true;
@@ -111,7 +113,13 @@ export default function App() {
         }
         const cleanUrl = window.location.pathname + window.location.search;
         window.history.replaceState({}, "", cleanUrl);
-        const destination = type === "invite" ? "/sign-up/invite" : "/login";
+        const destination =
+          nextPath ??
+          (type === "invite"
+            ? "/sign-up/invite"
+            : type === "recovery"
+              ? "/update-password"
+              : "/login");
         window.location.replace(destination);
       });
   }, [supabaseAnonKey, supabaseUrl]);
