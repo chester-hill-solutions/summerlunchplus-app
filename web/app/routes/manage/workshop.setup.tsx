@@ -1,4 +1,4 @@
-import { Link, Form, redirect, useActionData, useLoaderData } from 'react-router'
+import { Link, Form, redirect, useActionData, useLoaderData, useNavigation } from 'react-router'
 import { useEffect, useMemo, useState } from 'react'
 
 import { requireAuth } from '@/lib/auth.server'
@@ -236,7 +236,9 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function WorkshopSetupPage() {
   const { semesters, returnTo } = useLoaderData<typeof loader>()
   const actionData = useActionData<typeof action>() as ActionData | undefined
+  const navigation = useNavigation()
   const [timezone, setTimezone] = useState('Local time')
+  const isSubmitting = navigation.state === 'submitting'
 
   const [selectedSemesterId, setSelectedSemesterId] = useState(actionData?.values?.semester_id ?? '')
   const [enrollmentOpenAtValue, setEnrollmentOpenAtValue] = useState(actionData?.values?.enrollment_open_at ?? '')
@@ -517,9 +519,10 @@ export default function WorkshopSetupPage() {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
+            disabled={isSubmitting}
             className="inline-flex h-11 items-center rounded-md bg-[var(--brand-pink)] px-5 text-sm font-semibold text-white shadow-sm transition hover:brightness-95"
           >
-            Create workshop and classes
+            {isSubmitting ? 'Creating workshop...' : 'Create workshop and classes'}
           </button>
           <p className="text-xs text-muted-foreground">
             We create classes on your selected weekdays, starting from your first class, until the “Repeat until” date/time.
