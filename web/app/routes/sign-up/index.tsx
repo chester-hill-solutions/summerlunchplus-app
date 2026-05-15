@@ -97,8 +97,8 @@ export default function SignUp() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-2xl">Sign up</CardTitle>
-        <CardDescription>Create a new account</CardDescription>
+        <CardTitle className="text-2xl">Welcome to summerlunch+</CardTitle>
+        <CardDescription>Create your account to get started with us</CardDescription>
       </CardHeader>
       <CardContent>
         {!role ? (
