@@ -360,6 +360,45 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
       },
     },
   },
+  'semester-form-requirement': {
+    label: 'Semester Survey Mapping',
+    table: 'semester_form_requirement',
+    select: 'id, semester_id, form_id, kind, is_required, is_active, updated_at',
+    columns: ['semester_range', 'kind', 'form_name', 'is_required', 'is_active', 'updated_at'],
+    order: 'updated_at',
+    lookupMappings: [
+      {
+        keyColumn: 'semester_id',
+        table: 'semester',
+        resultColumn: 'semester_range',
+        select: 'id, name, starts_at, ends_at',
+        format: 'semester_range',
+      },
+      {
+        keyColumn: 'form_id',
+        table: 'form',
+        valueColumn: 'name',
+        resultColumn: 'form_name',
+      },
+    ],
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        semester_id: { label: 'Semester', type: 'foreign_key', required: true, foreignKeyTable: 'semester' },
+        form_id: { label: 'Form', type: 'foreign_key', required: true, foreignKeyTable: 'form' },
+        kind: {
+          label: 'Survey Type',
+          type: 'enum',
+          required: true,
+          enumValues: ['pre_survey', 'post_survey'],
+        },
+        is_required: { label: 'Required', type: 'boolean', required: true },
+        is_active: { label: 'Active', type: 'boolean', required: true },
+      },
+    },
+  },
   'form-submission': {
     label: 'Form Submissions',
     table: 'form_submission',

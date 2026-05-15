@@ -193,6 +193,31 @@ const foreignKeyOptions = async (
     }
   }
 
+  if (tableName === 'semester-form-requirement') {
+    const [{ data: forms }, { data: semesters }] = await Promise.all([
+      supabase.from('form').select('id, name').order('name', { ascending: true }),
+      supabase
+        .from('semester')
+        .select('id, name, starts_at, ends_at')
+        .order('starts_at', { ascending: true }),
+    ])
+
+    const formOptions = ((forms ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: formDisplay(row, id) }
+    })
+
+    const semesterOptions = ((semesters ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: semesterDisplay(row, id) }
+    })
+
+    return {
+      form_id: formOptions.filter(option => option.value),
+      semester_id: semesterOptions.filter(option => option.value),
+    }
+  }
+
   if (tableName === 'form-answer') {
     const [{ data: questions }, { data: submissions }] = await Promise.all([
       supabase.from('form_question').select('question_code, prompt').order('question_code', { ascending: true }),

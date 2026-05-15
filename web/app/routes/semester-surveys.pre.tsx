@@ -11,6 +11,7 @@ import {
 import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
+import { resolveSemesterSurveyForm } from '@/lib/semester-survey.server'
 import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
@@ -30,8 +31,6 @@ type LoaderData = {
 type ActionData = {
   error?: string
 }
-
-const getPreSurveyFormName = (semesterId: string) => `Pre-Semester Survey - ${semesterId}`
 
 const parseFormValue = (question: FormQuestionData, formData: FormData) => {
   const fieldName = `question_${question.question_code}`
@@ -80,11 +79,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw redirect('/home', { headers })
   }
 
-  const formName = getPreSurveyFormName(semesterId)
+  const preSurveyForm = await resolveSemesterSurveyForm(semesterId, 'pre_survey')
+  if (!preSurveyForm.formId) {
+    throw redirect('/home', { headers })
+  }
+
   const { data: formRow } = await adminClient
     .from('form')
     .select('id, name')
-    .eq('name', formName)
+    .eq('id', preSurveyForm.formId)
     .maybeSingle()
 
   if (!formRow?.id) {
@@ -156,11 +159,17 @@ export async function action({ request, params }: Route.ActionArgs) {
     return { error: 'Family enrollment profile is missing' } satisfies ActionData
   }
 
-  const formName = getPreSurveyFormName(semesterId)
+  const preSurveyForm = await resolveSemesterSurveyForm(semesterId, 'pre_survey')
+  const formId = preSurveyForm.formId
+
+  if (!formId) {
+    return { error: 'Pre-semester survey is not configured' } satisfies ActionData
+  }
+
   const { data: formRow } = await adminClient
     .from('form')
     .select('id')
-    .eq('name', formName)
+    .eq('id', formId)
     .maybeSingle()
 
   if (!formRow?.id) {

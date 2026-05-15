@@ -11,6 +11,7 @@ import {
   getWorkshopEnrollmentAction,
   type WorkshopCapacitySnapshot,
 } from '@/lib/workshop-capacity'
+import { resolveSemesterSurveyForm } from '@/lib/semester-survey.server'
 import { createClient } from '@/lib/supabase/server'
 
 type WorkshopRow = {
@@ -63,8 +64,6 @@ const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveF
   }
   return family.profileId
 }
-
-const getPreSurveyFormName = (semesterId: string) => `Pre-Semester Survey - ${semesterId}`
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
@@ -127,18 +126,16 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const targetProfileId = getFamilyEnrollmentProfileId(family)
   const semesterIds = semesters.map(semester => semester.id)
-  const preSurveyNames = semesterIds.map(semesterId => getPreSurveyFormName(semesterId))
-  const { data: preSurveyForms } = preSurveyNames.length
-    ? await adminClient.from('form').select('id, name').in('name', preSurveyNames)
-    : { data: [] }
-
-  const preSurveyFormBySemester = new Map<string, string>()
-  for (const row of preSurveyForms ?? []) {
-    const semesterId = row.name.replace('Pre-Semester Survey - ', '')
-    preSurveyFormBySemester.set(semesterId, row.id)
-  }
+  const preSurveyFormBySemester = new Map<string, { formId: string | null; required: boolean }>()
+  await Promise.all(
+    semesterIds.map(async semesterId => {
+      preSurveyFormBySemester.set(semesterId, await resolveSemesterSurveyForm(semesterId, 'pre_survey'))
+    })
+  )
 
   const preSurveyFormIds = Array.from(preSurveyFormBySemester.values())
+    .map(entry => entry.formId)
+    .filter((formId): formId is string => Boolean(formId))
   const { data: preSurveySubmissions } =
     targetProfileId && preSurveyFormIds.length
       ? await adminClient
@@ -154,11 +151,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const preSurveyBySemester = Object.fromEntries(
     semesterIds.map(semesterId => {
-      const formId = preSurveyFormBySemester.get(semesterId)
+      const survey = preSurveyFormBySemester.get(semesterId)
+      const formId = survey?.formId ?? null
+      const required = survey?.required ?? true
       return [
         semesterId,
         {
-          required: true,
+          required,
           completed: Boolean(formId && completedPreSurveyFormIds.has(formId)),
           preSurveyPath: formId ? `/semester-surveys/${semesterId}/pre` : null,
         },
@@ -233,27 +232,24 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: false, error: 'Family enrollment profile not found.' } satisfies ActionData
   }
 
-  const preSurveyFormName = getPreSurveyFormName(workshopRow.semester_id)
-  const { data: preSurveyForm } = await adminClient
-    .from('form')
-    .select('id')
-    .eq('name', preSurveyFormName)
-    .maybeSingle()
+  const preSurveyForm = await resolveSemesterSurveyForm(workshopRow.semester_id, 'pre_survey')
 
-  if (!preSurveyForm?.id) {
+  if (!preSurveyForm.formId) {
     return { ok: false, error: 'Pre-semester survey is not configured for this semester.' } satisfies ActionData
   }
 
-  const { data: preSurveySubmission } = await adminClient
-    .from('form_submission')
-    .select('id')
-    .eq('form_id', preSurveyForm.id)
-    .eq('profile_id', targetProfileId)
-    .order('submitted_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  const { data: preSurveySubmission } = preSurveyForm.required
+    ? await adminClient
+        .from('form_submission')
+        .select('id')
+        .eq('form_id', preSurveyForm.formId)
+        .eq('profile_id', targetProfileId)
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: { id: 'not-required' } }
 
-  if (!preSurveySubmission?.id) {
+  if (preSurveyForm.required && !preSurveySubmission?.id) {
     return {
       ok: false,
       error: 'Please complete the pre-semester survey before enrolling.',
@@ -337,7 +333,13 @@ export default function EnrollPage() {
                   <TableRow key={semester.id}>
                     <TableCell className="font-medium">{semester.id.slice(0, 8)}</TableCell>
                     <TableCell>{formatDate(semester.starts_at)} - {formatDate(semester.ends_at)}</TableCell>
-                    <TableCell>{preSurvey?.completed ? 'Complete' : 'Required'}</TableCell>
+                    <TableCell>
+                      {preSurvey?.required
+                        ? preSurvey.completed
+                          ? 'Complete'
+                          : 'Required'
+                        : 'Optional'}
+                    </TableCell>
                     <TableCell className="capitalize">{status ?? 'Not enrolled'}</TableCell>
                     <TableCell className="text-right">
                       <Button asChild size="sm" variant="outline">
@@ -367,7 +369,8 @@ export default function EnrollPage() {
                 <Link to="/home">Back to Family Workshops</Link>
               </Button>
             </div>
-          ) : !preSurveyBySemester[selectedSemester.id]?.completed ? (
+          ) : preSurveyBySemester[selectedSemester.id]?.required &&
+            !preSurveyBySemester[selectedSemester.id]?.completed ? (
             <div className="rounded-lg border bg-card p-4 shadow-sm space-y-2">
               <p className="font-medium">Complete pre-survey before choosing a workshop.</p>
               {preSurveyBySemester[selectedSemester.id]?.preSurveyPath ? (

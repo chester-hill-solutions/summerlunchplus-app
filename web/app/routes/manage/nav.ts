@@ -5,6 +5,7 @@ export const teamPages = [
   { to: '/manage/class', label: 'Classes', description: 'Individual class schedule entries.' },
   { to: '/manage/class-attendance', label: 'Class attendance', description: 'Attendance by class and student.' },
   { to: '/manage/semester', label: 'Semesters', description: 'Program semesters and enrollment windows.' },
+  { to: '/manage/semester-form-requirement', label: 'Semester surveys', description: 'Map one pre/post survey form per semester.' },
   { to: '/manage/participants', label: 'Participants', description: 'Guardians, students, and unassigned users.' },
   { to: '/manage/families', label: 'Families', description: 'Guardian/child relationships.' },
   { to: '/manage/team', label: 'Team', description: 'Instructors and staff roles.' },
