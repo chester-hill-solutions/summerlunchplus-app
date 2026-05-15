@@ -149,6 +149,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   })
 
   if (consentError) {
+    if (consentError.code === '23503') {
+      return { error: 'Unable to save consent because the selected terms version is no longer available. Please refresh and try again.' }
+    }
     return { error: consentError.message ?? 'Unable to save terms consent' }
   }
 

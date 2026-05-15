@@ -16,6 +16,19 @@ type ActionData = {
   error?: string
 }
 
+const getInsertErrorMessage = (error: { code?: string; message?: string }) => {
+  if (error.code === '23505') {
+    if ((error.message ?? '').includes('sign_up_terms_slug_key')) {
+      return 'A terms record with this title/version slug already exists. Change the title or version.'
+    }
+    if ((error.message ?? '').includes('sign_up_terms_single_active')) {
+      return 'Only one terms version can be active at a time. Uncheck "Set as active" or deactivate the current active version first.'
+    }
+    return 'This terms version conflicts with an existing record. Please adjust version or title.'
+  }
+  return error.message ?? 'Unable to create terms.'
+}
+
 const baseSlugFromTitle = (title: string) =>
   title
     .toLowerCase()
@@ -122,7 +135,7 @@ export async function action({ request }: ActionFunctionArgs) {
   })
 
   if (insertError) {
-    return { error: insertError.message } satisfies ActionData
+    return { error: getInsertErrorMessage(insertError) } satisfies ActionData
   }
 
   return redirect('/manage/sign-up-terms', { headers })

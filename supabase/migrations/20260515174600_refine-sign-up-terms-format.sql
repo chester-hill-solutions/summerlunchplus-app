@@ -1,3 +1,8 @@
+update public.sign_up_terms
+set is_active = false,
+    updated_at = now()
+where is_active = true;
+
 insert into public.sign_up_terms (slug, title, content, version, is_active)
 values (
   'default',
