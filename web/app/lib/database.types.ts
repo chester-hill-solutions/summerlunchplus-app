@@ -779,6 +779,54 @@ export type Database = {
         }
         Relationships: []
       }
+      semester_form_requirement: {
+        Row: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          is_required: boolean
+          kind: Database["public"]["Enums"]["semester_survey_kind"]
+          semester_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          form_id: string
+          id?: string
+          is_active?: boolean
+          is_required?: boolean
+          kind: Database["public"]["Enums"]["semester_survey_kind"]
+          semester_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          form_id?: string
+          id?: string
+          is_active?: boolean
+          is_required?: boolean
+          kind?: Database["public"]["Enums"]["semester_survey_kind"]
+          semester_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "semester_form_requirement_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "form"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "semester_form_requirement_semester_id_fkey"
+            columns: ["semester_id"]
+            isOneToOne: false
+            referencedRelation: "semester"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sign_up_flow: {
         Row: {
           condition: Json | null
@@ -1116,6 +1164,7 @@ export type Database = {
         | "approved"
         | "rejected"
         | "revoked"
+      semester_survey_kind: "pre_survey" | "post_survey"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1331,6 +1380,7 @@ export const Constants = {
         "rejected",
         "revoked",
       ],
+      semester_survey_kind: ["pre_survey", "post_survey"],
     },
   },
 } as const

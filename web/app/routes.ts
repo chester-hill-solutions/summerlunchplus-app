@@ -67,5 +67,6 @@ export default [
     route("discrepancies", "routes/manage/discrepancies.tsx"),
     route("request-metadata", "routes/manage/request-metadata.tsx"),
     route("semester", "routes/manage/semester.tsx"),
+    route("semester-form-requirement", "routes/manage/semester-form-requirement.tsx"),
   ]),
 ] satisfies RouteConfig;

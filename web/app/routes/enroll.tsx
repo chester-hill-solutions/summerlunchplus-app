@@ -11,6 +11,7 @@ import {
   getWorkshopEnrollmentAction,
   type WorkshopCapacitySnapshot,
 } from '@/lib/workshop-capacity'
+import { resolveSemesterSurveyForm } from '@/lib/semester-survey.server'
 import { createClient } from '@/lib/supabase/server'
 
 type WorkshopRow = {
@@ -24,6 +25,7 @@ type WorkshopRow = {
 
 type SemesterRow = {
   id: string
+  name: string | null
   starts_at: string
   ends_at: string
   enrollment_open_at: string | null
@@ -64,8 +66,6 @@ const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveF
   return family.profileId
 }
 
-const getPreSurveyFormName = (semesterId: string) => `Pre-Semester Survey - ${semesterId}`
-
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   const { supabase, headers } = createClient(request)
@@ -84,7 +84,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const [{ data: semesterData }, { data: enrollmentsData }] = await Promise.all([
     supabase
       .from('semester')
-      .select('id, starts_at, ends_at, enrollment_open_at, enrollment_close_at, workshop (id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity)')
+      .select('id, name, starts_at, ends_at, enrollment_open_at, enrollment_close_at, workshop (id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity)')
       .order('starts_at', { ascending: true }),
     supabase
       .from('workshop_enrollment')
@@ -95,6 +95,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const semesters: SemesterRow[] = (semesterData ?? []).map((s: any) => ({
     id: String(s.id),
+    name: s.name ? String(s.name) : null,
     starts_at: String(s.starts_at),
     ends_at: String(s.ends_at),
     enrollment_open_at: s.enrollment_open_at ? String(s.enrollment_open_at) : null,
@@ -108,6 +109,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       wait_list_capacity: Number(w.wait_list_capacity ?? 0),
     })),
   }))
+
+  if (!selectedSemesterId) {
+    const nowIso = new Date().toISOString()
+    const openSemesters = semesters.filter(semester => {
+      const opensAt = semester.enrollment_open_at
+      const closesAt = semester.enrollment_close_at
+      return (!opensAt || nowIso >= opensAt) && (!closesAt || nowIso <= closesAt)
+    })
+
+    if (openSemesters.length === 1) {
+      throw redirect(`/enroll?semester=${openSemesters[0].id}`, { headers })
+    }
+  }
 
   const workshops = semesters.flatMap(semester => semester.workshops)
   const workshopIds = workshops.map(workshop => workshop.id)
@@ -127,18 +141,16 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const targetProfileId = getFamilyEnrollmentProfileId(family)
   const semesterIds = semesters.map(semester => semester.id)
-  const preSurveyNames = semesterIds.map(semesterId => getPreSurveyFormName(semesterId))
-  const { data: preSurveyForms } = preSurveyNames.length
-    ? await adminClient.from('form').select('id, name').in('name', preSurveyNames)
-    : { data: [] }
-
-  const preSurveyFormBySemester = new Map<string, string>()
-  for (const row of preSurveyForms ?? []) {
-    const semesterId = row.name.replace('Pre-Semester Survey - ', '')
-    preSurveyFormBySemester.set(semesterId, row.id)
-  }
+  const preSurveyFormBySemester = new Map<string, { formId: string | null; required: boolean }>()
+  await Promise.all(
+    semesterIds.map(async semesterId => {
+      preSurveyFormBySemester.set(semesterId, await resolveSemesterSurveyForm(semesterId, 'pre_survey'))
+    })
+  )
 
   const preSurveyFormIds = Array.from(preSurveyFormBySemester.values())
+    .map(entry => entry.formId)
+    .filter((formId): formId is string => Boolean(formId))
   const { data: preSurveySubmissions } =
     targetProfileId && preSurveyFormIds.length
       ? await adminClient
@@ -154,11 +166,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const preSurveyBySemester = Object.fromEntries(
     semesterIds.map(semesterId => {
-      const formId = preSurveyFormBySemester.get(semesterId)
+      const survey = preSurveyFormBySemester.get(semesterId)
+      const formId = survey?.formId ?? null
+      const required = survey?.required ?? true
       return [
         semesterId,
         {
-          required: true,
+          required,
           completed: Boolean(formId && completedPreSurveyFormIds.has(formId)),
           preSurveyPath: formId ? `/semester-surveys/${semesterId}/pre` : null,
         },
@@ -233,27 +247,24 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: false, error: 'Family enrollment profile not found.' } satisfies ActionData
   }
 
-  const preSurveyFormName = getPreSurveyFormName(workshopRow.semester_id)
-  const { data: preSurveyForm } = await adminClient
-    .from('form')
-    .select('id')
-    .eq('name', preSurveyFormName)
-    .maybeSingle()
+  const preSurveyForm = await resolveSemesterSurveyForm(workshopRow.semester_id, 'pre_survey')
 
-  if (!preSurveyForm?.id) {
+  if (!preSurveyForm.formId) {
     return { ok: false, error: 'Pre-semester survey is not configured for this semester.' } satisfies ActionData
   }
 
-  const { data: preSurveySubmission } = await adminClient
-    .from('form_submission')
-    .select('id')
-    .eq('form_id', preSurveyForm.id)
-    .eq('profile_id', targetProfileId)
-    .order('submitted_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  const { data: preSurveySubmission } = preSurveyForm.required
+    ? await adminClient
+        .from('form_submission')
+        .select('id')
+        .eq('form_id', preSurveyForm.formId)
+        .eq('profile_id', targetProfileId)
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: { id: 'not-required' } }
 
-  if (!preSurveySubmission?.id) {
+  if (preSurveyForm.required && !preSurveySubmission?.id) {
     return {
       ok: false,
       error: 'Please complete the pre-semester survey before enrolling.',
@@ -322,7 +333,8 @@ export default function EnrollPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Semester</TableHead>
+                <TableHead>Semester ID</TableHead>
+                <TableHead>Name</TableHead>
                 <TableHead>Dates</TableHead>
                 <TableHead>Pre-survey</TableHead>
                 <TableHead>Enrollment</TableHead>
@@ -336,8 +348,15 @@ export default function EnrollPage() {
                 return (
                   <TableRow key={semester.id}>
                     <TableCell className="font-medium">{semester.id.slice(0, 8)}</TableCell>
+                    <TableCell>{semester.name ?? 'Unnamed semester'}</TableCell>
                     <TableCell>{formatDate(semester.starts_at)} - {formatDate(semester.ends_at)}</TableCell>
-                    <TableCell>{preSurvey?.completed ? 'Complete' : 'Required'}</TableCell>
+                    <TableCell>
+                      {preSurvey?.required
+                        ? preSurvey.completed
+                          ? 'Complete'
+                          : 'Required'
+                        : 'Optional'}
+                    </TableCell>
                     <TableCell className="capitalize">{status ?? 'Not enrolled'}</TableCell>
                     <TableCell className="text-right">
                       <Button asChild size="sm" variant="outline">
@@ -353,7 +372,9 @@ export default function EnrollPage() {
       ) : (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Semester {selectedSemester.id.slice(0, 8)}</h2>
+            <h2 className="text-lg font-semibold">
+              {selectedSemester.name ?? `Semester ${selectedSemester.id.slice(0, 8)}`}
+            </h2>
             <Button asChild variant="outline" size="sm">
               <Link to="/enroll">Change semester</Link>
             </Button>
@@ -367,7 +388,8 @@ export default function EnrollPage() {
                 <Link to="/home">Back to Family Workshops</Link>
               </Button>
             </div>
-          ) : !preSurveyBySemester[selectedSemester.id]?.completed ? (
+          ) : preSurveyBySemester[selectedSemester.id]?.required &&
+            !preSurveyBySemester[selectedSemester.id]?.completed ? (
             <div className="rounded-lg border bg-card p-4 shadow-sm space-y-2">
               <p className="font-medium">Complete pre-survey before choosing a workshop.</p>
               {preSurveyBySemester[selectedSemester.id]?.preSurveyPath ? (
