@@ -66,6 +66,9 @@ const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveF
   return family.profileId
 }
 
+const semesterSurveyPath = (semesterId: string) =>
+  `/semester-surveys/${semesterId}/pre?returnTo=${encodeURIComponent(`/enroll?semester=${semesterId}`)}`
+
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   const { supabase, headers } = createClient(request)
@@ -174,7 +177,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         {
           required,
           completed: Boolean(formId && completedPreSurveyFormIds.has(formId)),
-          preSurveyPath: formId ? `/semester-surveys/${semesterId}/pre` : null,
+          preSurveyPath: formId ? semesterSurveyPath(semesterId) : null,
         },
       ]
     })
@@ -265,12 +268,12 @@ export async function action({ request }: Route.ActionArgs) {
     : { data: { id: 'not-required' } }
 
   if (preSurveyForm.required && !preSurveySubmission?.id) {
-    return {
-      ok: false,
-      error: 'Please complete the pre-semester survey before enrolling.',
-      surveyPath: `/semester-surveys/${workshopRow.semester_id}/pre`,
-    } satisfies ActionData
-  }
+      return {
+        ok: false,
+        error: 'Please complete the pre-semester survey before enrolling.',
+        surveyPath: semesterSurveyPath(workshopRow.semester_id),
+      } satisfies ActionData
+    }
 
   const { data: workshopEnrollments } = await supabase
     .from('workshop_enrollment')

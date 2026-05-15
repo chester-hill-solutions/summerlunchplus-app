@@ -26,6 +26,7 @@ type LoaderData = {
   questions: FormQuestionData[]
   answers: Record<string, Json>
   familyProfileId: string
+  returnTo: string
 }
 
 type ActionData = {
@@ -64,6 +65,12 @@ const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveF
   return family.profileId
 }
 
+const sanitizeReturnTo = (value: string | null, semesterId: string) => {
+  if (!value) return `/enroll?semester=${semesterId}`
+  if (!value.startsWith('/') || value.startsWith('//')) return `/enroll?semester=${semesterId}`
+  return value
+}
+
 export async function loader({ request, params }: Route.LoaderArgs) {
   const semesterId = params.semesterId
   if (!semesterId) {
@@ -72,6 +79,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const auth = await enforceOnboardingGuard(request)
   const { supabase, headers } = createClient(request)
+  const url = new URL(request.url)
+  const returnTo = sanitizeReturnTo(url.searchParams.get('returnTo'), semesterId)
   const family = await resolveFamilyGraph(supabase, auth.user.id)
   const familyProfileId = getFamilyEnrollmentProfileId(family)
 
@@ -142,6 +151,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     questions: normalizedQuestions,
     answers,
     familyProfileId,
+    returnTo,
   } satisfies LoaderData
 }
 
@@ -193,6 +203,10 @@ export async function action({ request, params }: Route.ActionArgs) {
   })
 
   const formData = await request.formData()
+  const returnTo = sanitizeReturnTo(
+    typeof formData.get('return_to') === 'string' ? String(formData.get('return_to')) : null,
+    semesterId
+  )
   const answersToSave: { question_code: string; value: Json }[] = []
 
   for (const question of questions) {
@@ -270,11 +284,11 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
   }
 
-  throw redirect('/home', { headers })
+  throw redirect(returnTo, { headers })
 }
 
 export default function SemesterPreSurveyPage() {
-  const { semesterId, formName, formId, questions, answers } = useLoaderData() as LoaderData
+  const { semesterId, formName, formId, questions, answers, returnTo } = useLoaderData() as LoaderData
   const actionData = useActionData() as ActionData | undefined
   const navigation = useNavigation()
   const isSubmitting = navigation.state === 'submitting'
@@ -290,6 +304,7 @@ export default function SemesterPreSurveyPage() {
         </CardHeader>
         <CardContent>
           <Form method="post" className="space-y-6">
+            <input type="hidden" name="return_to" value={returnTo} />
             <p className="text-sm text-slate-500">Semester: {semesterId}</p>
 
             {questions.map(question => {
