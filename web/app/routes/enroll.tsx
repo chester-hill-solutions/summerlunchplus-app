@@ -25,6 +25,7 @@ type WorkshopRow = {
 
 type SemesterRow = {
   id: string
+  name: string | null
   starts_at: string
   ends_at: string
   enrollment_open_at: string | null
@@ -83,7 +84,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const [{ data: semesterData }, { data: enrollmentsData }] = await Promise.all([
     supabase
       .from('semester')
-      .select('id, starts_at, ends_at, enrollment_open_at, enrollment_close_at, workshop (id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity)')
+      .select('id, name, starts_at, ends_at, enrollment_open_at, enrollment_close_at, workshop (id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity)')
       .order('starts_at', { ascending: true }),
     supabase
       .from('workshop_enrollment')
@@ -94,6 +95,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const semesters: SemesterRow[] = (semesterData ?? []).map((s: any) => ({
     id: String(s.id),
+    name: s.name ? String(s.name) : null,
     starts_at: String(s.starts_at),
     ends_at: String(s.ends_at),
     enrollment_open_at: s.enrollment_open_at ? String(s.enrollment_open_at) : null,
@@ -107,6 +109,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       wait_list_capacity: Number(w.wait_list_capacity ?? 0),
     })),
   }))
+
+  if (!selectedSemesterId) {
+    const nowIso = new Date().toISOString()
+    const openSemesters = semesters.filter(semester => {
+      const opensAt = semester.enrollment_open_at
+      const closesAt = semester.enrollment_close_at
+      return (!opensAt || nowIso >= opensAt) && (!closesAt || nowIso <= closesAt)
+    })
+
+    if (openSemesters.length === 1) {
+      throw redirect(`/enroll?semester=${openSemesters[0].id}`, { headers })
+    }
+  }
 
   const workshops = semesters.flatMap(semester => semester.workshops)
   const workshopIds = workshops.map(workshop => workshop.id)
@@ -318,7 +333,8 @@ export default function EnrollPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Semester</TableHead>
+                <TableHead>Semester ID</TableHead>
+                <TableHead>Name</TableHead>
                 <TableHead>Dates</TableHead>
                 <TableHead>Pre-survey</TableHead>
                 <TableHead>Enrollment</TableHead>
@@ -332,6 +348,7 @@ export default function EnrollPage() {
                 return (
                   <TableRow key={semester.id}>
                     <TableCell className="font-medium">{semester.id.slice(0, 8)}</TableCell>
+                    <TableCell>{semester.name ?? 'Unnamed semester'}</TableCell>
                     <TableCell>{formatDate(semester.starts_at)} - {formatDate(semester.ends_at)}</TableCell>
                     <TableCell>
                       {preSurvey?.required
@@ -355,7 +372,9 @@ export default function EnrollPage() {
       ) : (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Semester {selectedSemester.id.slice(0, 8)}</h2>
+            <h2 className="text-lg font-semibold">
+              {selectedSemester.name ?? `Semester ${selectedSemester.id.slice(0, 8)}`}
+            </h2>
             <Button asChild variant="outline" size="sm">
               <Link to="/enroll">Change semester</Link>
             </Button>
