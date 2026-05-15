@@ -1,5 +1,6 @@
 
 import { createClient as createBrowserClient } from '@/lib/supabase/client'
+import AuthStickerBackground from '@/components/auth/sticker-background'
 import { createClient } from '@/lib/supabase/server'
 import { recordLoginEvent } from '@/lib/login-events.server'
 import { type EmailOtpType } from '@supabase/supabase-js'
@@ -105,7 +106,8 @@ export default function ConfirmPage() {
 
     const supabase = createBrowserClient()
     supabase.auth
-      .setSession({ access_token, refresh_token })
+      .signOut({ scope: 'local' })
+      .then(() => supabase.auth.setSession({ access_token, refresh_token }))
       .then(({ error: sessionError }) => {
         if (sessionError) {
           setError(sessionError.message)
@@ -116,29 +118,29 @@ export default function ConfirmPage() {
       })
   }, [destination])
 
-  if (error) {
-    return (
-      <main className="flex min-h-svh items-center justify-center p-6 md:p-10">
-        <div className="w-full max-w-md rounded-lg border bg-card p-6">
-          <p className="text-sm text-destructive">Unable to verify link: {error}</p>
-          <div className="mt-3 flex items-center gap-2">
-            <Link to="/forgot-password" className="text-sm underline underline-offset-4">
-              Request a new reset link
-            </Link>
-            <Link to="/login" className="text-sm underline underline-offset-4">
-              Back to login
-            </Link>
-          </div>
-        </div>
-      </main>
-    )
-  }
-
   return (
-    <main className="flex min-h-svh items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-md rounded-lg border bg-card p-6 text-sm text-muted-foreground">
-        Verifying your link...
+    <AuthStickerBackground dense>
+      <div
+        className={`w-full max-w-md rounded-lg border bg-card p-6 ${
+          error ? '' : 'text-sm text-muted-foreground'
+        }`}
+      >
+        {error ? (
+          <>
+            <p className="text-sm text-destructive">Unable to verify link: {error}</p>
+            <div className="mt-3 flex items-center gap-2">
+              <Link to="/forgot-password" className="text-sm underline underline-offset-4">
+                Request a new reset link
+              </Link>
+              <Link to="/login" className="text-sm underline underline-offset-4">
+                Back to login
+              </Link>
+            </div>
+          </>
+        ) : (
+          <>Verifying your link...</>
+        )}
       </div>
-    </main>
+    </AuthStickerBackground>
   )
 }
