@@ -20,8 +20,18 @@ import {
   Link,
   redirect,
   useFetcher,
+  useLoaderData,
 } from 'react-router'
 import { useState } from 'react'
+
+type LoaderData = {
+  terms: {
+    id: string
+    title: string
+    content: string
+    version: number
+  } | null
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { supabase, headers } = createClient(request)
@@ -32,7 +42,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect('/home', { headers })
   }
 
-  return null
+  const { data: activeTerms } = await supabase
+    .from('sign_up_terms')
+    .select('id, title, content, version')
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  return {
+    terms: activeTerms
+      ? {
+          id: activeTerms.id,
+          title: activeTerms.title,
+          content: activeTerms.content,
+          version: activeTerms.version,
+        }
+      : null,
+  } satisfies LoaderData
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -43,6 +70,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const email = normalizeEmail((formData.get('email') as string) ?? '')
   const password = formData.get('password') as string
   const repeatPassword = formData.get('repeat-password') as string
+  const acceptedTerms = formData.get('terms-consent') === 'on'
+
+  const { data: activeTerms } = await supabase
+    .from('sign_up_terms')
+    .select('id, content, version')
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!activeTerms) {
+    return {
+      error: 'Terms are unavailable right now. Please try again in a moment.',
+    }
+  }
+
+  if (!acceptedTerms) {
+    return {
+      error: 'You must accept the terms to create an account.',
+    }
+  }
 
   if (!password) {
     return {
@@ -63,7 +111,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { role } },
+    options: { data: { role, sign_up_terms_version: activeTerms.version } },
   })
   if (signUpError || !signUpData.user) {
     return { error: signUpError?.message ?? 'Signup failed' }
@@ -85,10 +133,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const profileId = profileRow.id
   await supabase.auth.updateUser({ data: { role, profile_id: profileId } })
 
+  const { error: consentError } = await supabase.from('sign_up_terms_consent').insert({
+    user_id: userId,
+    profile_id: profileId,
+    email: invitedEmail,
+    role,
+    sign_up_terms_id: activeTerms.id,
+    terms_version: activeTerms.version,
+    terms_content: activeTerms.content,
+    metadata: { source: 'sign_up' },
+  })
+
+  if (consentError) {
+    return { error: consentError.message ?? 'Unable to save terms consent' }
+  }
+
   return redirect(`/auth/sign-up-details?role=${role}&pid=${profileId}`, { headers })
 }
 
 export default function SignUp() {
+  const { terms } = useLoaderData<typeof loader>()
   const fetcher = useFetcher<typeof action>()
   const error = fetcher.data?.error
   const loading = fetcher.state === 'submitting'
@@ -143,6 +207,22 @@ export default function SignUp() {
                 type="password"
                 required
               />
+            </div>
+            <div className="grid gap-2 rounded-md border border-border bg-muted/30 p-3 text-sm">
+              <p className="font-medium text-foreground">{terms?.title ?? 'Terms and Consent'}</p>
+              <p className="max-h-48 overflow-y-auto whitespace-pre-wrap text-muted-foreground">
+                {terms?.content ?? 'Please review and accept our terms to continue.'}
+              </p>
+              <label className="flex items-start gap-2 text-foreground">
+                <input
+                  id="terms-consent"
+                  name="terms-consent"
+                  type="checkbox"
+                  required
+                  className="mt-0.5 h-4 w-4"
+                />
+                <span>I have read and agree to these terms.</span>
+              </label>
             </div>
             {error && <p className="text-sm text-red-500">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
