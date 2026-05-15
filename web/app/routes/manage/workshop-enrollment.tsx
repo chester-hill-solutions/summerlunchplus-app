@@ -10,6 +10,20 @@ import { createTableLoader } from './table-loader'
 
 const baseLoader = createTableLoader('class-enrollment')
 
+const ENROLLMENT_STATUS_ORDER: Record<Database['public']['Enums']['workshop_enrollment_status'], number> = {
+  pending: 0,
+  waitlisted: 1,
+  revoked: 2,
+  approved: 3,
+  rejected: 4,
+}
+
+const toTime = (value: unknown) => {
+  if (typeof value !== 'string' || !value) return Number.POSITIVE_INFINITY
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+}
+
 export async function loader(args: Route.LoaderArgs) {
   const auth = await requireAuth(args.request)
   const base = await baseLoader(args)
@@ -74,7 +88,7 @@ export async function loader(args: Route.LoaderArgs) {
     }
   }
 
-  const enrichedRows = rows.map(row => {
+  const enrichedRows: Array<Record<string, unknown>> = rows.map(row => {
     const workshopId = typeof row.workshop_id === 'string' ? row.workshop_id : ''
     const approved = workshopId ? approvedByWorkshopId.get(workshopId) ?? 0 : 0
     const capacity = workshopId ? workshopCapacityById.get(workshopId) ?? null : null
@@ -99,6 +113,31 @@ export async function loader(args: Route.LoaderArgs) {
       _row_class: hasHigh ? 'bg-amber-50' : 'bg-amber-50/70',
       _row_signal_summary: `${countLabel}: ${primarySignal.summary}`,
     }
+  })
+
+  enrichedRows.sort((left, right) => {
+    const leftStatus =
+      typeof left.status === 'string'
+        ? (left.status as Database['public']['Enums']['workshop_enrollment_status'])
+        : 'rejected'
+    const rightStatus =
+      typeof right.status === 'string'
+        ? (right.status as Database['public']['Enums']['workshop_enrollment_status'])
+        : 'rejected'
+
+    const statusDiff = ENROLLMENT_STATUS_ORDER[leftStatus] - ENROLLMENT_STATUS_ORDER[rightStatus]
+    if (statusDiff !== 0) {
+      return statusDiff
+    }
+
+    const timeDiff = toTime(left.requested_at) - toTime(right.requested_at)
+    if (timeDiff !== 0) {
+      return timeDiff
+    }
+
+    const leftId = typeof left.id === 'string' ? left.id : ''
+    const rightId = typeof right.id === 'string' ? right.id : ''
+    return leftId.localeCompare(rightId)
   })
 
   const columns = base.columns.includes('enrolled_capacity')
