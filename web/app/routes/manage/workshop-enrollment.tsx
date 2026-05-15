@@ -15,9 +15,40 @@ export async function loader(args: Route.LoaderArgs) {
   const base = await baseLoader(args)
 
   const rows = (base.rows ?? []) as Array<Record<string, unknown>>
+  const workshopIds = Array.from(
+    new Set(rows.map(row => (typeof row.workshop_id === 'string' ? row.workshop_id : '')).filter(Boolean))
+  )
   const profileIds = Array.from(
     new Set(rows.map(row => (typeof row.profile_id === 'string' ? row.profile_id : '')).filter(Boolean))
   )
+
+  const approvedByWorkshopId = rows.reduce((acc, row) => {
+    const workshopId = typeof row.workshop_id === 'string' ? row.workshop_id : ''
+    const status = typeof row.status === 'string' ? row.status : ''
+    if (!workshopId || status !== 'approved') {
+      return acc
+    }
+    acc.set(workshopId, (acc.get(workshopId) ?? 0) + 1)
+    return acc
+  }, new Map<string, number>())
+
+  let workshopCapacityById = new Map<string, number>()
+  if (workshopIds.length) {
+    const { data: workshopRows, error: workshopError } = await adminClient
+      .from('workshop')
+      .select('id, capacity')
+      .in('id', workshopIds)
+
+    if (!workshopError) {
+      workshopCapacityById = (workshopRows ?? []).reduce((acc, workshop) => {
+        if (!workshop.id) {
+          return acc
+        }
+        acc.set(workshop.id, workshop.capacity)
+        return acc
+      }, new Map<string, number>())
+    }
+  }
 
   let openSignalsByProfileId = new Map<string, Array<{ severity: string; summary: string }>>()
 
@@ -44,10 +75,19 @@ export async function loader(args: Route.LoaderArgs) {
   }
 
   const enrichedRows = rows.map(row => {
+    const workshopId = typeof row.workshop_id === 'string' ? row.workshop_id : ''
+    const approved = workshopId ? approvedByWorkshopId.get(workshopId) ?? 0 : 0
+    const capacity = workshopId ? workshopCapacityById.get(workshopId) ?? null : null
+
     const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
     const profileSignals = profileId ? openSignalsByProfileId.get(profileId) ?? [] : []
+    const baseRow = {
+      ...row,
+      enrolled_capacity: capacity === null ? `${approved}/-` : `${approved}/${capacity}`,
+    }
+
     if (!profileSignals.length) {
-      return row
+      return baseRow
     }
 
     const hasHigh = profileSignals.some(signal => signal.severity === 'high')
@@ -55,15 +95,30 @@ export async function loader(args: Route.LoaderArgs) {
     const countLabel = profileSignals.length === 1 ? '1 open signal' : `${profileSignals.length} open signals`
 
     return {
-      ...row,
+      ...baseRow,
       _row_class: hasHigh ? 'bg-amber-50' : 'bg-amber-50/70',
       _row_signal_summary: `${countLabel}: ${primarySignal.summary}`,
     }
   })
 
+  const columns = base.columns.includes('enrolled_capacity')
+    ? base.columns
+    : [
+        ...base.columns.slice(0, 2),
+        'enrolled_capacity',
+        ...base.columns.slice(2),
+      ]
+
   return {
     ...base,
+    columns,
     rows: enrichedRows,
+    columnMeta: {
+      ...(base.columnMeta ?? {}),
+      enrolled_capacity: {
+        label: 'enrolled/capacity',
+      },
+    },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
   }
 }
