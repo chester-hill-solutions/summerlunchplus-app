@@ -17,7 +17,7 @@ export function Navbar({ user, role }: NavbarProps) {
       <div className="flex w-full items-center justify-between px-6 py-4">
         <Link
           to="/"
-          className="text-3xl font-black tracking-tight text-[var(--brand-purple-dark)]"
+          className="text-3xl font-black tracking-tight text-[var(--color-summer)]"
         >
           summerlunch+
         </Link>
