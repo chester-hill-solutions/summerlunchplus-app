@@ -551,7 +551,7 @@ export default function Home() {
   }
 
   return (
-    <main className="w-full px-6 py-10 space-y-6">
+    <main className="w-full px-6 pt-6 pb-10 space-y-6">
       <div className="flex gap-2">
         <Button asChild variant={tab === 'family-workshops' ? 'default' : 'outline'}>
           <Link to="/home">Family Workshops</Link>
