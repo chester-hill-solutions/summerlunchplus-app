@@ -36,7 +36,7 @@ export default function TeamOverviewPage() {
               <Link
                 key={page.to}
                 to={page.to}
-                className="h-full w-full sm:w-[17.5rem] rounded-lg border bg-card px-2.5 py-2.5 shadow-sm transition hover:-translate-y-0.5"
+                className="h-36 w-full sm:w-[17.5rem] rounded-lg border bg-card px-2.5 py-2.5 shadow-sm transition hover:-translate-y-0.5"
               >
                 <div className="flex h-full items-center gap-3">
                   <img
@@ -59,7 +59,7 @@ export default function TeamOverviewPage() {
             <Link
               key={section.key}
               to={`/manage?group=${section.key}`}
-              className="h-full w-full sm:w-[17.5rem] rounded-lg border bg-card px-2.5 py-2.5 shadow-sm transition hover:-translate-y-0.5"
+              className="h-36 w-full sm:w-[17.5rem] rounded-lg border bg-card px-2.5 py-2.5 shadow-sm transition hover:-translate-y-0.5"
             >
               <div className="flex h-full items-center gap-3">
                 <img

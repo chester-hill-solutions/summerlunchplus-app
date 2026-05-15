@@ -59,11 +59,11 @@ export default function TeamLayout() {
     <main className="flex w-full">
       <aside
         className={cn(
-          'shrink-0 border-r bg-card transition-[width] duration-200',
+          'relative z-50 shrink-0 overflow-visible border-r bg-card transition-[width] duration-200',
           sidebarCollapsed ? 'w-16' : 'w-64'
         )}
       >
-        <div className="sticky top-0 flex h-[calc(100vh-4rem)] flex-col p-2">
+        <div className="sticky top-0 z-50 flex h-[calc(100vh-4rem)] flex-col overflow-visible p-2">
           <div className={cn('flex items-center', sidebarCollapsed ? 'justify-center' : 'justify-between')}>
             {!sidebarCollapsed ? (
               <NavLink
@@ -105,7 +105,7 @@ export default function TeamLayout() {
                       <img src={section.stickerSrc} alt={section.label} className="size-20 object-contain" />
                     </button>
 
-                    <div className="invisible absolute left-full top-0 z-50 ml-2 w-64 rounded-lg border bg-card p-2 opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100">
+                    <div className="pointer-events-none absolute left-full top-0 z-[70] hidden w-64 rounded-lg border bg-card p-2 shadow-lg group-hover:block group-hover:pointer-events-auto group-focus-within:block group-focus-within:pointer-events-auto">
                       <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {section.label}
                       </p>
