@@ -562,7 +562,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
       {editorFetcher.data?.error ? <p className="text-sm text-destructive">{editorFetcher.data.error}</p> : null}
 
       <div className="overflow-x-auto rounded-lg border">
-        <table className="min-w-max w-full table-auto text-sm">
+        <table className="min-w-max table-auto text-sm">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground">
             <tr>
               {columns.map(column => (
