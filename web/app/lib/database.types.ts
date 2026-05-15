@@ -1101,6 +1101,7 @@ export type Database = {
         | "agreement"
         | "checkbox"
         | "number"
+        | "no-input-text"
       gift_card_asset_status: "available" | "sent" | "used" | "invalid"
       gift_card_upload_status:
         | "uploaded"
@@ -1312,6 +1313,7 @@ export const Constants = {
         "agreement",
         "checkbox",
         "number",
+        "no-input-text",
       ],
       gift_card_asset_status: ["available", "sent", "used", "invalid"],
       gift_card_upload_status: [

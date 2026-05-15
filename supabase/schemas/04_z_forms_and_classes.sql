@@ -8,7 +8,8 @@ create type form_question_type as enum (
   'date',
   'address',
   'agreement',
-  'checkbox'
+  'checkbox',
+  'no-input-text'
 );
 
 create type form_assignment_status as enum (
