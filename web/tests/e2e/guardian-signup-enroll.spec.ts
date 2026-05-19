@@ -290,5 +290,7 @@ test('guardian signs up, completes pre-program survey, and enrolls', async ({ pa
   await expect(enrollAction).toBeVisible()
   await enrollAction.click()
 
-  await expect(page.getByText(/Enrollment requested\.|Added to waitlist\./)).toBeVisible()
+  await expect(page).toHaveURL(/\/home\?/)
+  await expect(page).toHaveURL(/enrollmentStatus=success/)
+  await expect(page.getByText(/Thank you for registering for summerlunch\+!/)).toBeVisible()
 })

@@ -1,4 +1,4 @@
-import { Link, redirect, useActionData, useLoaderData } from 'react-router'
+import { Link, redirect, useLoaderData } from 'react-router'
 
 import type { Route } from './+types/enroll'
 import { Button } from '@/components/ui/button'
@@ -50,11 +50,16 @@ type LoaderData = {
   selectedSemesterId: string | null
 }
 
-type ActionData = {
-  ok?: boolean
-  error?: string
-  status?: 'pending' | 'waitlisted'
-  surveyPath?: string | null
+const ENROLLMENT_SUCCESS_MESSAGE =
+  "Thank you for registering for summerlunch+! We're excited to welcome your family this summer. Your registration has been received and is currently pending approval. Our team will review your information and send you a confirmation email shortly with your program details, class schedule, and next steps."
+
+const redirectWithEnrollmentMessage = (status: 'success' | 'error', message: string) => {
+  const params = new URLSearchParams({
+    enrollmentStatus: status,
+    enrollmentMessage: message,
+  })
+
+  return redirect(`/home?${params.toString()}`)
 }
 
 type FamilyProfileEmailRow = {
@@ -240,7 +245,7 @@ export async function action({ request }: Route.ActionArgs) {
     family = await resolveFamilyGraph(supabase, auth.user.id)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Profile not found'
-    return { ok: false, error: message } satisfies ActionData
+    return redirectWithEnrollmentMessage('error', message)
   }
 
   const { data: workshopRow, error: workshopError } = await supabase
@@ -250,7 +255,7 @@ export async function action({ request }: Route.ActionArgs) {
     .single()
 
   if (workshopError || !workshopRow?.semester_id) {
-    return { ok: false, error: 'Workshop not found' } satisfies ActionData
+    return redirectWithEnrollmentMessage('error', 'Workshop not found')
   }
 
   const nowIso = new Date().toISOString()
@@ -258,7 +263,7 @@ export async function action({ request }: Route.ActionArgs) {
   const enrollmentCloseAt = workshopRow.enrollment_close_at
   const isOpen = (!enrollmentOpenAt || nowIso >= enrollmentOpenAt) && (!enrollmentCloseAt || nowIso <= enrollmentCloseAt)
   if (!isOpen) {
-    return { ok: false, error: 'Enrollment is closed for this workshop' } satisfies ActionData
+    return redirectWithEnrollmentMessage('error', 'Enrollment is closed for this workshop')
   }
 
   const { data: existingEnrollment } = await supabase
@@ -270,18 +275,18 @@ export async function action({ request }: Route.ActionArgs) {
     .maybeSingle()
 
   if (existingEnrollment?.id) {
-    return { ok: false, error: 'Your family is already enrolled in one workshop for this semester.' } satisfies ActionData
+    return redirectWithEnrollmentMessage('error', 'Your family is already enrolled in one workshop for this semester.')
   }
 
   const targetProfileId = getFamilyEnrollmentProfileId(family)
   if (!targetProfileId) {
-    return { ok: false, error: 'Family enrollment profile not found.' } satisfies ActionData
+    return redirectWithEnrollmentMessage('error', 'Family enrollment profile not found.')
   }
 
   const preSurveyForm = await resolveSemesterSurveyForm(workshopRow.semester_id, 'pre_program_survey')
 
   if (!preSurveyForm.formId) {
-    return { ok: false, error: 'Pre-program survey is not configured for this semester.' } satisfies ActionData
+    return redirectWithEnrollmentMessage('error', 'Pre-program survey is not configured for this semester.')
   }
 
   const { data: preSurveySubmission } = preSurveyForm.required
@@ -296,12 +301,8 @@ export async function action({ request }: Route.ActionArgs) {
     : { data: { id: 'not-required' } }
 
   if (preSurveyForm.required && !preSurveySubmission?.id) {
-      return {
-        ok: false,
-        error: 'Please complete the pre-program survey before enrolling.',
-        surveyPath: semesterSurveyPath(workshopRow.semester_id),
-      } satisfies ActionData
-    }
+    return redirectWithEnrollmentMessage('error', 'Please complete the pre-program survey before enrolling.')
+  }
 
   const { data: workshopEnrollments } = await supabase
     .from('workshop_enrollment')
@@ -320,15 +321,15 @@ export async function action({ request }: Route.ActionArgs) {
   ).get(workshop_id)
 
   if (!capacitySnapshot) {
-    return { ok: false, error: 'Unable to evaluate workshop capacity' } satisfies ActionData
+    return redirectWithEnrollmentMessage('error', 'Unable to evaluate workshop capacity')
   }
 
   const enrollmentAction = getWorkshopEnrollmentAction(capacitySnapshot)
   if (enrollmentAction === 'full') {
-    return { ok: false, error: 'This workshop and its waitlist are full' } satisfies ActionData
+    return redirectWithEnrollmentMessage('error', 'This workshop and its waitlist are full')
   }
 
-  const status: ActionData['status'] = enrollmentAction === 'waitlist' ? 'waitlisted' : 'pending'
+  const status = enrollmentAction === 'waitlist' ? 'waitlisted' : 'pending'
 
   const { data: enrollmentRow, error: enrollmentError } = await supabase
     .from('workshop_enrollment')
@@ -341,7 +342,7 @@ export async function action({ request }: Route.ActionArgs) {
     .single()
 
   if (enrollmentError || !enrollmentRow?.id) {
-    return { ok: false, error: enrollmentError?.message ?? 'Unable to create enrollment' } satisfies ActionData
+    return redirectWithEnrollmentMessage('error', enrollmentError?.message ?? 'Unable to create enrollment')
   }
 
   const { data: familyProfilesData } = await adminClient
@@ -408,12 +409,11 @@ export async function action({ request }: Route.ActionArgs) {
     })
   }
 
-  return { ok: true, status } satisfies ActionData
+  return redirectWithEnrollmentMessage('success', ENROLLMENT_SUCCESS_MESSAGE)
 }
 
 export default function EnrollPage() {
   const { semesters, enrollments, workshopCapacityById, preSurveyBySemester, selectedSemesterId } = useLoaderData<LoaderData>()
-  const actionData = useActionData<ActionData>()
 
   const semesterId = selectedSemesterId
   const selectedSemester = semesterId ? semesters.find(semester => semester.id === semesterId) : null
@@ -573,22 +573,6 @@ export default function EnrollPage() {
         </div>
       )}
 
-      {actionData?.error ? (
-        <div className="space-y-2">
-          <p className="text-sm text-destructive">{actionData.error}</p>
-          {actionData.surveyPath ? (
-            <Button asChild variant="outline" size="sm">
-              <Link to={actionData.surveyPath}>Complete pre-program survey</Link>
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-
-      {actionData?.ok ? (
-        <p className="text-sm text-emerald-600">
-          {actionData.status === 'waitlisted' ? 'Added to waitlist.' : 'Enrollment requested.'}
-        </p>
-      ) : null}
     </main>
   )
 }
