@@ -56,14 +56,14 @@ export default function TeamLayout() {
   }
 
   return (
-    <main className="flex w-full">
+    <main className="flex h-[calc(100svh-4rem)] w-full overflow-hidden">
       <aside
         className={cn(
-          'relative z-50 shrink-0 overflow-visible border-r bg-card transition-[width] duration-200',
+          'relative z-50 shrink-0 overflow-hidden border-r bg-card transition-[width] duration-200',
           sidebarCollapsed ? 'w-16' : 'w-64'
         )}
       >
-        <div className="sticky top-0 z-50 flex h-[calc(100vh-4rem)] flex-col overflow-visible p-2">
+        <div className="flex h-full flex-col overflow-y-auto overflow-x-hidden p-2">
           <div className={cn('flex items-center', sidebarCollapsed ? 'justify-center' : 'justify-between')}>
             {!sidebarCollapsed ? (
               <NavLink
@@ -178,7 +178,7 @@ export default function TeamLayout() {
         </div>
       </aside>
 
-      <section className="min-w-0 flex-1 space-y-6 p-6">
+      <section className="min-w-0 flex-1 space-y-6 overflow-y-auto p-6">
         <Outlet />
       </section>
     </main>
