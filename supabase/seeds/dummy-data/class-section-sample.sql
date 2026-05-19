@@ -31,8 +31,8 @@ values (
   'Previous-year semester for enrollment and attendance scenario seeds.',
   date_trunc('year', now()) - interval '1 year' + interval '5 months',
   date_trunc('year', now()) - interval '1 year' + interval '6 months' - interval '1 second',
-  date_trunc('year', now()) - interval '1 year' + interval '3 months',
-  date_trunc('year', now()) - interval '1 year' + interval '5 months' - interval '1 second'
+  now() - interval '30 days',
+  now() + interval '1 year'
 )
 on conflict (id) do update
   set name = excluded.name,
@@ -55,8 +55,8 @@ values (
   '11111111-1111-1111-1111-111111111111'::uuid,
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid,
   'Prior Semester - Family Cooking',
-  date_trunc('year', now()) - interval '1 year' + interval '3 months',
-  date_trunc('year', now()) - interval '1 year' + interval '5 months' - interval '1 second',
+  now() - interval '30 days',
+  now() + interval '1 year',
   5,
   2
 )
