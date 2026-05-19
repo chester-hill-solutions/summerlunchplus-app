@@ -63,6 +63,14 @@ const semesterDisplay = (semesterRow: Record<string, unknown> | null, fallbackId
   return range || fallbackId
 }
 
+const semesterTitleDisplay = (semesterRow: Record<string, unknown> | null, fallbackId: string) => {
+  const name = typeof semesterRow?.name === 'string' ? semesterRow.name.trim() : ''
+  if (name) return name
+  const description = typeof semesterRow?.description === 'string' ? semesterRow.description.trim() : ''
+  if (description) return description
+  return 'Unnamed semester'
+}
+
 const workshopDisplay = (workshopRow: Record<string, unknown> | null, fallbackId: string) => {
   const description = typeof workshopRow?.description === 'string' ? workshopRow.description.trim() : ''
   return description || fallbackId
@@ -198,7 +206,7 @@ const foreignKeyOptions = async (
       supabase.from('form').select('id, name').order('name', { ascending: true }),
       supabase
         .from('semester')
-        .select('id, name, starts_at, ends_at')
+        .select('id, name, description, starts_at, ends_at')
         .order('starts_at', { ascending: true }),
     ])
 
@@ -209,7 +217,7 @@ const foreignKeyOptions = async (
 
     const semesterOptions = ((semesters ?? []) as unknown as Record<string, unknown>[]).map(row => {
       const id = typeof row.id === 'string' ? row.id : ''
-      return { value: id, label: semesterDisplay(row, id) }
+      return { value: id, label: semesterTitleDisplay(row, id) }
     })
 
     return {
@@ -317,6 +325,10 @@ export function createTableLoader(tableName: string) {
             }
             if (mapping.format === 'semester_range') {
               row[mapping.resultColumn] = semesterDisplay(lookupRow, idValue)
+              continue
+            }
+            if (mapping.format === 'semester_title') {
+              row[mapping.resultColumn] = semesterTitleDisplay(lookupRow, idValue)
               continue
             }
             if (mapping.format === 'class_display') {
