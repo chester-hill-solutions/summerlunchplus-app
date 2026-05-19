@@ -120,6 +120,94 @@ export type Database = {
           },
         ]
       }
+      email_message: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          event_key: string | null
+          failed_at: string | null
+          family_profile_id: string | null
+          id: string
+          profile_id: string | null
+          provider: string
+          provider_message_id: string | null
+          recipient_user_id: string | null
+          sent_at: string | null
+          status: Database["public"]["Enums"]["email_message_status"]
+          subject: string
+          template_data: Json
+          template_key: string
+          to_email: string
+          triggered_by_user_id: string | null
+          updated_at: string
+          workshop_enrollment_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          event_key?: string | null
+          failed_at?: string | null
+          family_profile_id?: string | null
+          id?: string
+          profile_id?: string | null
+          provider?: string
+          provider_message_id?: string | null
+          recipient_user_id?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["email_message_status"]
+          subject: string
+          template_data?: Json
+          template_key: string
+          to_email: string
+          triggered_by_user_id?: string | null
+          updated_at?: string
+          workshop_enrollment_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          event_key?: string | null
+          failed_at?: string | null
+          family_profile_id?: string | null
+          id?: string
+          profile_id?: string | null
+          provider?: string
+          provider_message_id?: string | null
+          recipient_user_id?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["email_message_status"]
+          subject?: string
+          template_data?: Json
+          template_key?: string
+          to_email?: string
+          triggered_by_user_id?: string | null
+          updated_at?: string
+          workshop_enrollment_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_message_family_profile_id_fkey"
+            columns: ["family_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_message_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_message_workshop_enrollment_id_fkey"
+            columns: ["workshop_enrollment_id"]
+            isOneToOne: false
+            referencedRelation: "workshop_enrollment"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       form: {
         Row: {
           auto_assign: Database["public"]["Enums"]["app_role"][]
@@ -1146,16 +1234,17 @@ export type Database = {
         | "student"
         | "guardian"
       class_attendance_status: "unknown" | "present" | "absent"
+      email_message_status: "queued" | "sent" | "failed" | "skipped"
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
+        | "number"
         | "single_choice"
         | "multi_choice"
         | "date"
         | "address"
         | "agreement"
         | "checkbox"
-        | "number"
         | "no-input-text"
       gift_card_asset_status: "available" | "sent" | "used" | "invalid"
       gift_card_upload_status:
@@ -1359,16 +1448,17 @@ export const Constants = {
         "guardian",
       ],
       class_attendance_status: ["unknown", "present", "absent"],
+      email_message_status: ["queued", "sent", "failed", "skipped"],
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
+        "number",
         "single_choice",
         "multi_choice",
         "date",
         "address",
         "agreement",
         "checkbox",
-        "number",
         "no-input-text",
       ],
       gift_card_asset_status: ["available", "sent", "used", "invalid"],

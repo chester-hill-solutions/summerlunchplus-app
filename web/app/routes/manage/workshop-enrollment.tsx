@@ -1,4 +1,6 @@
 import { requireAuth } from '@/lib/auth.server'
+import { sendTemplateEmail } from '@/lib/email/send-email.server'
+import { resolveFamilyContactsByProfileId } from '@/lib/family.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { Constants, type Database } from '@/lib/database.types'
 import { isRoleAtLeast } from '@/lib/roles'
@@ -23,6 +25,8 @@ const toTime = (value: unknown) => {
   const parsed = Date.parse(value)
   return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
 }
+
+const isLikelyEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
 export async function loader(args: Route.LoaderArgs) {
   const auth = await requireAuth(args.request)
@@ -189,6 +193,16 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const { supabase } = createClient(request)
+  const { data: existingEnrollment, error: existingEnrollmentError } = await supabase
+    .from('workshop_enrollment')
+    .select('id, profile_id, workshop_id, status')
+    .eq('id', enrollmentId)
+    .single()
+
+  if (existingEnrollmentError || !existingEnrollment) {
+    return new Response(existingEnrollmentError?.message ?? 'Enrollment not found', { status: 404, headers: auth.headers })
+  }
+
   const { error } = await supabase
     .from('workshop_enrollment')
     .update({ status, decided_by: auth.user.id })
@@ -196,6 +210,53 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (error) {
     return new Response(error.message, { status: 500, headers: auth.headers })
+  }
+
+  const transitionedToApproved = existingEnrollment.status !== 'approved' && status === 'approved'
+  if (transitionedToApproved && existingEnrollment.profile_id) {
+    try {
+      const familyContacts = await resolveFamilyContactsByProfileId(adminClient, existingEnrollment.profile_id)
+      const { data: workshopRow } = await adminClient
+        .from('workshop')
+        .select('description')
+        .eq('id', existingEnrollment.workshop_id)
+        .single()
+
+      const workshopName = workshopRow?.description?.trim() || 'selected workshop'
+      const recipientEmails = Array.from(
+        new Set(
+          familyContacts
+            .map(contact => contact.email?.trim().toLowerCase())
+            .filter((value): value is string => Boolean(value && isLikelyEmail(value)))
+        )
+      )
+
+      const eventKey = `workshop_enrollment:${enrollmentId}:family_accepted:v1`
+
+      await Promise.all(
+        recipientEmails.map(async email => {
+          const recipient = familyContacts.find(contact => contact.email?.trim().toLowerCase() === email) ?? null
+          return sendTemplateEmail({
+            toEmail: email,
+            templateKey: 'family_enrollment_accepted_v1',
+            templateData: {
+              workshopName,
+            },
+            eventKey,
+            triggeredByUserId: auth.user.id,
+            recipientUserId: recipient?.user_id ?? null,
+            profileId: recipient?.id ?? null,
+            familyProfileId: existingEnrollment.profile_id,
+            workshopEnrollmentId: enrollmentId,
+          })
+        })
+      )
+    } catch (notificationError) {
+      console.error('[workshop enrollment] accepted notification failed', {
+        enrollmentId,
+        error: notificationError,
+      })
+    }
   }
 
   return { ok: true }
