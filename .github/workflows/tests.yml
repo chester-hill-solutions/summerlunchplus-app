@@ -1,0 +1,73 @@
+name: Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install app dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+
+      - name: Start Supabase
+        env:
+          SITE_URL: http://127.0.0.1:5173
+          SMTP_API_KEY: test-key
+        run: supabase start --debug
+
+      - name: Write web/.env.local from Supabase status
+        run: |
+          STATUS_JSON="$(supabase status -o json)"
+          API_URL="$(printf '%s' "$STATUS_JSON" | jq -r '.API_URL')"
+          ANON_KEY="$(printf '%s' "$STATUS_JSON" | jq -r '.ANON_KEY')"
+          SERVICE_ROLE_KEY="$(printf '%s' "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY')"
+
+          cat > web/.env.local <<EOF
+          SUPABASE_URL=$API_URL
+          SUPABASE_ANON_KEY=$ANON_KEY
+          SUPABASE_PUBLISHABLE_KEY=$ANON_KEY
+          SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY
+          VITE_SUPABASE_URL=$API_URL
+          VITE_SUPABASE_ANON_KEY=$ANON_KEY
+          VITE_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY
+          VITE_SUPABASE_PUBLISHABLE_OR_ANON_KEY=$ANON_KEY
+          ONBOARDING_MODE=role
+          EOF
+
+      - name: Run all tests
+        run: npm run test
+        working-directory: web
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          if-no-files-found: ignore
