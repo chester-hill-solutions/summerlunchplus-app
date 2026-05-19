@@ -13,8 +13,8 @@ type NavbarProps = {
 
 export function Navbar({ user, role }: NavbarProps) {
   return (
-    <header className="border-b bg-background/80 backdrop-blur">
-      <div className="flex w-full items-center justify-between px-6 py-4">
+    <header className="h-16 border-b bg-background/80 backdrop-blur">
+      <div className="flex h-full w-full items-center justify-between px-6">
         <Link
           to="/"
           className="text-3xl font-black tracking-tight text-[var(--color-summer)]"
