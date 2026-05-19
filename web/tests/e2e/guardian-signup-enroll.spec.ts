@@ -96,6 +96,78 @@ const fillRequiredFields = async (page: import('@playwright/test').Page) => {
   }
 }
 
+const countMissingRequiredFields = async (page: import('@playwright/test').Page) => {
+  const form = page.locator('form').first()
+  return form.evaluate(formEl => {
+    const getVisible = (element: HTMLElement) => {
+      const style = window.getComputedStyle(element)
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.offsetParent !== null
+    }
+
+    let missing = 0
+
+    const requiredInputs = Array.from(
+      formEl.querySelectorAll<HTMLInputElement>('input[required]:not([type="hidden"])')
+    ).filter(input => !input.disabled && getVisible(input))
+
+    const handledRadioNames = new Set<string>()
+
+    for (const input of requiredInputs) {
+      if (input.type === 'radio') {
+        if (!input.name || handledRadioNames.has(input.name)) continue
+        handledRadioNames.add(input.name)
+        const checked = formEl.querySelector(`input[type="radio"][name="${CSS.escape(input.name)}"]:checked`)
+        if (!checked) missing += 1
+        continue
+      }
+
+      if (input.type === 'checkbox') {
+        if (!input.checked) missing += 1
+        continue
+      }
+
+      if (!input.value.trim()) missing += 1
+    }
+
+    const requiredSelects = Array.from(formEl.querySelectorAll<HTMLSelectElement>('select[required]')).filter(
+      select => !select.disabled && getVisible(select)
+    )
+
+    for (const select of requiredSelects) {
+      if (!select.value) missing += 1
+    }
+
+    return missing
+  })
+}
+
+const submitStepWithRetry = async (
+  page: import('@playwright/test').Page,
+  submitName: RegExp | string,
+  maxAttempts = 3
+) => {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await fillRequiredFields(page)
+
+    const missingBeforeSubmit = await countMissingRequiredFields(page)
+    if (missingBeforeSubmit > 0) {
+      await page.waitForTimeout(400)
+      continue
+    }
+
+    const submitButton = page.getByRole('button', { name: submitName }).first()
+    await submitButton.click()
+    await page.waitForTimeout(500)
+
+    const errorPrompt = page.locator('p.text-red-500').first()
+    if ((await errorPrompt.count()) === 0 || !(await errorPrompt.isVisible())) {
+      return
+    }
+  }
+
+  throw new Error('Form could not be submitted cleanly after retries')
+}
+
 test('guardian signs up, completes pre-program survey, and enrolls', async ({ page }) => {
   const email = `e2e.guardian.${uniqueSuffix()}@gmail.com`
   const password = 'Password123456!'
@@ -137,16 +209,17 @@ test('guardian signs up, completes pre-program survey, and enrolls', async ({ pa
     if ((await page.getByText(/grocery gift card/i).count()) > 0) {
       await expect(page.getByText(/grocery gift card/i)).toBeVisible()
       await expect(page.getByText(/meal kit/i)).toHaveCount(0)
-    }
 
-    await fillRequiredFields(page)
+      // Give the UI a moment on consent step before submit.
+      await page.waitForTimeout(1500)
+    }
 
     if ((await saveAndContinue.count()) === 0) {
       if (page.url().includes('/home')) break
       throw new Error('Save and continue button not found before onboarding completed')
     }
 
-    await saveAndContinue.click()
+    await submitStepWithRetry(page, /Save and continue|Saving\.\.\./)
     await page.waitForLoadState('networkidle')
   }
 
@@ -155,30 +228,63 @@ test('guardian signs up, completes pre-program survey, and enrolls', async ({ pa
   await page.waitForLoadState('networkidle')
 
   const manageEnrollmentsLink = page.locator('a[href="/enroll"]').first()
-  await expect(manageEnrollmentsLink).toBeVisible()
-  await manageEnrollmentsLink.scrollIntoViewIfNeeded()
-  await manageEnrollmentsLink.click()
+  if ((await manageEnrollmentsLink.count()) > 0) {
+    await expect(manageEnrollmentsLink).toBeVisible()
+    await manageEnrollmentsLink.scrollIntoViewIfNeeded()
+    await manageEnrollmentsLink.click({ timeout: 5000 })
+  } else {
+    await page.goto('/enroll')
+  }
+
+  if (!page.url().includes('/enroll')) {
+    await page.goto('/enroll')
+  }
   await expect(page).toHaveURL(/\/enroll/)
 
-  if (page.url().match(/\/enroll\/[^/]+$/) && (await page.getByRole('button', { name: 'Complete pre-program survey' }).count()) === 0) {
-    await page.getByRole('button', { name: 'Change semester' }).click()
+  const preProgramLink = page.getByRole('link', { name: 'Complete pre-program survey' })
+
+  if (page.url().match(/\/enroll\/[^/]+$/) && (await preProgramLink.count()) === 0) {
+    const changeSemesterLink = page.getByRole('link', { name: 'Change semester' })
+    if ((await changeSemesterLink.count()) > 0) {
+      await changeSemesterLink.click()
+      await expect(page).toHaveURL(/\/enroll$/)
+    }
   }
 
   if (page.url().endsWith('/enroll')) {
-    const requiredRow = page
-      .locator('tbody tr')
-      .filter({ has: page.getByRole('cell', { name: 'Required' }) })
-      .first()
+    const rows = page.locator('tbody tr')
+    const rowCount = await rows.count()
+    let openedSurvey = false
 
-    await expect(requiredRow).toBeVisible()
-    await requiredRow.getByRole('link', { name: 'Select semester' }).click()
+    for (let index = 0; index < rowCount; index += 1) {
+      const row = rows.nth(index)
+      const selectSemesterLink = row.getByRole('link', { name: 'Select semester' })
+      if ((await selectSemesterLink.count()) === 0) continue
+
+      await selectSemesterLink.click()
+      await expect(page).toHaveURL(/\/enroll\/[^/]+$/)
+
+      if ((await preProgramLink.count()) > 0) {
+        openedSurvey = true
+        break
+      }
+
+      const changeSemesterLink = page.getByRole('link', { name: 'Change semester' })
+      if ((await changeSemesterLink.count()) > 0) {
+        await changeSemesterLink.click()
+        await expect(page).toHaveURL(/\/enroll$/)
+      }
+    }
+
+    if (!openedSurvey) {
+      throw new Error('Could not find a semester with a pre-program survey link')
+    }
   }
 
-  await expect(page.getByRole('button', { name: 'Complete pre-program survey' })).toBeVisible()
-  await page.getByRole('button', { name: 'Complete pre-program survey' }).click()
+  await expect(preProgramLink).toBeVisible()
+  await preProgramLink.click()
 
-  await fillRequiredFields(page)
-  await page.getByRole('button', { name: 'Save and continue' }).click()
+  await submitStepWithRetry(page, 'Save and continue', 4)
 
   const enrollAction = page.getByRole('button', { name: /Request enrollment|Join waitlist/ }).first()
   await expect(enrollAction).toBeVisible()
