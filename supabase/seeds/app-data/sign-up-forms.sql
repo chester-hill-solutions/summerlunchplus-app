@@ -186,13 +186,13 @@ select 'gift_card_store_preference', 'Which store would you like to receive the 
   "Sobeys (ex. FreshCo, Sobeys, Safeway, Foodland, IGA, Thrifty Foods)"
 ]$$::jsonb
 union all
-select 'guardian_consent_thorncliffe_meal_kit', 'I understand that each week I will need to pick up a meal kit that includes all the ingredients needed for my child(ren) to make the three recipes at home.', 'single_choice'::form_question_type, '["Yes","No"]'::jsonb
+select 'guardian_consent_thorncliffe_meal_kit', 'I understand that each week I will need to pick up a meal kit that includes all the ingredients needed for my child(ren) to make the three recipes at home.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_consent_thorncliffe_pickup_schedule', $$I understand that the meal kit pick-up day, time and location is:
 
 Tuesday
 1:00 PM – 6:00 PM
-TNO Youth Hub, East York Town Centre$$, 'single_choice'::form_question_type, '["Yes","No"]'::jsonb
+TNO Youth Hub, East York Town Centre$$, 'checkbox'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_consent_questionnaire', 'I agree to participate in the pre- and post-program questionnaires.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
