@@ -59,6 +59,26 @@ type Condition = {
   truthy?: boolean
 }
 
+const PROVINCE_CODES = [
+  'AB',
+  'BC',
+  'MB',
+  'NB',
+  'NL',
+  'NS',
+  'NT',
+  'NU',
+  'ON',
+  'PE',
+  'QC',
+  'SK',
+  'YT',
+] as const
+
+const isQuestionHiddenForRole = (role: 'guardian' | 'student', questionCode: string) => {
+  return role === 'student' && questionCode === 'guardian_self_phone'
+}
+
 const isConditionMet = (condition: Json | null | undefined, answers: Record<string, Json>): boolean => {
   if (!condition || typeof condition !== 'object' || Array.isArray(condition)) return true
   const normalized = condition as Condition
@@ -293,12 +313,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .order('position')
     currentFormQuestions = (questions ?? []).map(q => {
       const base = Array.isArray(q.form_question) ? q.form_question[0] : q.form_question
+      const metadata = { ...((q.metadata ?? {}) as Record<string, Json>) }
+      const isProvinceQuestion = q.question_code === 'address_province'
+      if (isProvinceQuestion) {
+        metadata.ui = 'select'
+      }
       return {
         question_code: q.question_code ?? '',
         prompt: q.prompt_override ?? base?.prompt ?? '',
-        type: (base?.type ?? 'text') as Database['public']['Enums']['form_question_type'],
-        options: (q.options_override ?? base?.options ?? []) as Json,
-        metadata: (q.metadata ?? {}) as Json,
+        type: (isProvinceQuestion ? 'single_choice' : (base?.type ?? 'text')) as Database['public']['Enums']['form_question_type'],
+        options: (isProvinceQuestion ? [...PROVINCE_CODES] : (q.options_override ?? base?.options ?? [])) as Json,
+        metadata: metadata as Json,
         visibility_condition: (q.visibility_condition ?? null) as Json,
       }
     })
@@ -558,12 +583,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const questions = (questionRows ?? []).map(row => {
     const base = Array.isArray(row.form_question) ? row.form_question[0] : row.form_question
+    const metadata = { ...((row.metadata ?? {}) as Record<string, Json>) }
+    const isProvinceQuestion = row.question_code === 'address_province'
+    if (isProvinceQuestion) {
+      metadata.ui = 'select'
+    }
     return {
       question_code: row.question_code ?? '',
       prompt: row.prompt_override ?? base?.prompt ?? '',
-      type: (base?.type ?? 'text') as Database['public']['Enums']['form_question_type'],
-      options: (row.options_override ?? base?.options ?? []) as Json,
-      metadata: (row.metadata ?? {}) as Json,
+      type: (isProvinceQuestion ? 'single_choice' : (base?.type ?? 'text')) as Database['public']['Enums']['form_question_type'],
+      options: (isProvinceQuestion ? [...PROVINCE_CODES] : (row.options_override ?? base?.options ?? [])) as Json,
+      metadata: metadata as Json,
       visibility_condition: (row.visibility_condition ?? null) as Json,
     } satisfies FormQuestionData
   })
@@ -593,7 +623,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const additionalGuardianQuestionCodes: string[] = []
 
   for (const question of questions) {
-    const isVisible = isConditionMet(question.visibility_condition as Json, combinedAnswers)
+    const isVisible = !isQuestionHiddenForRole(role, question.question_code) && isConditionMet(question.visibility_condition as Json, combinedAnswers)
     if (!isVisible) {
       hiddenQuestionCodes.push(question.question_code)
       continue
@@ -610,7 +640,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const inputType = typeof metadata.input_type === 'string' ? metadata.input_type : null
-    const isOptional = metadata.optional === true || (role === 'student' && question.question_code === 'guardian_self_phone')
+    const isOptional = metadata.optional === true
     const isRequired = !isOptional
     let value = submittedAnswers[question.question_code]
 
@@ -750,7 +780,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   let guardianInviteEmail: string | null = null
 
   for (const question of questions) {
-    const isVisible = isConditionMet(question.visibility_condition as Json, combinedAnswers)
+    const isVisible = !isQuestionHiddenForRole(role, question.question_code) && isConditionMet(question.visibility_condition as Json, combinedAnswers)
     if (!isVisible) continue
 
     const metadata = (question.metadata ?? {}) as Record<string, Json>
@@ -1111,8 +1141,10 @@ export default function SignUpDetails() {
     })
   }
 
-  const visibleQuestions = currentFormQuestions.filter(question =>
-    isConditionMet(question.visibility_condition as Json, answerState)
+  const visibleQuestions = currentFormQuestions.filter(
+    question =>
+      !isQuestionHiddenForRole(role, question.question_code) &&
+      isConditionMet(question.visibility_condition as Json, answerState)
   )
 
   const isAdditionalGuardianStep = currentForm?.slug === 'additional_guardians'
@@ -1255,8 +1287,7 @@ export default function SignUpDetails() {
                 ) : null}
                 {displayedQuestions.map(question => {
                   const metadata = (question.metadata ?? {}) as Record<string, Json>
-                  const isOptional =
-                    metadata.optional === true || (role === 'student' && question.question_code === 'guardian_self_phone')
+                  const isOptional = metadata.optional === true
                   return (
                     <FormQuestion
                       key={question.question_code}

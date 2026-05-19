@@ -511,6 +511,9 @@ export default function Home() {
   const actionData = useActionData<ActionData>()
   const [searchParams] = useSearchParams()
   const tab = searchParams.get('tab') === 'manage-family' ? 'manage-family' : 'family-workshops'
+  const enrollmentStatusParam = searchParams.get('enrollmentStatus')
+  const enrollmentStatus = enrollmentStatusParam === 'error' ? 'error' : enrollmentStatusParam === 'success' ? 'success' : null
+  const enrollmentMessage = searchParams.get('enrollmentMessage')
   const title = tab === 'manage-family' ? 'Manage Family' : 'Family Workshops'
   const subtitle =
     tab === 'manage-family'
@@ -568,6 +571,10 @@ export default function Home() {
         <h1 className="text-3xl font-semibold">{title}</h1>
         <p className="text-sm text-muted-foreground">{subtitle}</p>
       </header>
+
+      {enrollmentMessage && enrollmentStatus ? (
+        <p className={enrollmentStatus === 'error' ? 'text-sm text-destructive' : 'text-sm text-emerald-600'}>{enrollmentMessage}</p>
+      ) : null}
 
       {actionData?.error ? <p className="text-sm text-destructive">{actionData.error}</p> : null}
       {actionData?.ok && actionData.message ? <p className="text-sm text-emerald-600">{actionData.message}</p> : null}
