@@ -6,7 +6,7 @@ export type LookupMapping = {
   resultColumn: string
   keyColumnInTable?: string
   select?: string
-  format?: 'profile_display' | 'semester_range' | 'class_display' | 'submission_display'
+  format?: 'profile_display' | 'semester_range' | 'semester_title' | 'class_display' | 'submission_display'
 }
 
 export type EditorFieldType = 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'foreign_key' | 'enum' | 'json'
@@ -364,15 +364,15 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     label: 'Semester Survey Mapping',
     table: 'semester_form_requirement',
     select: 'id, semester_id, form_id, kind, is_required, is_active, updated_at',
-    columns: ['semester_range', 'kind', 'form_name', 'is_required', 'is_active', 'updated_at'],
+    columns: ['semester_title', 'kind', 'form_name', 'is_required', 'is_active', 'updated_at'],
     order: 'updated_at',
     lookupMappings: [
       {
         keyColumn: 'semester_id',
         table: 'semester',
-        resultColumn: 'semester_range',
-        select: 'id, name, starts_at, ends_at',
-        format: 'semester_range',
+        resultColumn: 'semester_title',
+        select: 'id, name, description',
+        format: 'semester_title',
       },
       {
         keyColumn: 'form_id',

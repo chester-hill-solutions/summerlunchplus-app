@@ -101,7 +101,11 @@ export default function AuthStickerBackground({
   const allStickers = dense ? createDenseStickers() : STICKERS
 
   return (
-    <div className="relative flex h-svh w-full items-center justify-center overflow-hidden bg-[#fff7ef] p-4 md:p-8">
+    <div
+      className={`relative flex h-svh w-full justify-center overflow-hidden bg-[#fff7ef] p-4 md:p-8 ${
+        scrollContent ? 'items-start' : 'items-center'
+      }`}
+    >
       <div aria-hidden="true" className={`pointer-events-none absolute inset-0 ${dense ? 'z-20' : ''}`}>
         {allStickers.map((sticker, index) => (
           <img
