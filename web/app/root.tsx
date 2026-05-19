@@ -144,10 +144,12 @@ export default function App() {
   }, [supabaseAnonKey, supabaseUrl]);
 
   return (
-    <>
+    <div className="flex min-h-svh flex-col">
       <Navbar user={user} role={role} />
-      <Outlet />
-    </>
+      <div className="min-h-0 flex-1">
+        <Outlet />
+      </div>
+    </div>
   );
 }
 

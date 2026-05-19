@@ -610,7 +610,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const inputType = typeof metadata.input_type === 'string' ? metadata.input_type : null
-    const isOptional = metadata.optional === true
+    const isOptional = metadata.optional === true || (role === 'student' && question.question_code === 'guardian_self_phone')
     const isRequired = !isOptional
     let value = submittedAnswers[question.question_code]
 
@@ -1255,7 +1255,8 @@ export default function SignUpDetails() {
                 ) : null}
                 {displayedQuestions.map(question => {
                   const metadata = (question.metadata ?? {}) as Record<string, Json>
-                  const isOptional = metadata.optional === true
+                  const isOptional =
+                    metadata.optional === true || (role === 'student' && question.question_code === 'guardian_self_phone')
                   return (
                     <FormQuestion
                       key={question.question_code}

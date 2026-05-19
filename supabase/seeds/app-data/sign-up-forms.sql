@@ -167,6 +167,8 @@ select 'partner_organization', 'Partner organization', 'single_choice'::form_que
   "Other"
 ]$$::jsonb
 union all
+select 'partner_organization_other', 'Please specify your partner organization', 'text'::form_question_type, '[]'::jsonb
+union all
 select 'guardian_consent_privacy', 'I understand that summerlunch+ is dedicated to protecting my privacy and will use my personal data only for the administration of the virtual summer cooking program and for communicating pertinent program-related information.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_consent_presence', 'I understand that a guardian/caregiver or elder sibling must be present during live cooking classes to ensure the safety of the summerlunch+ participant.', 'checkbox'::form_question_type, '[]'::jsonb
@@ -183,6 +185,14 @@ select 'gift_card_store_preference', 'Which store would you like to receive the 
   "Presidents Choice (ex, No Frills, Loblaws, Real Canadian Superstore, Zehrs, T&T, Fortinos)",
   "Sobeys (ex. FreshCo, Sobeys, Safeway, Foodland, IGA, Thrifty Foods)"
 ]$$::jsonb
+union all
+select 'guardian_consent_thorncliffe_meal_kit', 'I understand that each week I will need to pick up a meal kit that includes all the ingredients needed for my child(ren) to make the three recipes at home.', 'checkbox'::form_question_type, '[]'::jsonb
+union all
+select 'guardian_consent_thorncliffe_pickup_schedule', $$I understand that the meal kit pick-up day, time and location is:
+
+Tuesday
+1:00 PM – 6:00 PM
+TNO Youth Hub, East York Town Centre$$, 'checkbox'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_consent_questionnaire', 'I agree to participate in the pre- and post-program questionnaires.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
@@ -258,6 +268,8 @@ select id, 'household_total_children', 2, '{"target":"profile","role":"guardian"
 union all
 select id, 'partner_organization', 1, '{"target":"profile","role":"guardian","field":"partner_program","ui":"select"}'::jsonb, null::jsonb from partner_form
 union all
+select id, 'partner_organization_other', 2, '{"target":"profile","role":"guardian","field":"partner_program","placeholder":"Partner organization name"}'::jsonb, '{"question_code":"partner_organization","equals":"Other"}'::jsonb from partner_form
+union all
 select id, 'guardian_consent_privacy', 1, '{}'::jsonb, null::jsonb from guardian_form
 union all
 select id, 'guardian_consent_presence', 2, '{}'::jsonb, null::jsonb from guardian_form
@@ -268,7 +280,11 @@ select id, 'guardian_consent_attendance', 4, '{}'::jsonb, null::jsonb from guard
 union all
 select id, 'guardian_consent_photos', 5, '{}'::jsonb, null::jsonb from guardian_form
 union all
-select id, 'guardian_consent_gift_card', 6, '{}'::jsonb, '{
+select id, 'guardian_consent_thorncliffe_meal_kit', 6, '{}'::jsonb, '{"question_code":"partner_organization","equals":"Thorncliffe Park -TNO"}'::jsonb from guardian_form
+union all
+select id, 'guardian_consent_thorncliffe_pickup_schedule', 7, '{}'::jsonb, '{"question_code":"partner_organization","equals":"Thorncliffe Park -TNO"}'::jsonb from guardian_form
+union all
+select id, 'guardian_consent_gift_card', 8, '{}'::jsonb, '{
   "any": [
     { "question_code": "partner_organization", "equals": "Taylor-Massey & Oakridge" },
     { "question_code": "partner_organization", "equals": "Milton Food for Life" },
@@ -284,7 +300,7 @@ select id, 'guardian_consent_gift_card', 6, '{}'::jsonb, '{
   ]
 }'::jsonb from guardian_form
 union all
-select id, 'gift_card_store_preference', 7, '{}'::jsonb, '{
+select id, 'gift_card_store_preference', 9, '{}'::jsonb, '{
   "all": [
     {
       "any": [
@@ -305,9 +321,9 @@ select id, 'gift_card_store_preference', 7, '{}'::jsonb, '{
   ]
 }'::jsonb from guardian_form
 union all
-select id, 'guardian_consent_questionnaire', 8, '{}'::jsonb, null::jsonb from guardian_form
+select id, 'guardian_consent_questionnaire', 10, '{}'::jsonb, null::jsonb from guardian_form
 union all
-select id, 'guardian_consent_interview', 9, '{}'::jsonb, null::jsonb from guardian_form
+select id, 'guardian_consent_interview', 11, '{}'::jsonb, null::jsonb from guardian_form
 on conflict (form_id, question_code) do update
   set position = excluded.position,
       metadata = excluded.metadata,
@@ -334,10 +350,6 @@ select id, 'household_address', 5, array['guardian','student']::app_role[]
 from public.form
 where name = 'Household Address'
 union all
-select id, 'additional_guardians', 6, array['guardian','student']::app_role[]
-from public.form
-where name = 'Additional Guardians'
-union all
 select id, 'household_counts', 7, array['guardian','student']::app_role[]
 from public.form
 where name = 'Household Counts'
@@ -353,3 +365,8 @@ on conflict (form_id) do update
   set slug = excluded.slug,
       step_order = excluded.step_order,
       roles = excluded.roles;
+
+delete from public.sign_up_flow sf
+using public.form f
+where sf.form_id = f.id
+  and f.name = 'Additional Guardians';

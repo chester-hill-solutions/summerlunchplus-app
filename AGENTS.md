@@ -40,14 +40,18 @@ Update this file whenever commands, conventions, or workflows change.
 - Treat `npm run typecheck` as the required lint-quality gate.
 - Production build: `npm run build`.
 - Serve built app: `npm run start`.
-- Full tests: `npm run test:e2e` (Playwright across `web/tests`).
-- Headed tests: `npm run test:e2e:headed`.
+- All tests: `npm run test` (Playwright across `web/tests`).
+- All tests (headed): `npm run test:headed`.
+- E2E only: `npm run test:e2e`.
+- E2E only (headed): `npm run test:e2e:headed`.
+- Unit bucket only: `npm run test:unit`.
+- Unit bucket only (headed): `npm run test:unit:headed`.
 
 6) Single-test command patterns (important)
-- Single e2e file: `npm run test:e2e -- tests/e2e/create-guardian.spec.ts`.
-- Single unit-style file: `npm run test:e2e -- tests/unit/gift-card-csv.spec.ts`.
-- Filter by title only: `npm run test:e2e -- --grep "guardian sign-up creates a guardian profile"`.
-- File + title filter: `npm run test:e2e -- tests/unit/gift-card-csv.spec.ts --grep "reports missing fields"`.
+- Single e2e file: `npm run test:e2e -- tests/e2e/guardian-signup-enroll.spec.ts`.
+- Specific file list (any bucket): `npm run test -- tests/e2e/guardian-signup-enroll.spec.ts tests/e2e/other.spec.ts`.
+- Filter by title only: `npm run test:e2e -- --grep "guardian signs up, completes pre-program survey, and enrolls"`.
+- File + title filter: `npm run test:e2e -- tests/e2e/guardian-signup-enroll.spec.ts --grep "guardian signs up"`.
 - Playwright auto-starts `npm run dev -- --port 5173` when `PLAYWRIGHT_BASE_URL` is unset.
 
 7) Supabase and schema workflow

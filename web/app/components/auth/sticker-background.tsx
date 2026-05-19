@@ -102,7 +102,7 @@ export default function AuthStickerBackground({
 
   return (
     <div
-      className={`relative flex h-svh w-full justify-center overflow-hidden bg-[#fff7ef] p-4 md:p-8 ${
+      className={`relative flex h-[calc(100svh-4rem)] min-h-[calc(100svh-4rem)] w-full justify-center overflow-hidden bg-[#fff7ef] p-4 md:p-8 ${
         scrollContent ? 'items-start' : 'items-center'
       }`}
     >
@@ -124,7 +124,7 @@ export default function AuthStickerBackground({
 
       <div
         className={`relative z-30 w-full ${
-          scrollContent ? 'max-h-[calc(100svh-2rem)] overflow-y-auto md:max-h-[calc(100svh-4rem)]' : ''
+          scrollContent ? 'max-h-[calc(100%-2rem)] overflow-y-auto md:max-h-[calc(100%-4rem)]' : ''
         } ${maxWidthClassName}`}
       >
         {children}

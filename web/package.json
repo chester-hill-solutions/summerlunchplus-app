@@ -7,8 +7,12 @@
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:e2e": "playwright test tests/e2e",
+    "test:e2e:headed": "playwright test --headed tests/e2e",
+    "test:unit": "playwright test tests/unit --pass-with-no-tests",
+    "test:unit:headed": "playwright test --headed tests/unit --pass-with-no-tests"
   },
   "dependencies": {
     "@react-router/fs-routes": "^7.13.0",
