@@ -10,7 +10,7 @@
 
 html,
 body {
-  @apply bg-white dark:bg-gray-950;
+  background-color: #fff7ef;
 
   @media (prefers-color-scheme: dark) {
     color-scheme: dark;
@@ -64,7 +64,7 @@ body {
   --brand-blue: #2d91cf;
   --brand-green: #24b683;
   --brand-purple-dark: #2b2258;
-  --background: oklch(1 0 0);
+  --background: #fff7ef;
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
