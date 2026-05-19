@@ -67,7 +67,7 @@ const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveF
 }
 
 const semesterSurveyPath = (semesterId: string) =>
-  `/semester-surveys/${semesterId}/pre?returnTo=${encodeURIComponent(`/enroll?semester=${semesterId}`)}`
+  `/semester-surveys/${semesterId}/pre-program?returnTo=${encodeURIComponent(`/enroll?semester=${semesterId}`)}`
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
@@ -147,7 +147,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const preSurveyFormBySemester = new Map<string, { formId: string | null; required: boolean }>()
   await Promise.all(
     semesterIds.map(async semesterId => {
-      preSurveyFormBySemester.set(semesterId, await resolveSemesterSurveyForm(semesterId, 'pre_survey'))
+      preSurveyFormBySemester.set(semesterId, await resolveSemesterSurveyForm(semesterId, 'pre_program_survey'))
     })
   )
 
@@ -250,10 +250,10 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: false, error: 'Family enrollment profile not found.' } satisfies ActionData
   }
 
-  const preSurveyForm = await resolveSemesterSurveyForm(workshopRow.semester_id, 'pre_survey')
+  const preSurveyForm = await resolveSemesterSurveyForm(workshopRow.semester_id, 'pre_program_survey')
 
   if (!preSurveyForm.formId) {
-    return { ok: false, error: 'Pre-semester survey is not configured for this semester.' } satisfies ActionData
+    return { ok: false, error: 'Pre-program survey is not configured for this semester.' } satisfies ActionData
   }
 
   const { data: preSurveySubmission } = preSurveyForm.required
@@ -270,7 +270,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (preSurveyForm.required && !preSurveySubmission?.id) {
       return {
         ok: false,
-        error: 'Please complete the pre-semester survey before enrolling.',
+        error: 'Please complete the pre-program survey before enrolling.',
         surveyPath: semesterSurveyPath(workshopRow.semester_id),
       } satisfies ActionData
     }
@@ -340,7 +340,7 @@ export default function EnrollPage() {
 
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold">Manage Enrollments</h1>
-        <p className="text-sm text-muted-foreground">Step 1: select a semester. Step 2: complete pre-survey. Step 3: choose one workshop.</p>
+        <p className="text-sm text-muted-foreground">Step 1: select a semester. Step 2: complete pre-program survey. Step 3: choose one workshop.</p>
       </div>
 
       {!selectedSemester ? (
@@ -351,7 +351,7 @@ export default function EnrollPage() {
                 <TableHead>Semester ID</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Dates</TableHead>
-                <TableHead>Pre-survey</TableHead>
+                <TableHead>Pre-program survey</TableHead>
                 <TableHead>Enrollment</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
@@ -406,13 +406,18 @@ export default function EnrollPage() {
           ) : preSurveyBySemester[selectedSemester.id]?.required &&
             !preSurveyBySemester[selectedSemester.id]?.completed ? (
             <div className="rounded-lg border bg-card p-4 shadow-sm space-y-2">
-              <p className="font-medium">Complete pre-survey before choosing a workshop.</p>
+              <p className="font-medium">Complete pre-program survey before choosing a workshop.</p>
+              <p className="text-sm text-muted-foreground">
+                As part of summerlunch+, we&apos;ll ask a few questions about your family&apos;s nutrition
+                knowledge, cooking skills, eating habits, and more. Parents or caregivers are invited to
+                complete this survey together with their Jr. Chef.
+              </p>
               {preSurveyBySemester[selectedSemester.id]?.preSurveyPath ? (
                 <Button asChild>
-                  <Link to={preSurveyBySemester[selectedSemester.id].preSurveyPath as string}>Complete pre-survey</Link>
+                  <Link to={preSurveyBySemester[selectedSemester.id].preSurveyPath as string}>Complete pre-program survey</Link>
                 </Button>
               ) : (
-                <p className="text-sm text-muted-foreground">Pre-survey is not configured yet for this semester.</p>
+                <p className="text-sm text-muted-foreground">Pre-program survey is not configured yet for this semester.</p>
               )}
             </div>
           ) : (
@@ -478,7 +483,7 @@ export default function EnrollPage() {
           <p className="text-sm text-destructive">{actionData.error}</p>
           {actionData.surveyPath ? (
             <Button asChild variant="outline" size="sm">
-              <Link to={actionData.surveyPath}>Complete pre-survey</Link>
+              <Link to={actionData.surveyPath}>Complete pre-program survey</Link>
             </Button>
           ) : null}
         </div>

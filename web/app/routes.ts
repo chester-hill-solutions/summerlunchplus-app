@@ -8,7 +8,8 @@ export default [
   route("enroll", "routes/enroll.tsx"),
   route("my-forms", "routes/my-forms.tsx"),
   route("my-forms/:formId", "routes/my-forms.$formId.tsx"),
-  route("semester-surveys/:semesterId/pre", "routes/semester-surveys.pre.tsx"),
+  route("semester-surveys/:semesterId/pre-program", "routes/semester-surveys.pre.tsx"),
+  route("semester-surveys/:semesterId/pre", "routes/semester-surveys.pre-redirect.tsx"),
   route("login", "routes/auth/login.tsx"),
   route(
     "sign-up",

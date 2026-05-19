@@ -1,6 +1,6 @@
 import { adminClient } from '@/lib/supabase/adminClient'
 
-export type SemesterSurveyKind = 'pre_survey' | 'post_survey'
+export type SemesterSurveyKind = 'pre_program_survey' | 'post_program_survey'
 
 type SemesterSurveyForm = {
   formId: string | null

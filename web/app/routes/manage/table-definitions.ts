@@ -392,7 +392,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
           label: 'Survey Type',
           type: 'enum',
           required: true,
-          enumValues: ['pre_survey', 'post_survey'],
+          enumValues: ['pre_program_survey', 'post_program_survey'],
         },
         is_required: { label: 'Required', type: 'boolean', required: true },
         is_active: { label: 'Active', type: 'boolean', required: true },

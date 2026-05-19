@@ -88,7 +88,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw redirect('/home', { headers })
   }
 
-  const preSurveyForm = await resolveSemesterSurveyForm(semesterId, 'pre_survey')
+  const preSurveyForm = await resolveSemesterSurveyForm(semesterId, 'pre_program_survey')
   if (!preSurveyForm.formId) {
     throw redirect('/home', { headers })
   }
@@ -169,11 +169,11 @@ export async function action({ request, params }: Route.ActionArgs) {
     return { error: 'Family enrollment profile is missing' } satisfies ActionData
   }
 
-  const preSurveyForm = await resolveSemesterSurveyForm(semesterId, 'pre_survey')
+  const preSurveyForm = await resolveSemesterSurveyForm(semesterId, 'pre_program_survey')
   const formId = preSurveyForm.formId
 
   if (!formId) {
-    return { error: 'Pre-semester survey is not configured' } satisfies ActionData
+    return { error: 'Pre-program survey is not configured' } satisfies ActionData
   }
 
   const { data: formRow } = await adminClient
@@ -183,7 +183,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     .maybeSingle()
 
   if (!formRow?.id) {
-    return { error: 'Pre-semester survey is not configured' } satisfies ActionData
+    return { error: 'Pre-program survey is not configured' } satisfies ActionData
   }
 
   const { data: questionRows } = await adminClient
@@ -260,7 +260,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       accept_language: requestMetadata.acceptLanguage,
       referer: requestMetadata.referer,
       origin: requestMetadata.origin,
-      metadata: { source: 'semester_pre_survey' },
+      metadata: { source: 'semester_pre_program_survey' },
     })
     .select('id')
     .single()
@@ -299,7 +299,7 @@ export default function SemesterPreSurveyPage() {
         <CardHeader>
           <CardTitle className="text-2xl">{formName}</CardTitle>
           <CardDescription>
-            Complete this family survey before enrolling in classes for this semester.
+            Complete this pre-program survey before enrolling in workshops for this semester.
           </CardDescription>
         </CardHeader>
         <CardContent>

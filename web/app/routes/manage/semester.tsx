@@ -39,7 +39,7 @@ const parseSemesterField = (
 const setSemesterSurveyMapping = async (
   supabase: ReturnType<typeof createClient>['supabase'],
   semesterId: string,
-  kind: 'pre_survey' | 'post_survey',
+  kind: 'pre_program_survey' | 'post_program_survey',
   formId: string | null
 ) => {
   if (!formId) {
@@ -122,8 +122,8 @@ export async function loader(args: LoaderFunctionArgs) {
 
   for (const row of rows) {
     const semesterId = typeof row.id === 'string' ? row.id : ''
-    const pre = mappingBySemesterKind.get(`${semesterId}:pre_survey`)
-    const post = mappingBySemesterKind.get(`${semesterId}:post_survey`)
+    const pre = mappingBySemesterKind.get(`${semesterId}:pre_program_survey`)
+    const post = mappingBySemesterKind.get(`${semesterId}:post_program_survey`)
     row.pre_survey_form_id = pre?.formId ?? ''
     row.post_survey_form_id = post?.formId ?? ''
     row.pre_survey_form_name = pre?.formName ?? ''
@@ -146,8 +146,8 @@ export async function loader(args: LoaderFunctionArgs) {
     columns,
     columnMeta: {
       ...(base.columnMeta ?? {}),
-      pre_survey_form_name: { label: 'Pre survey form' },
-      post_survey_form_name: { label: 'Post survey form' },
+      pre_survey_form_name: { label: 'Pre-program survey form' },
+      post_survey_form_name: { label: 'Post-program survey form' },
     },
     editorConfig: base.editorConfig
       ? {
@@ -155,12 +155,12 @@ export async function loader(args: LoaderFunctionArgs) {
           fields: {
             ...base.editorConfig.fields,
             pre_survey_form_id: {
-              label: 'Pre survey form',
+              label: 'Pre-program survey form',
               type: 'foreign_key' as const,
               nullable: true,
             },
             post_survey_form_id: {
-              label: 'Post survey form',
+              label: 'Post-program survey form',
               type: 'foreign_key' as const,
               nullable: true,
             },
@@ -226,7 +226,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const preError = await setSemesterSurveyMapping(
       supabase,
       inserted.id,
-      'pre_survey',
+      'pre_program_survey',
       preSurveyFormId
     )
     if (preError) {
@@ -236,7 +236,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const postError = await setSemesterSurveyMapping(
       supabase,
       inserted.id,
-      'post_survey',
+      'post_program_survey',
       postSurveyFormId
     )
     if (postError) {
@@ -259,7 +259,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const preError = await setSemesterSurveyMapping(
     supabase,
     semesterId,
-    'pre_survey',
+    'pre_program_survey',
     preSurveyFormId
   )
   if (preError) {
@@ -269,7 +269,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const postError = await setSemesterSurveyMapping(
     supabase,
     semesterId,
-    'post_survey',
+    'post_program_survey',
     postSurveyFormId
   )
   if (postError) {
