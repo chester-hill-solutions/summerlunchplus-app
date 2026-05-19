@@ -644,93 +644,6 @@ export type Database = {
         }
         Relationships: []
       }
-      sign_up_terms: {
-        Row: {
-          content: string
-          created_at: string
-          id: string
-          is_active: boolean
-          slug: string
-          title: string
-          updated_at: string
-          version: number
-        }
-        Insert: {
-          content: string
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          slug: string
-          title: string
-          updated_at?: string
-          version?: number
-        }
-        Update: {
-          content?: string
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          slug?: string
-          title?: string
-          updated_at?: string
-          version?: number
-        }
-        Relationships: []
-      }
-      sign_up_terms_consent: {
-        Row: {
-          accepted_at: string
-          email: string
-          id: string
-          metadata: Json
-          profile_id: string | null
-          role: Database["public"]["Enums"]["app_role"]
-          sign_up_terms_id: string
-          terms_content: string
-          terms_version: number
-          user_id: string | null
-        }
-        Insert: {
-          accepted_at?: string
-          email: string
-          id?: string
-          metadata?: Json
-          profile_id?: string | null
-          role: Database["public"]["Enums"]["app_role"]
-          sign_up_terms_id: string
-          terms_content: string
-          terms_version: number
-          user_id?: string | null
-        }
-        Update: {
-          accepted_at?: string
-          email?: string
-          id?: string
-          metadata?: Json
-          profile_id?: string | null
-          role?: Database["public"]["Enums"]["app_role"]
-          sign_up_terms_id?: string
-          terms_content?: string
-          terms_version?: number
-          user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sign_up_terms_consent_profile_id_fkey"
-            columns: ["profile_id"]
-            isOneToOne: false
-            referencedRelation: "profile"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sign_up_terms_consent_sign_up_terms_id_fkey"
-            columns: ["sign_up_terms_id"]
-            isOneToOne: false
-            referencedRelation: "sign_up_terms"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       role_permission: {
         Row: {
           permission: Database["public"]["Enums"]["app_permissions"]
@@ -867,6 +780,93 @@ export type Database = {
             columns: ["form_id"]
             isOneToOne: true
             referencedRelation: "form"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sign_up_terms: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          is_active: boolean
+          slug: string
+          title: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          slug: string
+          title: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          slug?: string
+          title?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      sign_up_terms_consent: {
+        Row: {
+          accepted_at: string
+          email: string
+          id: string
+          metadata: Json
+          profile_id: string | null
+          role: Database["public"]["Enums"]["app_role"]
+          sign_up_terms_id: string
+          terms_content: string
+          terms_version: number
+          user_id: string | null
+        }
+        Insert: {
+          accepted_at?: string
+          email: string
+          id?: string
+          metadata?: Json
+          profile_id?: string | null
+          role: Database["public"]["Enums"]["app_role"]
+          sign_up_terms_id: string
+          terms_content: string
+          terms_version: number
+          user_id?: string | null
+        }
+        Update: {
+          accepted_at?: string
+          email?: string
+          id?: string
+          metadata?: Json
+          profile_id?: string | null
+          role?: Database["public"]["Enums"]["app_role"]
+          sign_up_terms_id?: string
+          terms_content?: string
+          terms_version?: number
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sign_up_terms_consent_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sign_up_terms_consent_sign_up_terms_id_fkey"
+            columns: ["sign_up_terms_id"]
+            isOneToOne: false
+            referencedRelation: "sign_up_terms"
             referencedColumns: ["id"]
           },
         ]
@@ -1076,6 +1076,10 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: boolean
       }
+      profile_in_same_family: {
+        Args: { target_profile_id: string }
+        Returns: boolean
+      }
       should_auto_promote_onboarding: { Args: never; Returns: boolean }
       sync_auto_assigned_forms_for_form: {
         Args: { p_form_id: string }
@@ -1161,13 +1165,13 @@ export type Database = {
         | "failed"
       gift_card_upload_type: "pdf_per_page" | "pdf_per_4_pages" | "csv_link"
       invite_status: "pending" | "confirmed" | "revoked"
+      semester_survey_kind: "pre_survey" | "post_survey"
       workshop_enrollment_status:
         | "pending"
         | "waitlisted"
         | "approved"
         | "rejected"
         | "revoked"
-      semester_survey_kind: "pre_survey" | "post_survey"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1376,6 +1380,7 @@ export const Constants = {
       ],
       gift_card_upload_type: ["pdf_per_page", "pdf_per_4_pages", "csv_link"],
       invite_status: ["pending", "confirmed", "revoked"],
+      semester_survey_kind: ["pre_survey", "post_survey"],
       workshop_enrollment_status: [
         "pending",
         "waitlisted",
@@ -1383,7 +1388,7 @@ export const Constants = {
         "rejected",
         "revoked",
       ],
-      semester_survey_kind: ["pre_survey", "post_survey"],
     },
   },
 } as const
+
