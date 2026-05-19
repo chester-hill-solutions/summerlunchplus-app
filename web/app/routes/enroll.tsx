@@ -3,6 +3,7 @@ import { Link, redirect, useActionData, useLoaderData } from 'react-router'
 import type { Route } from './+types/enroll'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { sendTemplateEmail } from '@/lib/email/send-email.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { requireAuth } from '@/lib/auth.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
@@ -56,6 +57,19 @@ type ActionData = {
   surveyPath?: string | null
 }
 
+type FamilyProfileEmailRow = {
+  id: string
+  user_id: string | null
+  email: string | null
+  firstname: string | null
+  surname: string | null
+}
+
+type EmailRecipient = {
+  profileId: string | null
+  userId: string | null
+}
+
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
 
@@ -68,6 +82,13 @@ const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveF
 
 const semesterSurveyPath = (semesterId: string) =>
   `/semester-surveys/${semesterId}/pre-program?returnTo=${encodeURIComponent(`/enroll/${semesterId}`)}`
+
+const toDisplayName = (profile: Pick<FamilyProfileEmailRow, 'firstname' | 'surname' | 'email'>) => {
+  const fullName = [profile.firstname, profile.surname].filter(Boolean).join(' ').trim()
+  return fullName || profile.email || 'A family member'
+}
+
+const isLikelyEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
@@ -224,7 +245,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   const { data: workshopRow, error: workshopError } = await supabase
     .from('workshop')
-    .select('id, semester_id, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity')
+    .select('id, semester_id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity')
     .eq('id', workshop_id)
     .single()
 
@@ -309,14 +330,82 @@ export async function action({ request }: Route.ActionArgs) {
 
   const status: ActionData['status'] = enrollmentAction === 'waitlist' ? 'waitlisted' : 'pending'
 
-  const { error } = await supabase.from('workshop_enrollment').insert({
-    workshop_id,
-    profile_id: targetProfileId,
-    status,
-  })
+  const { data: enrollmentRow, error: enrollmentError } = await supabase
+    .from('workshop_enrollment')
+    .insert({
+      workshop_id,
+      profile_id: targetProfileId,
+      status,
+    })
+    .select('id')
+    .single()
 
-  if (error) {
-    return { ok: false, error: error.message } satisfies ActionData
+  if (enrollmentError || !enrollmentRow?.id) {
+    return { ok: false, error: enrollmentError?.message ?? 'Unable to create enrollment' } satisfies ActionData
+  }
+
+  const { data: familyProfilesData } = await adminClient
+    .from('profile')
+    .select('id, user_id, email, firstname, surname')
+    .in('id', family.familyProfileIds)
+
+  const familyProfiles = (familyProfilesData ?? []) as FamilyProfileEmailRow[]
+  const actorProfile =
+    familyProfiles.find(profile => profile.user_id === auth.user.id) ??
+    familyProfiles.find(profile => profile.id === family.profileId) ??
+    null
+
+  const actorName = actorProfile ? toDisplayName(actorProfile) : auth.user.email ?? 'A family member'
+  const actorEmail = actorProfile?.email ?? auth.user.email ?? 'Unknown email'
+  const workshopName = workshopRow.description?.trim() || 'selected workshop'
+
+  const emailByLowercase = new Map<string, EmailRecipient>()
+  for (const profile of familyProfiles) {
+    const rawEmail = profile.email?.trim()
+    if (!rawEmail || !isLikelyEmail(rawEmail)) continue
+    const normalized = rawEmail.toLowerCase()
+    if (!emailByLowercase.has(normalized)) {
+      emailByLowercase.set(normalized, { profileId: profile.id, userId: profile.user_id })
+    }
+  }
+
+  if (isLikelyEmail(actorEmail)) {
+    const normalizedActorEmail = actorEmail.trim().toLowerCase()
+    if (!emailByLowercase.has(normalizedActorEmail)) {
+      emailByLowercase.set(normalizedActorEmail, {
+        profileId: actorProfile?.id ?? null,
+        userId: auth.user.id,
+      })
+    }
+  }
+
+  const notificationEventKey = `workshop_enrollment:${enrollmentRow.id}:family_requested:v1`
+  const notificationResults = await Promise.all(
+    Array.from(emailByLowercase.entries()).map(async ([normalizedEmail, recipient]) => {
+      return sendTemplateEmail({
+        toEmail: normalizedEmail,
+        templateKey: 'family_enrollment_requested_v1',
+        templateData: {
+          actorName,
+          actorEmail,
+          workshopName,
+        },
+        eventKey: notificationEventKey,
+        triggeredByUserId: auth.user.id,
+        recipientUserId: recipient.userId,
+        profileId: recipient.profileId,
+        familyProfileId: targetProfileId,
+        workshopEnrollmentId: enrollmentRow.id,
+      })
+    })
+  )
+
+  const failedNotifications = notificationResults.filter(result => result.status === 'failed')
+  if (failedNotifications.length > 0) {
+    console.error('[enroll] failed to send some family enrollment notifications', {
+      workshopEnrollmentId: enrollmentRow.id,
+      failures: failedNotifications,
+    })
   }
 
   return { ok: true, status } satisfies ActionData

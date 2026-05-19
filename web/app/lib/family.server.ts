@@ -9,6 +9,14 @@ type ProfileRow = {
   surname: string | null
 }
 
+export type FamilyContact = {
+  id: string
+  user_id: string | null
+  email: string | null
+  firstname: string | null
+  surname: string | null
+}
+
 type GuardianChildRow = {
   guardian_profile_id: string
   child_profile_id: string
@@ -109,4 +117,47 @@ export async function resolveFamilyGraph(
     children,
     primaryChildByGuardian,
   }
+}
+
+export async function resolveFamilyContactsByProfileId(
+  supabase: SupabaseClient<Database>,
+  profileId: string
+): Promise<FamilyContact[]> {
+  const seen = new Set<string>([profileId])
+  const queue: string[] = [profileId]
+
+  while (queue.length) {
+    const batch = queue.splice(0, queue.length)
+    const { data: batchEdges, error: edgeError } = await supabase
+      .from('person_guardian_child')
+      .select('guardian_profile_id, child_profile_id')
+      .or(`guardian_profile_id.in.(${batch.join(',')}),child_profile_id.in.(${batch.join(',')})`)
+
+    if (edgeError) {
+      throw new Error(edgeError.message)
+    }
+
+    for (const edge of batchEdges ?? []) {
+      if (!seen.has(edge.guardian_profile_id)) {
+        seen.add(edge.guardian_profile_id)
+        queue.push(edge.guardian_profile_id)
+      }
+      if (!seen.has(edge.child_profile_id)) {
+        seen.add(edge.child_profile_id)
+        queue.push(edge.child_profile_id)
+      }
+    }
+  }
+
+  const familyProfileIds = Array.from(seen)
+  const { data: profiles, error: profilesError } = await supabase
+    .from('profile')
+    .select('id, user_id, email, firstname, surname')
+    .in('id', familyProfileIds)
+
+  if (profilesError) {
+    throw new Error(profilesError.message)
+  }
+
+  return (profiles ?? []) as FamilyContact[]
 }
