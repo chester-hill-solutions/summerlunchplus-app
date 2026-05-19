@@ -114,6 +114,14 @@ test('guardian signs up, completes pre-program survey, and enrolls', async ({ pa
   for (let step = 0; step < 20; step += 1) {
     if (page.url().includes('/home')) break
 
+    const saveAndContinue = page.getByRole('button', { name: /Save and continue|Saving\.\.\./ })
+    await Promise.race([
+      page.waitForURL(/\/home/, { timeout: 10000 }),
+      saveAndContinue.first().waitFor({ state: 'visible', timeout: 10000 }),
+    ])
+
+    if (page.url().includes('/home')) break
+
     if ((await page.locator('input[name="question_child_has_email"][value="No"]').count()) > 0) {
       await page.locator('input[name="question_child_has_email"][value="No"]').check()
     }
@@ -133,12 +141,24 @@ test('guardian signs up, completes pre-program survey, and enrolls', async ({ pa
 
     await fillRequiredFields(page)
 
-    await page.getByRole('button', { name: 'Save and continue' }).click()
+    if ((await saveAndContinue.count()) === 0) {
+      if (page.url().includes('/home')) break
+      throw new Error('Save and continue button not found before onboarding completed')
+    }
+
+    await saveAndContinue.click()
+    await page.waitForLoadState('networkidle')
   }
 
   await expect(page).toHaveURL(/\/home/)
+  await page.waitForLoadState('domcontentloaded')
+  await page.waitForLoadState('networkidle')
 
-  await page.goto('/enroll')
+  const manageEnrollmentsLink = page.locator('a[href="/enroll"]').first()
+  await expect(manageEnrollmentsLink).toBeVisible()
+  await manageEnrollmentsLink.scrollIntoViewIfNeeded()
+  await manageEnrollmentsLink.click()
+  await expect(page).toHaveURL(/\/enroll/)
 
   if (page.url().match(/\/enroll\/[^/]+$/) && (await page.getByRole('button', { name: 'Complete pre-program survey' }).count()) === 0) {
     await page.getByRole('button', { name: 'Change semester' }).click()
