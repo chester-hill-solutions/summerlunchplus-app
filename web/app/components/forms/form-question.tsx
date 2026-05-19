@@ -65,6 +65,11 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
     return value === option
   }
 
+  const isPostcodeField =
+    metadata.field === 'postcode' ||
+    autoComplete === 'postal-code' ||
+    question.question_code.toLowerCase().includes('postcode')
+
   const renderRadioGroup = (items: string[]) => (
     <fieldset className="space-y-2">
       <Label className="text-base">
@@ -187,11 +192,27 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
         name={name}
         type={resolvedInputType}
         defaultValue={typeof value === 'string' ? value : ''}
-        placeholder={placeholder}
+        placeholder={isPostcodeField ? 'ANA NAN' : placeholder}
         autoComplete={autoComplete}
         min={min}
         max={max}
         step={step}
+        pattern={isPostcodeField ? '[A-Za-z][0-9][A-Za-z] [0-9][A-Za-z][0-9]' : undefined}
+        title={isPostcodeField ? 'Use format ANA NAN (for example K1A 0B1)' : undefined}
+        maxLength={isPostcodeField ? 7 : undefined}
+        className={isPostcodeField ? 'uppercase' : undefined}
+        onInput={
+          isPostcodeField
+            ? event => {
+                const input = event.currentTarget
+                let next = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '')
+                if (next.length > 3) {
+                  next = `${next.slice(0, 3)} ${next.slice(3, 6)}`
+                }
+                input.value = next.slice(0, 7)
+              }
+            : undefined
+        }
         required={required}
       />
     </div>
