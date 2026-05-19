@@ -6,6 +6,7 @@ export default [
   route("info", "routes/info.tsx"),
   route("forms", "routes/forms.tsx"),
   route("enroll", "routes/enroll.tsx"),
+  route("enroll/:semesterId", "routes/enroll.$semesterId.tsx"),
   route("my-forms", "routes/my-forms.tsx"),
   route("my-forms/:formId", "routes/my-forms.$formId.tsx"),
   route("semester-surveys/:semesterId/pre-program", "routes/semester-surveys.pre.tsx"),

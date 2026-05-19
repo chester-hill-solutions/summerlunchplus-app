@@ -1,4 +1,4 @@
-import { Link, redirect, useActionData, useLoaderData, useSearchParams } from 'react-router'
+import { Link, redirect, useActionData, useLoaderData } from 'react-router'
 
 import type { Route } from './+types/enroll'
 import { Button } from '@/components/ui/button'
@@ -67,7 +67,7 @@ const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveF
 }
 
 const semesterSurveyPath = (semesterId: string) =>
-  `/semester-surveys/${semesterId}/pre-program?returnTo=${encodeURIComponent(`/enroll?semester=${semesterId}`)}`
+  `/semester-surveys/${semesterId}/pre-program?returnTo=${encodeURIComponent(`/enroll/${semesterId}`)}`
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
@@ -82,7 +82,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const url = new URL(request.url)
-  const selectedSemesterId = url.searchParams.get('semester')
+  const enrollPathMatch = url.pathname.match(/^\/enroll\/([^/]+)$/)
+  const pathSemesterId = enrollPathMatch?.[1] ? decodeURIComponent(enrollPathMatch[1]) : null
+  const querySemesterId = url.searchParams.get('semester')
+  const selectedSemesterId = pathSemesterId ?? querySemesterId
+
+  if (!pathSemesterId && querySemesterId) {
+    throw redirect(`/enroll/${querySemesterId}`, { headers })
+  }
 
   const [{ data: semesterData }, { data: enrollmentsData }] = await Promise.all([
     supabase
@@ -122,7 +129,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     })
 
     if (openSemesters.length === 1) {
-      throw redirect(`/enroll?semester=${openSemesters[0].id}`, { headers })
+      throw redirect(`/enroll/${openSemesters[0].id}`, { headers })
     }
   }
 
@@ -318,9 +325,8 @@ export async function action({ request }: Route.ActionArgs) {
 export default function EnrollPage() {
   const { semesters, enrollments, workshopCapacityById, preSurveyBySemester, selectedSemesterId } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
-  const [searchParams] = useSearchParams()
 
-  const semesterId = selectedSemesterId ?? searchParams.get('semester')
+  const semesterId = selectedSemesterId
   const selectedSemester = semesterId ? semesters.find(semester => semester.id === semesterId) : null
   const semesterEnrollment = semesterId ? enrollments.find(enrollment => enrollment.semester_id === semesterId) : null
 
@@ -375,7 +381,7 @@ export default function EnrollPage() {
                     <TableCell className="capitalize">{status ?? 'Not enrolled'}</TableCell>
                     <TableCell className="text-right">
                       <Button asChild size="sm" variant="outline">
-                        <Link to={`/enroll?semester=${semester.id}`}>Select semester</Link>
+                        <Link to={`/enroll/${semester.id}`}>Select semester</Link>
                       </Button>
                     </TableCell>
                   </TableRow>

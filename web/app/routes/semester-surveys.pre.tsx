@@ -66,8 +66,8 @@ const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveF
 }
 
 const sanitizeReturnTo = (value: string | null, semesterId: string) => {
-  if (!value) return `/enroll?semester=${semesterId}`
-  if (!value.startsWith('/') || value.startsWith('//')) return `/enroll?semester=${semesterId}`
+  if (!value) return `/enroll/${semesterId}`
+  if (!value.startsWith('/') || value.startsWith('//')) return `/enroll/${semesterId}`
   return value
 }
 
