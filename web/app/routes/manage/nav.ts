@@ -73,6 +73,11 @@ export const manageSections: ManageNavSection[] = [
       { to: '/manage/user-roles', label: 'User roles', description: 'The role each user currently holds.' },
       { to: '/manage/sign-up-terms-consent', label: 'Terms consent', description: 'Accepted terms snapshots captured at signup.' },
       { to: '/manage/sign-up-terms', label: 'Sign-up terms', description: 'Active terms copy shown during account creation.' },
+      {
+        to: '/manage/federal-electoral-district',
+        label: 'Federal electoral districts',
+        description: 'Manage whitelist and meal kit flags for all federal ridings.',
+      },
       { to: '/manage/semester', label: 'Semesters', description: 'Program semesters and enrollment windows.' },
     ],
   },

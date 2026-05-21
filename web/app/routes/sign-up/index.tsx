@@ -162,6 +162,9 @@ export default function SignUp() {
   if (email) termsParams.set('email', email)
   if (role) termsParams.set('role', role)
   const termsTo = `/sign-up/terms${termsParams.toString() ? `?${termsParams.toString()}` : ''}`
+  const roleLabel = role === 'guardian' ? 'Guardian' : 'Student'
+  const alternateRole = role === 'guardian' ? 'student' : 'guardian'
+  const alternateRoleLabel = alternateRole === 'guardian' ? 'Guardian' : 'Student'
 
   return (
     <Card>
@@ -182,8 +185,35 @@ export default function SignUp() {
         ) : (
           <fetcher.Form method="post" className="flex flex-col gap-6">
             <input type="hidden" name="role" value={role} />
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <p>
+                You are signing up as <span className="font-semibold">{roleLabel}</span>.
+              </p>
+              <button
+                type="button"
+                className="linklike mt-1"
+                onClick={() => setRole(alternateRole)}
+              >
+                Switch to {alternateRoleLabel} sign-up
+              </button>
+            </div>
             <div className="grid gap-2">
-              <Label htmlFor="email">Gmail</Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="email">Gmail</Label>
+                <span className="group relative inline-flex items-center">
+                  <button
+                    type="button"
+                    className="h-5 w-5 rounded-full border border-slate-300 text-xs text-slate-500"
+                    aria-label="Email guidance"
+                  >
+                    ?
+                  </button>
+                  <span className="pointer-events-none absolute left-0 top-7 z-10 hidden w-72 rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-700 shadow-md group-hover:block group-focus-within:block">
+                    You are currently in the {roleLabel} sign-up flow. Use your own email. If
+                    this email belongs to your guardian or child, switch to the correct flow.
+                  </span>
+                </span>
+              </div>
               <Input
                 id="email"
                 name="email"
@@ -220,7 +250,7 @@ export default function SignUp() {
                 />
                 <span>
                   I have read and agree to the{' '}
-                  <Link to={termsTo} className="underline underline-offset-4">
+                  <Link to={termsTo}>
                     Terms and Conditions
                   </Link>
                   .
@@ -233,7 +263,7 @@ export default function SignUp() {
             </Button>
             <div className="mt-4 text-center text-sm">
               Already have an account?{' '}
-              <Link to="/login" className="underline underline-offset-4 cursor-pointer">
+              <Link to="/login" className="cursor-pointer">
                 Login
               </Link>
             </div>

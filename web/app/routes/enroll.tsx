@@ -46,6 +46,7 @@ type LoaderData = {
   semesters: SemesterRow[]
   enrollments: EnrollmentRow[]
   workshopCapacityById: Record<string, WorkshopCapacitySnapshot>
+  nextClassByWorkshopId: Record<string, string | null>
   preSurveyBySemester: Record<string, { required: boolean; completed: boolean; preSurveyPath: string | null }>
   selectedSemesterId: string | null
 }
@@ -77,6 +78,15 @@ type EmailRecipient = {
 
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+
+const formatDateTime = (value: string) =>
+  new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value))
 
 const getFamilyEnrollmentProfileId = (family: Awaited<ReturnType<typeof resolveFamilyGraph>>) => {
   if (family.profileRole === 'guardian') {
@@ -112,6 +122,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const pathSemesterId = enrollPathMatch?.[1] ? decodeURIComponent(enrollPathMatch[1]) : null
   const querySemesterId = url.searchParams.get('semester')
   const selectedSemesterId = pathSemesterId ?? querySemesterId
+  const nowIso = new Date().toISOString()
 
   if (!pathSemesterId && querySemesterId) {
     throw redirect(`/enroll/${querySemesterId}`, { headers })
@@ -161,12 +172,35 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const workshops = semesters.flatMap(semester => semester.workshops)
   const workshopIds = workshops.map(workshop => workshop.id)
-  const { data: workshopEnrollmentRows } = workshopIds.length
-    ? await supabase
-        .from('workshop_enrollment')
-        .select('workshop_id, status')
-        .in('workshop_id', workshopIds)
-    : { data: [] }
+  const [workshopEnrollmentResult, upcomingClassesResult] = await Promise.all([
+    workshopIds.length
+      ? supabase
+          .from('workshop_enrollment')
+          .select('workshop_id, status')
+          .in('workshop_id', workshopIds)
+      : Promise.resolve({ data: [] as Array<{ workshop_id: string | null; status: string | null }> }),
+    workshopIds.length
+      ? supabase
+          .from('class')
+          .select('workshop_id, starts_at')
+          .in('workshop_id', workshopIds)
+          .gt('starts_at', nowIso)
+          .order('starts_at', { ascending: true })
+      : Promise.resolve({ data: [] as Array<{ workshop_id: string | null; starts_at: string }> }),
+  ])
+
+  const workshopEnrollmentRows = workshopEnrollmentResult.data ?? []
+  const upcomingClasses = upcomingClassesResult.data ?? []
+
+  const nextClassByWorkshopId: Record<string, string | null> = Object.fromEntries(
+    workshopIds.map(workshopId => [workshopId, null])
+  )
+
+  for (const classRow of upcomingClasses) {
+    const workshopId = classRow.workshop_id
+    if (!workshopId || nextClassByWorkshopId[workshopId]) continue
+    nextClassByWorkshopId[workshopId] = classRow.starts_at
+  }
 
   const workshopCapacityById = Object.fromEntries(
     Array.from(
@@ -228,6 +262,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     semesters,
     enrollments,
     workshopCapacityById,
+    nextClassByWorkshopId,
     preSurveyBySemester,
     selectedSemesterId,
   } satisfies LoaderData
@@ -413,7 +448,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function EnrollPage() {
-  const { semesters, enrollments, workshopCapacityById, preSurveyBySemester, selectedSemesterId } = useLoaderData<LoaderData>()
+  const { semesters, enrollments, workshopCapacityById, nextClassByWorkshopId, preSurveyBySemester, selectedSemesterId } = useLoaderData<LoaderData>()
 
   const semesterId = selectedSemesterId
   const selectedSemester = semesterId ? semesters.find(semester => semester.id === semesterId) : null
@@ -518,10 +553,31 @@ export default function EnrollPage() {
           ) : (
             <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
               <p className="text-sm text-muted-foreground">You can enroll in one workshop for this semester.</p>
+              {(() => {
+                const sortedWorkshops = selectedSemester.workshops
+                  .slice()
+                  .sort((a, b) => {
+                    const nextA = nextClassByWorkshopId[a.id]
+                    const nextB = nextClassByWorkshopId[b.id]
+
+                    if (nextA && nextB) {
+                      const byNextClass = new Date(nextA).getTime() - new Date(nextB).getTime()
+                      if (byNextClass !== 0) return byNextClass
+                    } else if (nextA) {
+                      return -1
+                    } else if (nextB) {
+                      return 1
+                    }
+
+                    return (a.description ?? '').localeCompare(b.description ?? '')
+                  })
+
+                return (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Workshop</TableHead>
+                    <TableHead>Next class</TableHead>
                     <TableHead>Seats</TableHead>
                     <TableHead>Waitlist</TableHead>
                     <TableHead>Enrollment window</TableHead>
@@ -529,17 +585,19 @@ export default function EnrollPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {selectedSemester.workshops.map(workshop => {
+                  {sortedWorkshops.map(workshop => {
                     const capacitySnapshot = workshopCapacityById[workshop.id]
                     const enrollmentAction = capacitySnapshot
                       ? getWorkshopEnrollmentAction(capacitySnapshot)
                       : 'enroll'
                     const isFull = enrollmentAction === 'full'
                     const actionLabel = enrollmentAction === 'waitlist' ? 'Join waitlist' : 'Request enrollment'
+                    const nextClass = nextClassByWorkshopId[workshop.id]
 
                     return (
                       <TableRow key={workshop.id}>
                         <TableCell className="font-medium">{workshop.description ?? 'Workshop'}</TableCell>
+                        <TableCell className="text-muted-foreground">{nextClass ? formatDateTime(nextClass) : 'No upcoming class'}</TableCell>
                         <TableCell className="text-muted-foreground">
                           {capacitySnapshot
                             ? `${capacitySnapshot.approvedCount} / ${capacitySnapshot.capacity}`
@@ -568,6 +626,8 @@ export default function EnrollPage() {
                   })}
                 </TableBody>
               </Table>
+                )
+              })()}
             </div>
           )}
         </div>

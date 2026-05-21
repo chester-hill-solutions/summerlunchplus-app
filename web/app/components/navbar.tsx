@@ -30,13 +30,9 @@ export function Navbar({ user, role }: NavbarProps) {
 
 function UnauthenticatedNav() {
   return (
-    <div className="flex items-center gap-3">
-      <Button variant="ghost" asChild>
-        <Link to="/login">Login</Link>
-      </Button>
-      <Button asChild>
-        <Link to="/sign-up">Sign up</Link>
-      </Button>
+    <div className="flex items-center gap-4 text-sm font-medium">
+      <Link to="/login">Login</Link>
+      <Link to="/sign-up">Sign up</Link>
     </div>
   )
 }
