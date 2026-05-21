@@ -69,6 +69,7 @@ export default [
     route("invites", "routes/manage/invites.tsx"),
     route("discrepancies", "routes/manage/discrepancies.tsx"),
     route("request-metadata", "routes/manage/request-metadata.tsx"),
+    route("federal-electoral-district", "routes/manage/federal-electoral-district.tsx"),
     route("semester", "routes/manage/semester.tsx"),
     route("semester-form-requirement", "routes/manage/semester-form-requirement.tsx"),
   ]),

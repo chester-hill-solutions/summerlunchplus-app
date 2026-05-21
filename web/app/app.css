@@ -63,6 +63,8 @@ body {
   --brand-pink: #ec407d;
   --brand-blue: #2d91cf;
   --brand-green: #24b683;
+  --brand-salmon: #f25f5f;
+  --brand-yellow: #f9d222;
   --brand-purple-dark: #2b2258;
   --background: #fff7ef;
   --foreground: oklch(0.145 0 0);
@@ -100,6 +102,8 @@ body {
 
 .dark {
   --brand-purple-dark: #8a7bd9;
+  --brand-salmon: #f25f5f;
+  --brand-yellow: #f9d222;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -149,5 +153,41 @@ body {
   h5,
   h6 {
     color: var(--brand-purple-dark);
+  }
+
+  a:not([data-slot='button']) {
+    color: var(--brand-blue);
+    text-decoration: none !important;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  a:not([data-slot='button']):visited {
+    color: var(--brand-blue);
+  }
+
+  a:not([data-slot='button']):hover {
+    color: var(--brand-blue);
+    text-decoration: underline !important;
+  }
+
+  a:not([data-slot='button']):active {
+    color: var(--brand-pink);
+  }
+
+  button.linklike {
+    color: var(--brand-blue);
+    text-decoration: none !important;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  button.linklike:hover {
+    color: var(--brand-blue);
+    text-decoration: underline !important;
+  }
+
+  button.linklike:active {
+    color: var(--brand-pink);
   }
 }

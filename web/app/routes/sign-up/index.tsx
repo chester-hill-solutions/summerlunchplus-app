@@ -191,7 +191,7 @@ export default function SignUp() {
               </p>
               <button
                 type="button"
-                className="mt-1 underline underline-offset-4"
+                className="linklike mt-1"
                 onClick={() => setRole(alternateRole)}
               >
                 Switch to {alternateRoleLabel} sign-up
@@ -250,7 +250,7 @@ export default function SignUp() {
                 />
                 <span>
                   I have read and agree to the{' '}
-                  <Link to={termsTo} className="underline underline-offset-4">
+                  <Link to={termsTo}>
                     Terms and Conditions
                   </Link>
                   .
@@ -263,7 +263,7 @@ export default function SignUp() {
             </Button>
             <div className="mt-4 text-center text-sm">
               Already have an account?{' '}
-              <Link to="/login" className="underline underline-offset-4 cursor-pointer">
+              <Link to="/login" className="cursor-pointer">
                 Login
               </Link>
             </div>

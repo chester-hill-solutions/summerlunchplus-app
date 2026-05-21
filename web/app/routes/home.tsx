@@ -553,6 +553,27 @@ export default function Home() {
     return { present, absent }
   }
 
+  const sortedWorkshopEnrollments = workshopEnrollments
+    .slice()
+    .sort((a, b) => {
+      const workshopIdA = a.workshop_id as string
+      const workshopIdB = b.workshop_id as string
+
+      const nextA = upcomingAndPastByWorkshop[workshopIdA]?.upcoming?.[0]?.starts_at ?? null
+      const nextB = upcomingAndPastByWorkshop[workshopIdB]?.upcoming?.[0]?.starts_at ?? null
+
+      if (nextA && nextB) {
+        const byNextClass = new Date(nextA).getTime() - new Date(nextB).getTime()
+        if (byNextClass !== 0) return byNextClass
+      } else if (nextA) {
+        return -1
+      } else if (nextB) {
+        return 1
+      }
+
+      return a.requested_at.localeCompare(b.requested_at)
+    })
+
   return (
     <main className="w-full px-6 pt-6 pb-10 space-y-6">
       <div className="flex gap-2">
@@ -613,7 +634,7 @@ export default function Home() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {workshopEnrollments.map(enrollment => {
+                    {sortedWorkshopEnrollments.map(enrollment => {
                       const workshopId = enrollment.workshop_id as string
                       const workshop = workshopsById[workshopId]
                       const semester = semesterById[enrollment.semester_id]
@@ -650,7 +671,7 @@ export default function Home() {
                 </Table>
               </section>
 
-              {workshopEnrollments.map(enrollment => {
+              {sortedWorkshopEnrollments.map(enrollment => {
                 const workshopId = enrollment.workshop_id as string
                 const workshop = workshopsById[workshopId]
                 const grouped = upcomingAndPastByWorkshop[workshopId] ?? { upcoming: [], past: [] }
