@@ -614,11 +614,11 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   'federal-electoral-district': {
     label: 'Federal Electoral Districts',
     table: 'federal_electoral_district',
-    select: 'id, code, name, whitelist, meal_kit, updated_at',
+    select: 'code, name, whitelist, meal_kit, updated_at',
     columns: ['code', 'name', 'whitelist', 'meal_kit', 'updated_at'],
     order: 'code',
     editor: {
-      primaryKey: ['id'],
+      primaryKey: ['name'],
       allowInsert: true,
       allowUpdate: true,
       fields: {

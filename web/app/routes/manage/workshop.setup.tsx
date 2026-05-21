@@ -225,7 +225,7 @@ export async function action({ request }: ActionFunctionArgs) {
     ends_at: new Date(startAt.getTime() + durationMs).toISOString(),
   }))
 
-  const { error: classError } = await supabase.from('class').insert(classRows)
+  const { error: classError } = await supabase.from('class').upsert(classRows, { onConflict: 'workshop_id,starts_at' })
   if (classError) {
     return { error: `Workshop created, but class generation failed: ${classError.message}`, values, byday } satisfies ActionData
   }
@@ -520,7 +520,10 @@ export default function WorkshopSetupPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="inline-flex h-11 items-center rounded-md bg-[var(--brand-pink)] px-5 text-sm font-semibold text-white shadow-sm transition hover:brightness-95"
+            aria-busy={isSubmitting}
+            className={`inline-flex h-11 items-center rounded-md bg-[var(--brand-pink)] px-5 text-sm font-semibold text-white shadow-sm transition hover:brightness-95 ${
+              isSubmitting ? 'translate-y-px brightness-95' : ''
+            }`}
           >
             {isSubmitting ? 'Creating workshop...' : 'Create workshop and classes'}
           </button>

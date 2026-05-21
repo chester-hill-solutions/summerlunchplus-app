@@ -1,7 +1,5 @@
 import { expect, test } from '@playwright/test'
 
-const PARTNER_PROGRAM = 'Taylor-Massey & Oakridge'
-
 const uniqueSuffix = () => {
   const now = new Date()
   return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}${String(now.getMilliseconds()).padStart(3, '0')}`
@@ -200,10 +198,6 @@ test('guardian signs up, completes pre-program survey, and enrolls', async ({ pa
 
     if ((await page.locator('input[name="additional_guardian_choice"][value="no"]').count()) > 0) {
       await page.locator('input[name="additional_guardian_choice"][value="no"]').check()
-    }
-
-    if ((await page.locator('select[name="question_partner_organization"]').count()) > 0) {
-      await page.locator('select[name="question_partner_organization"]').selectOption({ label: PARTNER_PROGRAM })
     }
 
     if ((await page.getByText(/grocery gift card/i).count()) > 0) {

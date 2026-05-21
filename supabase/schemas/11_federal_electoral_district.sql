@@ -1,7 +1,6 @@
 create table if not exists public.federal_electoral_district (
-  id uuid primary key default gen_random_uuid(),
+  name text primary key,
   code integer not null unique,
-  name text not null unique,
   whitelist boolean not null default false,
   meal_kit boolean not null default false,
   created_at timestamptz not null default now(),

@@ -14,6 +14,7 @@ import type { Database, Json } from '@/lib/database.types'
 import { normalizeEmail } from '@/lib/email-domain'
 import { getProfileSignUpCompletionWithContext } from '@/lib/onboarding.server'
 import { extractRequestMetadata } from '@/lib/request-metadata.server'
+import { ridingLookupProvider } from '@/lib/riding-lookup.server'
 import { getSignUpFlowContext } from '@/lib/sign-up-flow-context.server'
 import { refreshSuspiciousSignalsForProfile } from '@/lib/suspicious-signals.server'
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
@@ -77,6 +78,28 @@ const PROVINCE_CODES = [
 
 const isQuestionHiddenForRole = (role: 'guardian' | 'student', questionCode: string) => {
   return role === 'student' && questionCode === 'guardian_self_phone'
+}
+
+const MEAL_KIT_DERIVED_KEY = 'derived_is_meal_kit_riding'
+const RIDING_LOOKUP_FALLBACK_BRANCH = process.env.RIDING_LOOKUP_FALLBACK_BRANCH === 'meal_kit' ? 'meal_kit' : 'regular'
+
+const resolveMealKitEligibility = (mealKitFlag: boolean | null) => {
+  if (mealKitFlag === true) return true
+  if (mealKitFlag === false) return false
+  return RIDING_LOOKUP_FALLBACK_BRANCH === 'meal_kit'
+}
+
+const normalizePostcode = (value: string) => value.replace(/\s+/g, '').toUpperCase()
+
+const districtMealKitFlag = async (
+  districtName: string | null | undefined
+) => {
+  if (!districtName) return null
+  const { data } = await (adminClient.from('federal_electoral_district') as any)
+    .select('meal_kit')
+    .eq('name', districtName)
+    .maybeSingle()
+  return typeof data?.meal_kit === 'boolean' ? data.meal_kit : null
 }
 
 const isConditionMet = (condition: Json | null | undefined, answers: Record<string, Json>): boolean => {
@@ -214,10 +237,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
   if (!pid) throw redirect('/sign-up', { headers })
 
-  const { data: profile } = await supabase
-    .from('profile')
+  const { data: profile } = await (supabase.from('profile') as any)
     .select(
-      'role, email, firstname, surname, phone, street_address, city, province, postcode, household_size, household_children_count, partner_program, date_of_birth'
+      'role, email, firstname, surname, phone, street_address, city, province, postcode, household_size, household_children_count, partner_program, federal_electoral_district_name, date_of_birth'
     )
     .eq('id', pid)
     .single()
@@ -236,6 +258,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     .eq('profile_id', pid)
     .order('submitted_at', { ascending: true })
   const submissionData = buildAnswerMapFromSubmissions(submissions ?? [])
+  const mealKitFlag = await districtMealKitFlag(
+    typeof profile.federal_electoral_district_name === 'string' ? profile.federal_electoral_district_name : null
+  )
+  submissionData.answers[MEAL_KIT_DERIVED_KEY] = resolveMealKitEligibility(mealKitFlag)
 
   const { data: flowEntries } = await supabase
     .from('sign_up_flow')
@@ -554,9 +580,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ? (formData.get('additional_guardian_choice') as string | null) === 'yes'
       : true
 
-  const { data: profile } = await supabase
-    .from('profile')
-    .select('email')
+  const { data: profile } = await (supabase.from('profile') as any)
+    .select('email, federal_electoral_district_name')
     .eq('id', pid)
     .single()
 
@@ -618,6 +643,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const combinedAnswers = mergeAnswerMaps(submissionData.answers, submittedAnswers)
+  const currentMealKitFlag = await districtMealKitFlag(
+    typeof profile?.federal_electoral_district_name === 'string' ? profile.federal_electoral_district_name : null
+  )
+  combinedAnswers[MEAL_KIT_DERIVED_KEY] = resolveMealKitEligibility(currentMealKitFlag)
   const answersToSave: { questionCode: string; value: Json }[] = []
   const hiddenQuestionCodes: string[] = []
   const additionalGuardianQuestionCodes: string[] = []
@@ -801,6 +830,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (typeof value === 'string' && value.trim()) {
         guardianInviteEmail = value.trim()
       }
+    }
+  }
+
+  const guardianPostcodeRaw = profileUpdates.guardian.postcode
+  const guardianPostcode = typeof guardianPostcodeRaw === 'string' ? normalizePostcode(guardianPostcodeRaw) : ''
+  if (guardianPostcode) {
+    const lookup = await ridingLookupProvider.lookupByPostcode(guardianPostcode)
+    profileUpdates.guardian.riding_lookup_last_attempt_at = new Date().toISOString()
+
+    if (lookup.status === 'matched') {
+      const { data: districtRow } = await (adminClient.from('federal_electoral_district') as any)
+        .select('name, meal_kit')
+        .eq('name', lookup.districtName)
+        .maybeSingle()
+
+      if (districtRow?.name) {
+        profileUpdates.guardian.federal_electoral_district_name = districtRow.name
+        profileUpdates.guardian.riding_lookup_status = 'matched'
+        profileUpdates.guardian.riding_lookup_error = null
+        combinedAnswers[MEAL_KIT_DERIVED_KEY] = resolveMealKitEligibility(
+          typeof districtRow.meal_kit === 'boolean' ? districtRow.meal_kit : null
+        )
+      } else {
+        profileUpdates.guardian.federal_electoral_district_name = null
+        profileUpdates.guardian.riding_lookup_status = 'not_found'
+        profileUpdates.guardian.riding_lookup_error = 'district_not_seeded'
+      }
+    } else if (lookup.status === 'not_found') {
+      profileUpdates.guardian.federal_electoral_district_name = null
+      profileUpdates.guardian.riding_lookup_status = 'not_found'
+      profileUpdates.guardian.riding_lookup_error = null
+    } else {
+      profileUpdates.guardian.riding_lookup_status = 'error'
+      profileUpdates.guardian.riding_lookup_error = lookup.reason
     }
   }
 
@@ -1300,7 +1363,12 @@ export default function SignUpDetails() {
                   </p>
                 ) : null}
                 {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={disableContinue}>
+                <Button
+                  type="submit"
+                  className={`w-full ${loading ? 'translate-y-px brightness-95' : ''}`}
+                  disabled={disableContinue}
+                  aria-busy={loading}
+                >
                   {loading ? 'Saving...' : 'Save and continue'}
                 </Button>
               </fetcher.Form>

@@ -8,6 +8,11 @@ type FamilyEdge = {
   child_profile_id: string
 }
 
+type RidingRow = {
+  name: string
+  whitelist: boolean
+}
+
 const familyGraphForProfile = async (profileId: string) => {
   const seen = new Set<string>([profileId])
   const queue: string[] = [profileId]
@@ -39,9 +44,8 @@ export const refreshSuspiciousSignalsForProfile = async (profileId: string) => {
   if (!familyProfileIds.length) return
 
   const [{ data: profiles }, { data: submissions }] = await Promise.all([
-    adminClient
-      .from('profile')
-      .select('id, role, firstname, surname, email, street_address, city, province, postcode')
+    (adminClient.from('profile') as any)
+      .select('id, role, firstname, surname, email, street_address, city, province, postcode, federal_electoral_district_name')
       .in('id', familyProfileIds),
     adminClient
       .from('form_submission')
@@ -51,10 +55,25 @@ export const refreshSuspiciousSignalsForProfile = async (profileId: string) => {
       .limit(40),
   ])
 
-  const addressSignal = detectAddressMismatchSignal((profiles ?? []).map(profile => ({
-    ...profile,
-    role: profile.role ?? null,
-  })))
+  const normalizedProfiles = ((profiles ?? []) as Array<Record<string, unknown>>)
+    .map(profile => ({
+      id: typeof profile.id === 'string' ? profile.id : '',
+      role: typeof profile.role === 'string' ? profile.role : null,
+      firstname: typeof profile.firstname === 'string' ? profile.firstname : null,
+      surname: typeof profile.surname === 'string' ? profile.surname : null,
+      email: typeof profile.email === 'string' ? profile.email : null,
+      street_address: typeof profile.street_address === 'string' ? profile.street_address : null,
+      city: typeof profile.city === 'string' ? profile.city : null,
+      province: typeof profile.province === 'string' ? profile.province : null,
+      postcode: typeof profile.postcode === 'string' ? profile.postcode : null,
+      federal_electoral_district_name:
+        typeof profile.federal_electoral_district_name === 'string'
+          ? profile.federal_electoral_district_name
+          : null,
+    }))
+    .filter(profile => Boolean(profile.id))
+
+  const addressSignal = detectAddressMismatchSignal(normalizedProfiles)
 
   const networkSignal = detectNetworkDistanceSignal(
     (submissions ?? []).map(submission => ({
@@ -66,8 +85,37 @@ export const refreshSuspiciousSignalsForProfile = async (profileId: string) => {
     }))
   )
 
+  const districtNames = new Set(
+    normalizedProfiles
+      .map(profile =>
+        typeof profile.federal_electoral_district_name === 'string'
+          ? profile.federal_electoral_district_name.trim()
+          : ''
+      )
+      .filter(Boolean)
+  )
+
+  const districtByName = new Map<string, RidingRow>()
+  if (districtNames.size > 0) {
+    const { data: districts } = await adminClient
+      .from('federal_electoral_district' as any)
+      .select('name, whitelist')
+      .in('name', Array.from(districtNames))
+
+    for (const district of (districts ?? []) as RidingRow[]) {
+      districtByName.set(district.name, district)
+    }
+  }
+
+  const subjectProfile = normalizedProfiles.find(profile => profile.id === profileId)
+  const subjectDistrictName =
+    typeof subjectProfile?.federal_electoral_district_name === 'string'
+      ? subjectProfile.federal_electoral_district_name.trim()
+      : ''
+  const subjectDistrict = subjectDistrictName ? districtByName.get(subjectDistrictName) : null
+
   const signals: Array<{
-    signal_type: 'address_mismatch' | 'network_distance_anomaly'
+    signal_type: 'address_mismatch' | 'network_distance_anomaly' | 'non_whitelisted_riding'
     severity: string
     summary: string
     title: string
@@ -94,12 +142,25 @@ export const refreshSuspiciousSignalsForProfile = async (profileId: string) => {
     })
   }
 
+  if (subjectDistrictName && subjectDistrict && subjectDistrict.whitelist === false) {
+    signals.push({
+      signal_type: 'non_whitelisted_riding',
+      severity: 'medium',
+      summary: 'Profile riding is not currently whitelisted.',
+      title: 'Non-whitelisted riding',
+      details: {
+        district_name: subjectDistrictName,
+        whitelist: subjectDistrict.whitelist,
+      },
+    })
+  }
+
   await adminClient
     .from('suspicious_signal')
     .delete()
     .eq('status', 'open')
     .eq('subject_profile_id', profileId)
-    .in('signal_type', ['address_mismatch', 'network_distance_anomaly'])
+    .in('signal_type', ['address_mismatch', 'network_distance_anomaly', 'non_whitelisted_riding'])
 
   if (!signals.length) return
 

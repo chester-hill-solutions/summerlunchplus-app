@@ -12,7 +12,7 @@ create table if not exists public.suspicious_signal (
   resolved_at timestamptz,
   resolved_by uuid references auth.users(id) on delete set null,
   resolution_note text,
-  constraint suspicious_signal_signal_type_chk check (signal_type in ('address_mismatch', 'network_distance_anomaly')),
+  constraint suspicious_signal_signal_type_chk check (signal_type in ('address_mismatch', 'network_distance_anomaly', 'non_whitelisted_riding')),
   constraint suspicious_signal_severity_chk check (severity in ('low', 'medium', 'high')),
   constraint suspicious_signal_status_chk check (status in ('open', 'resolved'))
 );

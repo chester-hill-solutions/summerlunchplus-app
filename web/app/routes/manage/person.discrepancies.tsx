@@ -86,6 +86,22 @@ export default function ManagePersonDiscrepanciesPage() {
                       </ul>
                     </div>
                   ) : null}
+
+                  {signal.signal_type === 'non_whitelisted_riding' ? (
+                    <div className="mt-2 rounded border bg-background p-2 text-xs">
+                      <p className="font-medium">Riding evidence</p>
+                      <ul className="mt-1 space-y-1">
+                        <li>
+                          • Riding:{' '}
+                          {typeof details?.district_name === 'string' ? details.district_name : 'Unknown'}
+                        </li>
+                        <li>
+                          • Whitelisted:{' '}
+                          {typeof details?.whitelist === 'boolean' ? String(details.whitelist) : 'Unknown'}
+                        </li>
+                      </ul>
+                    </div>
+                  ) : null}
                 </article>
               )
             })}
