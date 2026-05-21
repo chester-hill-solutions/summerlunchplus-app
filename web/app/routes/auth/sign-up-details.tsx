@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/card'
 import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import type { Database, Json } from '@/lib/database.types'
-import { isAllowedEmailDomain, normalizeEmail } from '@/lib/email-domain'
+import { normalizeEmail } from '@/lib/email-domain'
 import { getProfileSignUpCompletionWithContext } from '@/lib/onboarding.server'
 import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import { getSignUpFlowContext } from '@/lib/sign-up-flow-context.server'
@@ -650,9 +650,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (inputType === 'email' && typeof value === 'string') {
       const normalized = normalizeEmail(value)
-      if (!isAllowedEmailDomain(normalized)) {
-        return { error: 'Please enter a valid Gmail address' }
-      }
       value = normalized
       submittedAnswers[question.question_code] = normalized
       combinedAnswers[question.question_code] = normalized
