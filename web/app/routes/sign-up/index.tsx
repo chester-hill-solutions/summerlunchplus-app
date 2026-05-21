@@ -258,7 +258,12 @@ export default function SignUp() {
               </label>
             </div>
             {error && <p className="text-sm text-red-500">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button
+              type="submit"
+              className={`w-full ${loading ? 'translate-y-px brightness-95' : ''}`}
+              disabled={loading}
+              aria-busy={loading}
+            >
               {loading ? 'Creating an account...' : 'Next'}
             </Button>
             <div className="mt-4 text-center text-sm">

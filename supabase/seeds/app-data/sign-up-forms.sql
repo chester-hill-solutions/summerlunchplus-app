@@ -266,10 +266,6 @@ select id, 'household_total_people', 1, '{"target":"profile","role":"guardian","
 union all
 select id, 'household_total_children', 2, '{"target":"profile","role":"guardian","field":"household_children_count","input_type":"number","min":0}'::jsonb, null::jsonb from household_counts_form
 union all
-select id, 'partner_organization', 1, '{"target":"profile","role":"guardian","field":"partner_program","ui":"select"}'::jsonb, null::jsonb from partner_form
-union all
-select id, 'partner_organization_other', 2, '{"target":"profile","role":"guardian","field":"partner_program","placeholder":"Partner organization name"}'::jsonb, '{"question_code":"partner_organization","equals":"Other"}'::jsonb from partner_form
-union all
 select id, 'guardian_consent_privacy', 1, '{}'::jsonb, null::jsonb from guardian_form
 union all
 select id, 'guardian_consent_presence', 2, '{}'::jsonb, null::jsonb from guardian_form
@@ -280,43 +276,15 @@ select id, 'guardian_consent_attendance', 4, '{}'::jsonb, null::jsonb from guard
 union all
 select id, 'guardian_consent_photos', 5, '{}'::jsonb, null::jsonb from guardian_form
 union all
-select id, 'guardian_consent_thorncliffe_meal_kit', 6, '{}'::jsonb, '{"question_code":"partner_organization","equals":"Thorncliffe Park -TNO"}'::jsonb from guardian_form
+select id, 'guardian_consent_thorncliffe_meal_kit', 6, '{}'::jsonb, '{"question_code":"derived_is_meal_kit_riding","equals":true}'::jsonb from guardian_form
 union all
-select id, 'guardian_consent_thorncliffe_pickup_schedule', 7, '{}'::jsonb, '{"question_code":"partner_organization","equals":"Thorncliffe Park -TNO"}'::jsonb from guardian_form
+select id, 'guardian_consent_thorncliffe_pickup_schedule', 7, '{}'::jsonb, '{"question_code":"derived_is_meal_kit_riding","equals":true}'::jsonb from guardian_form
 union all
-select id, 'guardian_consent_gift_card', 8, '{}'::jsonb, '{
-  "any": [
-    { "question_code": "partner_organization", "equals": "Taylor-Massey & Oakridge" },
-    { "question_code": "partner_organization", "equals": "Milton Food for Life" },
-    { "question_code": "partner_organization", "equals": "Gloucester -GEFC" },
-    { "question_code": "partner_organization", "equals": "Orangeville Food Bank" },
-    { "question_code": "partner_organization", "equals": "Cresent Town Community" },
-    { "question_code": "partner_organization", "equals": "Eastview Community Centre" },
-    { "question_code": "partner_organization", "equals": "Greenest City" },
-    { "question_code": "partner_organization", "equals": "Partage Vanier" },
-    { "question_code": "partner_organization", "equals": "Parkdale Community Food Bank" },
-    { "question_code": "partner_organization", "equals": "Hamilton - Eva Rothwell Centre" },
-    { "question_code": "partner_organization", "equals": "Corktown Community" }
-  ]
-}'::jsonb from guardian_form
+select id, 'guardian_consent_gift_card', 8, '{}'::jsonb, '{"question_code":"derived_is_meal_kit_riding","not_equals":true}'::jsonb from guardian_form
 union all
 select id, 'gift_card_store_preference', 9, '{}'::jsonb, '{
   "all": [
-    {
-      "any": [
-        { "question_code": "partner_organization", "equals": "Taylor-Massey & Oakridge" },
-        { "question_code": "partner_organization", "equals": "Milton Food for Life" },
-        { "question_code": "partner_organization", "equals": "Gloucester -GEFC" },
-        { "question_code": "partner_organization", "equals": "Orangeville Food Bank" },
-        { "question_code": "partner_organization", "equals": "Cresent Town Community" },
-        { "question_code": "partner_organization", "equals": "Eastview Community Centre" },
-        { "question_code": "partner_organization", "equals": "Greenest City" },
-        { "question_code": "partner_organization", "equals": "Partage Vanier" },
-        { "question_code": "partner_organization", "equals": "Parkdale Community Food Bank" },
-        { "question_code": "partner_organization", "equals": "Hamilton - Eva Rothwell Centre" },
-        { "question_code": "partner_organization", "equals": "Corktown Community" }
-      ]
-    },
+    { "question_code": "derived_is_meal_kit_riding", "not_equals": true },
     { "question_code": "guardian_consent_gift_card", "equals": true }
   ]
 }'::jsonb from guardian_form
@@ -354,10 +322,6 @@ select id, 'household_counts', 7, array['guardian','student']::app_role[]
 from public.form
 where name = 'Household Counts'
 union all
-select id, 'partner_organization', 8, array['guardian']::app_role[]
-from public.form
-where name = 'Partner Organization'
-union all
 select id, 'guardian_consent', 9, array['guardian']::app_role[]
 from public.form
 where name = 'Guardian Consent'
@@ -366,7 +330,18 @@ on conflict (form_id) do update
       step_order = excluded.step_order,
       roles = excluded.roles;
 
+update public.sign_up_flow sf
+set step_order = 8
+from public.form f
+where sf.form_id = f.id
+  and f.name = 'Guardian Consent';
+
 delete from public.sign_up_flow sf
 using public.form f
 where sf.form_id = f.id
   and f.name = 'Additional Guardians';
+
+delete from public.sign_up_flow sf
+using public.form f
+where sf.form_id = f.id
+  and f.name = 'Partner Organization';

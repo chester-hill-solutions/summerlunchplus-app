@@ -13,11 +13,19 @@ create table public.profile (
   province text,
   postcode text,
   partner_program text,
+  federal_electoral_district_name text references public.federal_electoral_district(name) on delete set null,
+  riding_lookup_status text,
+  riding_lookup_last_attempt_at timestamptz,
+  riding_lookup_error text,
   household_size integer,
   household_children_count integer,
   password_set boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+  ,constraint profile_riding_lookup_status_chk check (
+    riding_lookup_status is null
+    or riding_lookup_status in ('matched', 'not_found', 'error', 'skipped')
+  )
 );
 
 alter table public.profile enable row level security;
