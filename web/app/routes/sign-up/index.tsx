@@ -10,8 +10,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  ALLOWED_EMAIL_PATTERN,
-  isAllowedEmailDomain,
   normalizeEmail,
 } from '@/lib/email-domain'
 import {
@@ -99,12 +97,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!password) {
     return {
       error: 'Password is required',
-    }
-  }
-
-  if (!isAllowedEmailDomain(email)) {
-    return {
-      error: 'Please enter a valid Gmail address',
     }
   }
 
@@ -197,7 +189,6 @@ export default function SignUp() {
                 name="email"
                 type="email"
                 placeholder="name@gmail.com"
-                pattern={ALLOWED_EMAIL_PATTERN}
                 title="Use a valid Gmail address"
                 value={email}
                 onChange={event => setEmail(event.target.value)}
