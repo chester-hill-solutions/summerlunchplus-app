@@ -183,7 +183,22 @@ export default function SignUp() {
           <fetcher.Form method="post" className="flex flex-col gap-6">
             <input type="hidden" name="role" value={role} />
             <div className="grid gap-2">
-              <Label htmlFor="email">Gmail</Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="email">Gmail</Label>
+                <span className="group relative inline-flex items-center">
+                  <button
+                    type="button"
+                    className="h-5 w-5 rounded-full border border-slate-300 text-xs text-slate-500"
+                    aria-label="Email guidance"
+                  >
+                    ?
+                  </button>
+                  <span className="pointer-events-none absolute left-0 top-7 z-10 hidden w-72 rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-700 shadow-md group-hover:block group-focus-within:block">
+                    Make sure you are using your own email. If you are entering your guardian's
+                    email or your child's email, go back and select the correct sign-up flow.
+                  </span>
+                </span>
+              </div>
               <Input
                 id="email"
                 name="email"
