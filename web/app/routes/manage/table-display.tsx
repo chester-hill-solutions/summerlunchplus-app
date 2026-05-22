@@ -695,6 +695,29 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                         )
                       }
 
+                      if (tableName === 'email-message' && column === 'resend') {
+                        const emailMessageId = typeof row.id === 'string' ? row.id : ''
+                        return (
+                          <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2">
+                            <button
+                              type="button"
+                              disabled={!emailMessageId || statusFetcher.state === 'submitting'}
+                              onClick={event => {
+                                event.stopPropagation()
+                                if (!emailMessageId) return
+                                const formData = new FormData()
+                                formData.set('intent', 'resend-email')
+                                formData.set('email_message_id', emailMessageId)
+                                statusFetcher.submit(formData, { method: 'post' })
+                              }}
+                              className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Resend
+                            </button>
+                          </td>
+                        )
+                      }
+
                       const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
                       const isFormAnswersLink = tableName === 'form' && column === 'answers' && typeof row.id === 'string'
                       const personLink = personLinkForCell(tableName, column, row)
