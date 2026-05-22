@@ -196,7 +196,7 @@ TNO Youth Hub, East York Town Centre$$, 'checkbox'::form_question_type, '[]'::js
 union all
 select 'guardian_consent_questionnaire', 'I agree to participate in the pre- and post-program questionnaires.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
-select 'guardian_consent_interview', 'May summerlunch+ contact you for an interview after the program has finished?', 'checkbox'::form_question_type, '[]'::jsonb
+select 'guardian_consent_interview', 'May summerlunch+ contact you for an interview after the program has finished?', 'single_choice'::form_question_type, '["Yes","No"]'::jsonb
 on conflict (question_code) do update
   set prompt = excluded.prompt,
       "type" = excluded."type",
