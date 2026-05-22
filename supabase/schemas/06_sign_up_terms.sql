@@ -148,69 +148,69 @@ grant select, insert on table public.sign_up_terms_consent to authenticated;
 insert into public.sign_up_terms (slug, title, content, version, is_active)
 values (
   'default',
-  'Summerlunch+ Data Privacy Principles for Children''s Nutrition Education Programs',
-  $$Purpose
+  'Privacy Policy',
+  $$At summerlunch+, we are committed to protecting the privacy and personal information of children, families, educators, volunteers, and website visitors. This Privacy Policy explains how we collect, use, store, and protect information through our programs and website.
 
-At Summerlunch+, we are committed to protecting the privacy, safety, and dignity of children
-and their families. These principles guide how we handle data in our nutrition education
-programs while supporting responsible program delivery and evaluation.
+Information We Collect
+We may collect the following types of information:
+Parent or guardian names
+Email addresses
+Phone numbers
+Child participant information
+Program registration details
+Feedback or survey responses
 
-1. Child-Centered Best Interests
+How We Use Information
+Operate and manage nutrition education programs
+Communicate with families and participants
+Improve educational materials and services
+Evaluate program effectiveness
+Maintain website security and performance
+Share program evaluation data with partners and donors
 
-We ensure that all data practices prioritize the best interests of the child. We only collect and
-use data in ways that support children’s learning, health, and well-being, and avoid any
-practices that could harm or stigmatize them.
+Children’s Privacy
+Protecting children’s privacy is a core priority for summerlunch+. We collect children’s personal information only when necessary for program participation and evaluation purposes with appropriate parent or guardian consent.
 
-2. Data Minimization and Purpose Limitation
+Consent
+Where required, we obtain consent from parents or legal guardians before collecting or using a child’s personal information and or photos shared with us. This is to be completed in our program registration form.
 
-We only collect data that is directly relevant and necessary for clearly defined educational and
-evaluation purposes. We do not collect sensitive personal information unless it is essential and
-justified, and we do not use data beyond its original purpose without renewed consent.
+Data Security
+We use administrative, technical, and physical safeguards to protect personal information from unauthorized access, disclosure, misuse, or loss. However, no online system can guarantee complete security.
 
-3. Informed Consent and Assent
+Data Retention
+We retain personal information only for as long as necessary to fulfill program, operational, legal, or reporting purposes. Information that is no longer required is securely deleted or anonymized.
 
-We only collect data after obtaining informed consent from parents or legal guardians, along
-with age-appropriate assent from children. We provide clear, accessible explanations of what
-data is collected, why it is needed, how it will be used, and with whom it may be shared.
+Third-Party Links
+Our website may contain links to external websites. summerlunch+ is not responsible for the privacy practices or content of third-party websites.
 
-4. Transparency and Accountability
+Photo, Media, and User Content
+Participants, parents, guardians, educators, or volunteers may choose to upload photos, recipes, or other educational materials through summerlunch+ programs or website activities.
 
-We are transparent about our data practices and provide plain-language privacy information to
-families. We maintain clear accountability through designated data stewards and documented
-data governance policies.
+By submitting content, users confirm that:
+they have the right and permission to share the content,
+the content does not violate the privacy or rights of others,
+and the content is appropriate, respectful, and related to summerlunch+ program
 
-5. Privacy by Design and Default
+Examples of acceptable content may include:
+recipe photos
+educational activity photos
+nutrition projects
+or other materials specifically requested by the summerlunch+ team.
 
-We build privacy protections into our programs from the outset. By default, we only collect and
-retain the minimum amount of personal data necessary, ensuring that information is not shared
-unless required and authorized.
+summerlunch+ reserves the right to remove any content that is considered inappropriate, unsafe, unrelated to program activities, offensive, or inconsistent with our mission and community standards.
 
-6. De-identification and Anonymization
+Consent for Photos and Social Media
+summerlunch+ will not publicly post or share identifiable photos or videos of children on social media, websites, promotional materials, or public communications unless explicit consent has been provided by a parent or legal guardian through an authorized consent form. Parents and guardians may withdraw media consent at any time by contacting summerlunch+.
 
-We only collect identifiable data when necessary. Whenever possible, we use aggregated or
-de-identified data for analysis, reporting, and knowledge sharing to reduce the risk of
-re-identification.
+Protection of Children’s Images
+We take reasonable steps to minimize privacy risks associated with children’s images and media. Whenever possible, we avoid:
+sharing full names alongside photos,
+sharing sensitive personal information,
+or using images in ways that could compromise a child’s safety, dignity, or privacy.
 
-7. Limited Retention and Secure Disposal
-
-We only collect data for as long as necessary to fulfill program purposes or legal obligations.
-We establish clear timelines for secure deletion or anonymization of personal data.
-
-8. Third-Party Safeguards
-
-We do not share data. We prohibit unauthorized data sharing or commercial use of children’s
-data.
-
-9. Rights of Access and Correction
-
-We respect the rights of parents and guardians to access, review, and request corrections or
-deletion of their child’s data, in accordance with applicable laws.
-
-Implementation Commitment
-
-At Summerlunch+, we commit to ongoing staff training, regular review of our data practices, and
-continuous improvement to ensure we uphold the highest standards of children’s data privacy.$$,
-  3,
+Changes to This Privacy Policy
+We may update this Privacy Policy from time to time. Updated versions will be posted on this page with a revised effective date.$$,
+  4,
   true
 )
 on conflict (slug) do nothing;

@@ -76,6 +76,9 @@ const PROVINCE_CODES = [
   'YT',
 ] as const
 
+const INTERVIEW_CONSENT_QUESTION_CODE = 'guardian_consent_interview'
+const YES_NO_OPTIONS = ['Yes', 'No'] as const
+
 const isQuestionHiddenForRole = (role: 'guardian' | 'student', questionCode: string) => {
   return role === 'student' && questionCode === 'guardian_self_phone'
 }
@@ -341,14 +344,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const base = Array.isArray(q.form_question) ? q.form_question[0] : q.form_question
       const metadata = { ...((q.metadata ?? {}) as Record<string, Json>) }
       const isProvinceQuestion = q.question_code === 'address_province'
+      const isInterviewConsentQuestion = q.question_code === INTERVIEW_CONSENT_QUESTION_CODE
       if (isProvinceQuestion) {
         metadata.ui = 'select'
       }
       return {
         question_code: q.question_code ?? '',
         prompt: q.prompt_override ?? base?.prompt ?? '',
-        type: (isProvinceQuestion ? 'single_choice' : (base?.type ?? 'text')) as Database['public']['Enums']['form_question_type'],
-        options: (isProvinceQuestion ? [...PROVINCE_CODES] : (q.options_override ?? base?.options ?? [])) as Json,
+        type: (
+          isProvinceQuestion || isInterviewConsentQuestion
+            ? 'single_choice'
+            : (base?.type ?? 'text')
+        ) as Database['public']['Enums']['form_question_type'],
+        options: (
+          isProvinceQuestion
+            ? [...PROVINCE_CODES]
+            : isInterviewConsentQuestion
+              ? [...YES_NO_OPTIONS]
+              : (q.options_override ?? base?.options ?? [])
+        ) as Json,
         metadata: metadata as Json,
         visibility_condition: (q.visibility_condition ?? null) as Json,
       }
@@ -610,14 +624,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const base = Array.isArray(row.form_question) ? row.form_question[0] : row.form_question
     const metadata = { ...((row.metadata ?? {}) as Record<string, Json>) }
     const isProvinceQuestion = row.question_code === 'address_province'
+    const isInterviewConsentQuestion = row.question_code === INTERVIEW_CONSENT_QUESTION_CODE
     if (isProvinceQuestion) {
       metadata.ui = 'select'
     }
     return {
       question_code: row.question_code ?? '',
       prompt: row.prompt_override ?? base?.prompt ?? '',
-      type: (isProvinceQuestion ? 'single_choice' : (base?.type ?? 'text')) as Database['public']['Enums']['form_question_type'],
-      options: (isProvinceQuestion ? [...PROVINCE_CODES] : (row.options_override ?? base?.options ?? [])) as Json,
+      type: (
+        isProvinceQuestion || isInterviewConsentQuestion
+          ? 'single_choice'
+          : (base?.type ?? 'text')
+      ) as Database['public']['Enums']['form_question_type'],
+      options: (
+        isProvinceQuestion
+          ? [...PROVINCE_CODES]
+          : isInterviewConsentQuestion
+            ? [...YES_NO_OPTIONS]
+            : (row.options_override ?? base?.options ?? [])
+      ) as Json,
       metadata: metadata as Json,
       visibility_condition: (row.visibility_condition ?? null) as Json,
     } satisfies FormQuestionData
