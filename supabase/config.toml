@@ -223,7 +223,7 @@ admin_email = "hub@summerlunchplus.com"
 sender_name = "Summerlunch+ Hub"
 
 [auth.email.template.invite]
-subject = "You have been invited"
+subject = "You've been invited to join summerlunch+"
 content_path = "./templates/invite.html"
 
 [auth.email.template.confirmation]
