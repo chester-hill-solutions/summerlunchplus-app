@@ -562,6 +562,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
       'sent_at',
       'failed_at',
       'template_data',
+      'resend',
     ],
     order: 'created_at',
     lookupMappings: [

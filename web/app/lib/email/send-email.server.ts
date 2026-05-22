@@ -181,3 +181,51 @@ export const sendTemplateEmail = async <K extends EmailTemplateKey>({
     workshopEnrollmentId,
   })
 }
+
+export const resendEmailMessageById = async ({
+  emailMessageId,
+  triggeredByUserId,
+}: {
+  emailMessageId: string
+  triggeredByUserId: string
+}) => {
+  const { data: message, error } = await adminClient
+    .from('email_message')
+    .select(
+      'id, to_email, template_key, template_data, recipient_user_id, profile_id, family_profile_id, workshop_enrollment_id'
+    )
+    .eq('id', emailMessageId)
+    .single()
+
+  if (error || !message) {
+    return { ok: false, error: error?.message ?? 'Email message not found' }
+  }
+
+  const templateEntry = (emailTemplates as Record<string, { render: (data: unknown) => { subject: string; html: string; text: string } }>)[message.template_key]
+
+  if (!templateEntry) {
+    return { ok: false, error: `Unknown template key: ${message.template_key}` }
+  }
+
+  const rendered = templateEntry.render(message.template_data)
+  const resendResult = await sendTransactionalEmail({
+    toEmail: message.to_email,
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
+    templateKey: message.template_key,
+    templateData: message.template_data,
+    eventKey: null,
+    triggeredByUserId,
+    recipientUserId: message.recipient_user_id,
+    profileId: message.profile_id,
+    familyProfileId: message.family_profile_id,
+    workshopEnrollmentId: message.workshop_enrollment_id,
+  })
+
+  if (resendResult.status === 'failed') {
+    return { ok: false, error: resendResult.error ?? 'Resend failed' }
+  }
+
+  return { ok: true }
+}
