@@ -1,5 +1,5 @@
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation, useRouteLoaderData } from "react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import type { Route } from "./+types/my-forms.$formId";
 import { Button } from "@/components/ui/button";
@@ -268,8 +268,16 @@ export default function MyFormDetail() {
   const navigation = useNavigation();
   const rootData = useRouteLoaderData("root") as RootLoaderData | undefined;
   const submitted = Boolean(assignment.submission);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const isSubmitting =
-    navigation.state === "submitting" && navigation.formAction?.includes(assignment.form.id);
+    submitLocked ||
+    (navigation.state !== "idle" && navigation.formAction?.includes(assignment.form.id));
+
+  useEffect(() => {
+    if (navigation.state === "idle" && actionData?.error) {
+      setSubmitLocked(false);
+    }
+  }, [actionData?.error, navigation.state]);
 
   // Client-side session refresh after a successful submit/resubmit so JWT claims update.
   useEffect(() => {
@@ -312,7 +320,7 @@ export default function MyFormDetail() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Form method="post" className="space-y-6">
+          <Form method="post" className="space-y-6" onSubmit={() => setSubmitLocked(true)}>
             <input type="hidden" name="intent" value="submit_form" />
 
             {actionData?.error ? (
@@ -331,7 +339,7 @@ export default function MyFormDetail() {
 
             <div className="flex justify-end">
               <Button type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>
-                {isSubmitting ? "Submitting..." : submitted ? "Resubmit" : "Submit"}
+                {isSubmitting ? "Loading next step..." : submitted ? "Resubmit" : "Submit"}
               </Button>
             </div>
           </Form>

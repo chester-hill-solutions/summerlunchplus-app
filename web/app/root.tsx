@@ -4,11 +4,16 @@ import { useEffect, useRef } from "react";
 import type { Route } from "./+types/root";
 import { Navbar } from "./components/navbar";
 import { enforceOnboardingGuard } from "./lib/auth.server";
+import { useRouterInstrumentation } from "./lib/router-instrumentation";
 import { createClient } from "./lib/supabase/server";
 import { createClient as createBrowserClient } from "./lib/supabase/client";
 import "./app.css";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const startedAt = Date.now()
+  const requestPath = new URL(request.url).pathname
+
+  try {
   const supabaseUrl = process.env.VITE_SUPABASE_URL ?? '';
   const supabaseAnonKey = process.env.VITE_SUPABASE_PUBLISHABLE_OR_ANON_KEY ?? '';
 
@@ -67,6 +72,20 @@ export async function loader({ request }: Route.LoaderArgs) {
   const role = typeof claims?.user_role === "string" ? claims.user_role : null;
 
   return { user, role, supabaseUrl, supabaseAnonKey };
+  } finally {
+    const shouldLog =
+      process.env.NODE_ENV !== 'production' ||
+      process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+
+    if (shouldLog) {
+      console.info('[router-instrumentation]', {
+        event: 'root_loader',
+        method: request.method,
+        pathname: requestPath,
+        durationMs: Date.now() - startedAt,
+      })
+    }
+  }
 }
 
 export const links: Route.LinksFunction = () => [
@@ -104,6 +123,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   const { user, role, supabaseUrl, supabaseAnonKey } = useLoaderData<typeof loader>();
   const hashHandledRef = useRef(false);
+
+  useRouterInstrumentation();
 
   useEffect(() => {
     if (hashHandledRef.current) return;

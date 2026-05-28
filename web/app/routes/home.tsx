@@ -1,4 +1,4 @@
-import { Form, Link, redirect, useActionData, useLoaderData, useSearchParams } from 'react-router'
+import { Form, Link, redirect, useActionData, useLoaderData, useNavigation, useSearchParams } from 'react-router'
 
 import type { Route } from './+types/home'
 import { Button } from '@/components/ui/button'
@@ -509,7 +509,12 @@ export default function Home() {
     nextClass,
   } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
+  const navigation = useNavigation()
   const [searchParams] = useSearchParams()
+  const mutationLocked =
+    navigation.state !== 'idle' &&
+    typeof navigation.formMethod === 'string' &&
+    navigation.formMethod.toLowerCase() === 'post'
   const tab = searchParams.get('tab') === 'manage-family' ? 'manage-family' : 'family-workshops'
   const enrollmentStatusParam = searchParams.get('enrollmentStatus')
   const enrollmentStatus = enrollmentStatusParam === 'error' ? 'error' : enrollmentStatusParam === 'success' ? 'success' : null
@@ -806,7 +811,7 @@ export default function Home() {
                                 <Form method="post" className="flex items-center gap-2">
                                   <input type="hidden" name="intent" value="set_primary_child" />
                                   <input type="hidden" name="child_id" value={profile.id} />
-                                  <Button type="submit" variant="outline" size="sm" disabled={isPrimaryChild}>
+                                  <Button type="submit" variant="outline" size="sm" disabled={isPrimaryChild || mutationLocked}>
                                     {isPrimaryChild ? 'Primary' : 'Set primary'}
                                   </Button>
                                 </Form>
@@ -823,8 +828,9 @@ export default function Home() {
                                     placeholder={isGuardian ? 'guardian@gmail.com' : 'child@gmail.com'}
                                     className="h-8 w-52"
                                     required
+                                    disabled={mutationLocked}
                                   />
-                                  <Button type="submit" variant="outline" size="sm">
+                                  <Button type="submit" variant="outline" size="sm" disabled={mutationLocked}>
                                     {invite?.status === 'pending' ? 'Resend invite' : 'Send invite'}
                                   </Button>
                                 </Form>
@@ -846,10 +852,10 @@ export default function Home() {
                       <TableCell colSpan={3}>
                         <Form method="post" className="flex flex-wrap items-center gap-2">
                           <input type="hidden" name="intent" value="add_child" />
-                          <Input name="firstname" placeholder="First name" className="h-8 w-32" />
-                          <Input name="surname" placeholder="Surname" className="h-8 w-32" />
-                          <Input name="email" type="email" placeholder="Email (optional)" className="h-8 w-52" />
-                          <Button type="submit" size="sm">Add</Button>
+                          <Input name="firstname" placeholder="First name" className="h-8 w-32" disabled={mutationLocked} />
+                          <Input name="surname" placeholder="Surname" className="h-8 w-32" disabled={mutationLocked} />
+                          <Input name="email" type="email" placeholder="Email (optional)" className="h-8 w-52" disabled={mutationLocked} />
+                          <Button type="submit" size="sm" disabled={mutationLocked}>Add</Button>
                         </Form>
                       </TableCell>
                     </TableRow>
@@ -860,10 +866,10 @@ export default function Home() {
                       <TableCell colSpan={3}>
                         <Form method="post" className="flex flex-wrap items-center gap-2">
                           <input type="hidden" name="intent" value="add_guardian" />
-                          <Input name="firstname" placeholder="First name" className="h-8 w-32" />
-                          <Input name="surname" placeholder="Surname" className="h-8 w-32" />
-                          <Input name="email" type="email" placeholder="guardian@gmail.com" className="h-8 w-52" required />
-                          <select name="child_id" className="h-8 rounded border border-input bg-background px-2 text-xs" required>
+                          <Input name="firstname" placeholder="First name" className="h-8 w-32" disabled={mutationLocked} />
+                          <Input name="surname" placeholder="Surname" className="h-8 w-32" disabled={mutationLocked} />
+                          <Input name="email" type="email" placeholder="guardian@gmail.com" className="h-8 w-52" required disabled={mutationLocked} />
+                          <select name="child_id" className="h-8 rounded border border-input bg-background px-2 text-xs" required disabled={mutationLocked}>
                             <option value="">Link to child</option>
                             {familyProfiles
                               .filter(profile => profile.role === 'student')
@@ -873,7 +879,7 @@ export default function Home() {
                                 </option>
                               ))}
                           </select>
-                          <Button type="submit" size="sm">Add</Button>
+                          <Button type="submit" size="sm" disabled={mutationLocked}>Add</Button>
                         </Form>
                       </TableCell>
                     </TableRow>

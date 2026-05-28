@@ -40,3 +40,8 @@ High-signal guidance for OpenCode sessions in this repo.
 - Route modules commonly import generated `./+types/*`; rerun `npm run typecheck` after route changes.
 - Server auth helpers (`web/app/lib/supabase/server.ts`) return `headers`; preserve/pass these headers on auth redirects/responses or sessions can break.
 - Email templates under `supabase/templates/` are inline-styled HTML; keep styles inline (no `<style>` blocks).
+
+## Performance diagnostics conventions
+- Keep submit buttons disabled for the full mutation transition (`submitting` + `loading`) on signup, enrollment, family-management, and survey forms to prevent duplicate writes.
+- Client router timing logs are emitted from `web/app/lib/router-instrumentation.ts`; enable in production with `VITE_ENABLE_ROUTER_INSTRUMENTATION=true`.
+- Treat suspicious-signal refresh and enrollment notification dispatch as async side effects; do not block user-visible responses on them.
