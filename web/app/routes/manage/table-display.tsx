@@ -115,6 +115,10 @@ const getDirectionIndicator = (stage: 0 | 1 | 2) => {
   return ''
 }
 
+const FORM_SELECT_CLASS_NAME = 'h-9 rounded border border-input bg-background px-2 pr-8'
+const TABLE_SELECT_CLASS_NAME =
+  'h-8 min-w-32 w-full rounded border border-input bg-background px-2 pr-8 text-xs'
+
 const normalizeFilterValues = (values: string[]) =>
   Array.from(new Set(values.filter(value => value !== undefined)))
 
@@ -614,7 +618,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
               const nextValue = event.target.value
               setValues(prev => ({ ...prev, [fieldName]: nextValue }))
             }}
-            className="h-9 rounded border border-input bg-background px-2"
+            className={FORM_SELECT_CLASS_NAME}
           >
             {field.nullable ? <option value="">(none)</option> : null}
             <option value="true">true</option>
@@ -634,7 +638,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
               const nextValue = event.target.value
               setValues(prev => ({ ...prev, [fieldName]: nextValue }))
             }}
-            className="h-9 rounded border border-input bg-background px-2"
+            className={FORM_SELECT_CLASS_NAME}
           >
             {field.nullable ? <option value="">(none)</option> : null}
             {(field.enumValues ?? []).map(option => (
@@ -766,7 +770,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
               if (!PAGE_SIZE_OPTIONS.includes(nextPageSize as (typeof PAGE_SIZE_OPTIONS)[number])) return
               setPageAndSync(1, nextPageSize)
             }}
-            className="h-8 rounded border border-input bg-background px-2"
+            className="h-8 rounded border border-input bg-background px-2 pr-8"
           >
             {PAGE_SIZE_OPTIONS.map(option => (
               <option key={option} value={option}>
@@ -862,7 +866,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                             <select
                               value={statusValue}
                               onChange={event => updateAttendanceStatus(row, event.target.value)}
-                              className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
+                              className={TABLE_SELECT_CLASS_NAME}
                             >
                               <option value="">(none)</option>
                               <option value="unknown">unknown</option>
@@ -888,7 +892,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                             <select
                               value={cameraValue}
                               onChange={event => updateAttendanceCameraOn(row, event.target.value)}
-                              className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
+                              className={TABLE_SELECT_CLASS_NAME}
                             >
                               <option value="">(none)</option>
                               <option value="true">true</option>
@@ -905,7 +909,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                             <select
                               value={statusValue}
                               onChange={event => updateWorkshopEnrollmentStatus(row, event.target.value)}
-                              className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
+                              className={TABLE_SELECT_CLASS_NAME}
                             >
                               {Constants.public.Enums.workshop_enrollment_status.map((status: Database['public']['Enums']['workshop_enrollment_status']) => (
                                 <option key={status} value={status}>
