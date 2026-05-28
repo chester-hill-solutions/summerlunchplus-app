@@ -40,7 +40,7 @@ type LoaderData = {
   label: string
   tableName: string
   tableVariant?: 'default' | 'pivot'
-  columnMeta?: Record<string, { label?: string; truncate?: boolean; filterable?: boolean }>
+  columnMeta?: Record<string, { label?: string; truncate?: boolean; filterable?: boolean; numeric?: boolean }>
   canEditStatus?: boolean
   editorConfig?: EditorConfig
   foreignKeyOptions?: Record<string, ForeignKeyOption[]>
@@ -530,7 +530,8 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
   }
 
   const fieldKeys = editorConfig ? Object.keys(editorConfig.fields) : []
-  const isNumericColumn = (column: string) => editorConfig?.fields[column]?.type === 'number'
+  const isNumericColumn = (column: string) =>
+    editorConfig?.fields[column]?.type === 'number' || columnMeta[column]?.numeric === true
 
   const beginEdit = (row: Record<string, unknown>) => {
     if (!editorConfig) return

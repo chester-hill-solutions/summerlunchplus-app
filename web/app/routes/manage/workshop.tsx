@@ -17,53 +17,84 @@ export async function loader(args: Route.LoaderArgs) {
     new Set(rows.map(row => (typeof row.id === 'string' ? row.id : '')).filter(Boolean))
   )
 
-  let approvedByWorkshopId = new Map<string, number>()
+  let statusCountsByWorkshopId = new Map<
+    string,
+    { pending: number; accepted: number; waitlisted: number }
+  >()
   if (workshopIds.length) {
     const { supabase } = createClient(args.request)
-    const { data: approvedEnrollmentRows, error: approvedEnrollmentError } = await supabase
+    const { data: enrollmentRows, error: enrollmentError } = await supabase
       .from('workshop_enrollment')
-      .select('workshop_id')
+      .select('workshop_id, status')
       .in('workshop_id', workshopIds)
-      .eq('status', 'approved')
 
-    if (!approvedEnrollmentError) {
-      approvedByWorkshopId = (approvedEnrollmentRows ?? []).reduce((acc, row) => {
+    if (!enrollmentError) {
+      statusCountsByWorkshopId = (enrollmentRows ?? []).reduce((acc, row) => {
         if (!row.workshop_id) {
           return acc
         }
-        acc.set(row.workshop_id, (acc.get(row.workshop_id) ?? 0) + 1)
+        const current = acc.get(row.workshop_id) ?? {
+          pending: 0,
+          accepted: 0,
+          waitlisted: 0,
+        }
+
+        if (row.status === 'pending') {
+          current.pending += 1
+        } else if (row.status === 'approved') {
+          current.accepted += 1
+        } else if (row.status === 'waitlisted') {
+          current.waitlisted += 1
+        }
+
+        acc.set(row.workshop_id, current)
         return acc
-      }, new Map<string, number>())
+      }, new Map<string, { pending: number; accepted: number; waitlisted: number }>())
     }
   }
 
   const enrichedRows = rows.map(row => {
     const workshopId = typeof row.id === 'string' ? row.id : ''
-    const approved = workshopId ? approvedByWorkshopId.get(workshopId) ?? 0 : 0
-    const capacity = typeof row.capacity === 'number' ? row.capacity : null
+    const counts =
+      workshopId
+        ? statusCountsByWorkshopId.get(workshopId) ?? {
+            pending: 0,
+            accepted: 0,
+            waitlisted: 0,
+          }
+        : {
+            pending: 0,
+            accepted: 0,
+            waitlisted: 0,
+          }
 
     return {
       ...row,
-      enrolled_capacity: capacity === null ? `${approved}/-` : `${approved}/${capacity}`,
+      pending: counts.pending,
+      accepted: counts.accepted,
+      waitlisted: counts.waitlisted,
     }
   })
 
-  let columns = base.columns.includes('enrolled_capacity')
-    ? base.columns
-    : [...base.columns]
+  let columns = base.columns.filter(column => column !== 'enrolled_capacity')
 
-  if (!columns.includes('enrolled_capacity')) {
-    const descriptionIndex = columns.indexOf('description')
-    if (descriptionIndex >= 0) {
-      columns = [
-        ...columns.slice(0, descriptionIndex + 1),
-        'enrolled_capacity',
-        ...columns.slice(descriptionIndex + 1),
-      ]
-    } else {
-      columns = [...columns, 'enrolled_capacity']
+  const insertBefore = (target: string, ...inserted: string[]) => {
+    const cleanInserted = inserted.filter(column => !columns.includes(column))
+    if (!cleanInserted.length) return
+    const targetIndex = columns.indexOf(target)
+    if (targetIndex === -1) {
+      columns = [...columns, ...cleanInserted]
+      return
     }
+    columns = [
+      ...columns.slice(0, targetIndex),
+      ...cleanInserted,
+      ...columns.slice(targetIndex),
+    ]
   }
+
+  insertBefore('capacity', 'pending', 'accepted')
+  insertBefore('wait_list_capacity', 'waitlisted')
 
   return {
     ...base,
@@ -71,8 +102,25 @@ export async function loader(args: Route.LoaderArgs) {
     columns,
     columnMeta: {
       ...(base.columnMeta ?? {}),
-      enrolled_capacity: {
-        label: 'enrolled/capacity',
+      pending: {
+        label: 'pending',
+        numeric: true,
+      },
+      accepted: {
+        label: 'accepted',
+        numeric: true,
+      },
+      capacity: {
+        label: 'cap',
+        numeric: true,
+      },
+      waitlisted: {
+        label: 'waitlisted',
+        numeric: true,
+      },
+      wait_list_capacity: {
+        label: 'waitlist cap',
+        numeric: true,
       },
     },
   }
