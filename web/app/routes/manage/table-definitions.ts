@@ -181,6 +181,16 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
       },
       { keyColumn: 'decided_by', table: 'auth.users', valueColumn: 'email', resultColumn: 'decided_by_email' },
     ],
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: true,
+      allowUpdate: true,
+      fields: {
+        workshop_id: { label: 'Workshop', type: 'foreign_key', required: true, foreignKeyTable: 'workshop' },
+        profile_id: { label: 'Profile', type: 'foreign_key', required: true, foreignKeyTable: 'profile' },
+        requested_at: { label: 'Requested At', type: 'datetime', nullable: true },
+      },
+    },
   },
   'class-attendance': {
     label: 'Class Attendance',

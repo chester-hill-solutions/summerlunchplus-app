@@ -118,6 +118,34 @@ const foreignKeyOptions = async (
     return { workshop_id: options.filter(option => option.value) }
   }
 
+  if (tableName === 'class-enrollment') {
+    const [{ data: workshops }, { data: profiles }] = await Promise.all([
+      supabase
+        .from('workshop')
+        .select('id, description')
+        .order('description', { ascending: true }),
+      supabase
+        .from('profile')
+        .select('id, email, firstname, surname')
+        .order('email', { ascending: true }),
+    ])
+
+    const workshopOptions = ((workshops ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: workshopDisplay(row, id) }
+    })
+
+    const profileOptions = ((profiles ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: profileDisplay(row, id) }
+    })
+
+    return {
+      workshop_id: workshopOptions.filter(option => option.value),
+      profile_id: profileOptions.filter(option => option.value),
+    }
+  }
+
   if (tableName === 'form-question-map') {
     const [{ data: forms }, { data: questions }] = await Promise.all([
       supabase.from('form').select('id, name').order('name', { ascending: true }),
