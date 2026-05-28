@@ -342,7 +342,10 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     setFilters(prev => {
       const next = { ...prev }
       const normalized = normalizeFilterValues(values)
-      if (!normalized.length) {
+      const allOptions = filterOptionsByColumn[column] ?? []
+      const isAllSelected = allOptions.length > 0 && normalized.length === allOptions.length
+
+      if (!normalized.length || isAllSelected) {
         delete next[column]
       } else {
         next[column] = normalized
@@ -366,6 +369,12 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
       setPageSize(nextPageSize)
     }
     syncSearch(filters, sortColumn, sortStage, boundedPage, nextPageSize)
+  }
+
+  const effectiveSelectedValuesForColumn = (column: string) => {
+    const explicit = filters[column]
+    if (explicit && explicit.length) return explicit
+    return filterOptionsByColumn[column] ?? []
   }
 
   const isClassAttendance = tableName === 'class-attendance'
@@ -723,7 +732,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <button
                             type="button"
-                            onClick={() => updateFilterValues(column, filterOptionsByColumn[column] ?? [])}
+                            onClick={() => updateFilterValues(column, [])}
                             className="rounded border border-input px-2 py-1 hover:bg-muted"
                           >
                             Select all
@@ -743,7 +752,8 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               option.toLowerCase().includes((filterSearch[column] ?? '').toLowerCase())
                             )
                             .map(option => {
-                              const selected = (filters[column] ?? []).includes(option)
+                              const selectedValues = effectiveSelectedValuesForColumn(column)
+                              const selected = selectedValues.includes(option)
                               const labelText = option || '(empty)'
                               return (
                                 <label
@@ -755,7 +765,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                                     type="checkbox"
                                     checked={selected}
                                     onChange={event => {
-                                      const current = filters[column] ?? []
+                                      const current = effectiveSelectedValuesForColumn(column)
                                       if (event.target.checked) {
                                         updateFilterValues(column, [...current, option])
                                       } else {
