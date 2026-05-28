@@ -28,6 +28,40 @@ const toTime = (value: unknown) => {
 
 const isLikelyEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
+type RidingProfileRow = {
+  id: string
+  role: string | null
+  federal_electoral_district_name: string | null
+}
+
+type GuardianChildEdge = {
+  guardian_profile_id: string
+  child_profile_id: string
+  primary_child: boolean
+}
+
+const normalizeRiding = (value: unknown) =>
+  typeof value === 'string' && value.trim() ? value.trim() : null
+
+const pushEdge = (
+  map: Map<string, Array<{ profileId: string; primary: boolean }>>,
+  key: string,
+  profileId: string,
+  primary: boolean
+) => {
+  const current = map.get(key) ?? []
+  if (!current.some(item => item.profileId === profileId)) {
+    current.push({ profileId, primary })
+    current.sort((left, right) => Number(right.primary) - Number(left.primary))
+    map.set(key, current)
+  }
+}
+
+const preferredRelatedProfileId = (
+  map: Map<string, Array<{ profileId: string; primary: boolean }>>,
+  key: string
+) => map.get(key)?.[0]?.profileId ?? null
+
 export async function loader(args: Route.LoaderArgs) {
   const auth = await requireAuth(args.request)
   const base = await baseLoader(args)
@@ -92,6 +126,45 @@ export async function loader(args: Route.LoaderArgs) {
     }
   }
 
+  let profileById = new Map<string, RidingProfileRow>()
+  let guardiansByChildId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
+  let childrenByGuardianId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
+
+  if (profileIds.length) {
+    const { data: familyEdges, error: familyEdgesError } = await adminClient
+      .from('person_guardian_child')
+      .select('guardian_profile_id, child_profile_id, primary_child')
+      .or(`guardian_profile_id.in.(${profileIds.join(',')}),child_profile_id.in.(${profileIds.join(',')})`)
+
+    if (!familyEdgesError) {
+      for (const edge of (familyEdges ?? []) as GuardianChildEdge[]) {
+        pushEdge(guardiansByChildId, edge.child_profile_id, edge.guardian_profile_id, edge.primary_child)
+        pushEdge(childrenByGuardianId, edge.guardian_profile_id, edge.child_profile_id, edge.primary_child)
+      }
+    }
+
+    const profileScope = new Set<string>(profileIds)
+    for (const edgeList of guardiansByChildId.values()) {
+      for (const edge of edgeList) profileScope.add(edge.profileId)
+    }
+    for (const edgeList of childrenByGuardianId.values()) {
+      for (const edge of edgeList) profileScope.add(edge.profileId)
+    }
+
+    const { data: profileRows, error: profileRowsError } = await adminClient
+      .from('profile')
+      .select('id, role, federal_electoral_district_name')
+      .in('id', Array.from(profileScope))
+
+    if (!profileRowsError) {
+      profileById = new Map(
+        ((profileRows ?? []) as RidingProfileRow[])
+          .filter(profile => typeof profile.id === 'string' && profile.id)
+          .map(profile => [profile.id, profile])
+      )
+    }
+  }
+
   const enrichedRows: Array<Record<string, unknown>> = rows.map(row => {
     const workshopId = typeof row.workshop_id === 'string' ? row.workshop_id : ''
     const approved = workshopId ? approvedByWorkshopId.get(workshopId) ?? 0 : 0
@@ -99,9 +172,44 @@ export async function loader(args: Route.LoaderArgs) {
 
     const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
     const profileSignals = profileId ? openSignalsByProfileId.get(profileId) ?? [] : []
+    const enrollmentProfile = profileId ? profileById.get(profileId) ?? null : null
+
+    const inferredStudentProfileId = (() => {
+      if (!profileId) return null
+      if (enrollmentProfile?.role === 'student') return profileId
+      if (enrollmentProfile?.role === 'guardian') {
+        return preferredRelatedProfileId(childrenByGuardianId, profileId)
+      }
+
+      const directChild = preferredRelatedProfileId(childrenByGuardianId, profileId)
+      if (directChild) return directChild
+      return profileId
+    })()
+
+    const studentRiding = inferredStudentProfileId
+      ? normalizeRiding(profileById.get(inferredStudentProfileId)?.federal_electoral_district_name)
+      : null
+
+    const inferredParentProfileId = (() => {
+      if (!profileId) return null
+      if (inferredStudentProfileId) {
+        const guardianId = preferredRelatedProfileId(guardiansByChildId, inferredStudentProfileId)
+        if (guardianId) return guardianId
+      }
+      if (enrollmentProfile?.role === 'guardian') return profileId
+      return preferredRelatedProfileId(guardiansByChildId, profileId)
+    })()
+
+    const parentRiding = inferredParentProfileId
+      ? normalizeRiding(profileById.get(inferredParentProfileId)?.federal_electoral_district_name)
+      : null
+
+    const ridingDisplay = studentRiding ?? parentRiding ?? normalizeRiding(enrollmentProfile?.federal_electoral_district_name) ?? ''
+
     const baseRow = {
       ...row,
       enrolled_capacity: capacity === null ? `${approved}/-` : `${approved}/${capacity}`,
+      riding_display: ridingDisplay,
     }
 
     if (!profileSignals.length) {
@@ -144,13 +252,18 @@ export async function loader(args: Route.LoaderArgs) {
     return leftId.localeCompare(rightId)
   })
 
-  const columns = base.columns.includes('enrolled_capacity')
+  let columns = base.columns.includes('enrolled_capacity')
     ? base.columns
-    : [
-        ...base.columns.slice(0, 2),
-        'enrolled_capacity',
-        ...base.columns.slice(2),
-      ]
+    : [...base.columns.slice(0, 2), 'enrolled_capacity', ...base.columns.slice(2)]
+
+  if (!columns.includes('riding_display')) {
+    const profileIndex = columns.indexOf('profile_display')
+    if (profileIndex >= 0) {
+      columns = [...columns.slice(0, profileIndex + 1), 'riding_display', ...columns.slice(profileIndex + 1)]
+    } else {
+      columns = [...columns, 'riding_display']
+    }
+  }
 
   return {
     ...base,
@@ -160,6 +273,9 @@ export async function loader(args: Route.LoaderArgs) {
       ...(base.columnMeta ?? {}),
       enrolled_capacity: {
         label: 'enrolled/capacity',
+      },
+      riding_display: {
+        label: 'riding',
       },
     },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),

@@ -1,160 +1,42 @@
-AGENT HANDBOOK (~150 lines)
+# AGENTS.md
 
-Purpose: give coding agents a concise, practical map of this repository.
-Update this file whenever commands, conventions, or workflows change.
+High-signal guidance for OpenCode sessions in this repo.
 
----
+## Repo shape and entrypoints
+- Runtime app is `web/` (React Router v7 SSR + Vite + TS strict + Supabase).
+- Root `package.json` is not the app command source of truth; use `web/package.json` scripts.
+- App shell starts in `web/app/root.tsx`; route table is manually maintained in `web/app/routes.ts`.
+- Path aliases `~/` and `@/` both resolve to `web/app` (`web/tsconfig.json`).
 
-1) Workspace and git hygiene
-- Assume the tree may already contain user edits; do not reset/revert/delete work you did not create.
-- Never amend commits or force-push unless a human explicitly asks.
-- Keep diffs focused; avoid whole-file reformatting for small logic edits.
-- Use ASCII by default; keep Unicode only if the file already uses it.
-- Do not stage secrets (`.env.local`, Supabase service-role keys, other credentials).
-- Treat `supabase/migrations/` as generated output from schema changes.
+## Setup and environment
+- First-time local setup: copy `web/.env.template` to `web/.env.local`, then run Supabase locally and fill keys from `supabase status -o json`.
+- Local app/test base URL is `http://localhost:5173`.
+- `ONBOARDING_MODE` defaults to role-based behavior (`role` unless explicitly set to `permission` in server env).
+- Keep `SUPABASE_SECRET_KEY` server-only; never expose it in client code or loader data.
 
-2) AI instruction files (checked on 2026-05-19)
-- No Cursor rules found at `.cursor/rules/`.
-- No `.cursorrules` file found.
-- No Copilot rules found at `.github/copilot-instructions.md`.
-- If any of these files are added later, read and honor them before editing code.
+## Commands (run from `web/`)
+- Install deps: `npm install`
+- Dev server: `npm run dev`
+- Type gate (required before handoff): `npm run typecheck` (`react-router typegen && tsc`)
+- Build/serve: `npm run build` then `npm run start`
+- Tests: `npm run test` (Playwright over `tests/`)
+- Scoped tests: `npm run test:e2e`, `npm run test:unit`
 
-3) Project shape
-- Stack: React Router v7 SSR + Vite + Tailwind CSS v4 + TypeScript strict + Supabase.
-- App root: `web/app/root.tsx`.
-- Route config: `web/app/routes.ts`; route modules live in `web/app/routes/`.
-- Shared helpers: `web/app/lib`; Supabase helpers: `web/app/lib/supabase`.
-- Path aliases: `~/` and `@/` both map to `web/app` (see `web/tsconfig.json`).
-- Generated router types in `web/.react-router/types/` are read-only.
+## Playwright quirks and focused runs
+- If `PLAYWRIGHT_BASE_URL` is unset, Playwright auto-starts `npm run dev -- --port 5173`.
+- Single e2e file: `npm run test:e2e -- tests/e2e/guardian-signup-enroll.spec.ts`
+- File + title filter: `npm run test:e2e -- tests/e2e/guardian-signup-enroll.spec.ts --grep "guardian signs up"`
+- Title-only filter: `npm run test:e2e -- --grep "guardian signs up, completes pre-program survey, and enrolls"`
 
-4) Where to run commands
-- Run app commands from `web/` unless noted otherwise.
-- Root `package.json` is not the app runtime source of truth; `web/package.json` is.
-- Local default dev URL is `http://localhost:5173`.
+## Supabase workflow
+- Start local services from repo root: `supabase start --debug`; inspect keys/status with `supabase status -o json`.
+- Create migrations with CLI (`supabase migration new <name>`); do not hand-create or rename versions in `supabase/migrations/`.
+- Do not edit already-committed migrations; add a new forward-fix migration instead.
+- Typical schema flow: edit `supabase/schemas/*.sql` -> `supabase db diff -f <name>` -> `supabase migration up`.
+- After schema changes, regenerate DB types: `supabase gen types typescript --local > web/app/lib/database.types.ts`.
 
-5) Build/lint/test commands (from `web/`)
-- Install deps: `npm install`.
-- Dev server: `npm run dev`.
-- Type/lint gate: `npm run typecheck` (`react-router typegen && tsc`).
-- There is no dedicated eslint/prettier script in `web/package.json`.
-- Treat `npm run typecheck` as the required lint-quality gate.
-- Production build: `npm run build`.
-- Serve built app: `npm run start`.
-- All tests: `npm run test` (Playwright across `web/tests`).
-- All tests (headed): `npm run test:headed`.
-- E2E only: `npm run test:e2e`.
-- E2E only (headed): `npm run test:e2e:headed`.
-- Unit bucket only: `npm run test:unit`.
-- Unit bucket only (headed): `npm run test:unit:headed`.
-
-6) Single-test command patterns (important)
-- Single e2e file: `npm run test:e2e -- tests/e2e/guardian-signup-enroll.spec.ts`.
-- Specific file list (any bucket): `npm run test -- tests/e2e/guardian-signup-enroll.spec.ts tests/e2e/other.spec.ts`.
-- Filter by title only: `npm run test:e2e -- --grep "guardian signs up, completes pre-program survey, and enrolls"`.
-- File + title filter: `npm run test:e2e -- tests/e2e/guardian-signup-enroll.spec.ts --grep "guardian signs up"`.
-- Playwright auto-starts `npm run dev -- --port 5173` when `PLAYWRIGHT_BASE_URL` is unset.
-
-7) Supabase and schema workflow
-- Start local Supabase: `supabase start --debug`.
-- Check local status/keys: `supabase status -o json`.
-- Migration creation (required): run `supabase migration new <name>` for manual SQL migrations.
-- Never hand-create files in `supabase/migrations/` and never rename migration versions manually.
-- Never edit an existing migration file once committed/shared; create a new migration for follow-up changes.
-- Keep migration versions unique and strictly increasing to avoid collisions/skipped applies.
-- Schema flow: edit `supabase/schemas/*.sql` -> `supabase db diff -f <name>` (or manual migration) -> `supabase migration up`.
-- If a migration failed after partial changes, do not mutate old files; add a new migration that fixes forward.
-- Verify migration application with `supabase migration list` and confirm new versions appear where expected.
-- Regenerate DB types (local): `supabase gen types typescript --local > web/app/lib/database.types.ts`.
-- Regenerate DB types (remote): `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
-
-8) Import conventions
-- Prefer 3 import blocks with blank lines: external, alias (`@/` or `~/`), then relative.
-- Use `import type` for type-only symbols (`verbatimModuleSyntax` is enabled).
-- Prefer named exports in shared modules; keep default exports where route modules require them.
-- Never edit generated files under `web/.react-router/types/` manually.
-
-9) Formatting conventions
-- Match local style in each touched file (many files use 2 spaces and no semicolons).
-- Quote style is mixed; preserve existing quote style in the file you edit.
-- Avoid mass import sorting or quote normalization unless requested.
-- Keep Tailwind class strings literal and token-based.
-- Avoid computed class fragments that could break Tailwind scanning.
-- Add comments only when clarifying non-obvious behavior.
-
-10) TypeScript guidelines
-- `strict` mode is enabled; avoid `any`.
-- Reuse Supabase types from `web/app/lib/database.types.ts`.
-- Reuse route `+types` (for example `./+types/<route>`) in loaders/actions.
-- Keep server/client boundaries explicit; do not import server-only modules in client paths.
-- Use narrow, validated types for `formData` fields and route params.
-
-11) Naming conventions
-- React components and exported hooks: PascalCase.
-- Functions, variables, helpers, selectors: camelCase.
-- Shared constants: SCREAMING_SNAKE_CASE.
-- Route filenames: hyphenated (for example `forgot-password.tsx`); use `index.tsx` only for index routes.
-
-12) Router and route-module patterns
-- Route modules usually export `loader`, `action`, and a default component in one file.
-- After adding/removing routes, update `web/app/routes.ts`.
-- Run `npm run typecheck` after route changes to refresh router-generated types.
-- Keep route-specific helpers near the route unless reused broadly.
-
-13) Data loading and mutations
-- Use `useFetcher`/`fetcher.Form` for non-navigating mutations.
-- Always `await request.formData()` and validate/cast inputs defensively.
-- On auth-sensitive responses, preserve Supabase session headers on `redirect()`/JSON responses.
-- Keep privileged operations server-side only.
-
-14) Auth and security rules
-- `VITE_SUPABASE_*` values are client-safe; keep `SUPABASE_SECRET_KEY` server-only.
-- Never expose service-role credentials in browser code or serialized loader data.
-- Merge metadata updates (`{ ...existing, ...updates }`) to avoid dropping keys.
-- Validate and sanitize server-read params and form values.
-
-15) Error handling expectations
-- Fail early in protected loaders/actions (redirect unauthenticated users).
-- Return user-friendly messages for expected failures.
-- For unexpected failures, log with `console.error` and return/throw controlled responses.
-- Use route error boundaries with `isRouteErrorResponse` when possible.
-
-16) UI and accessibility practices
-- Reuse primitives in `web/app/components/ui/*` before creating new ones.
-- Keep label/input pairing intact (`<Label htmlFor>` with matching input `id`).
-- Preserve focus/hover/active states and existing spacing rhythm.
-- Keep responsive behavior aligned to existing breakpoints/tokens.
-- Use `cn()` from `web/app/lib/utils.ts` for conditional class composition.
-- For auth sticker backdrops, use solid backgrounds only (no gradient backgrounds).
-- For emails, apply all styling inline (`style="..."`) and do not rely on `<style>` blocks; inline styles are required to preserve formatting during forwarding.
-
-17) Testing and QA expectations
-- Test files live under `web/tests/e2e` and `web/tests/unit` (both run via Playwright).
-- For auth changes, manually verify login, sign-up, password reset, and protected redirects.
-- Prefer targeted test commands first, then full suite only when needed.
-- In handoff notes, list commands run and any manual QA performed.
-- If a command cannot be run, say why and provide exact follow-up verify steps.
-
-18) Agent editing workflow
-- Prefer `Read`/`Glob`/`Grep` for code inspection over ad-hoc shell searching.
-- Keep changes minimal and consistent with neighboring code.
-- Avoid broad refactors unless requested or required for correctness.
-- Do not introduce new dependencies without clear need.
-
-19) Pre-handoff checklist
-- Minimum for substantial code changes: run `npm run typecheck`.
-- If dependencies/config/build behavior changed: run `npm run build`.
-- If behavior changed: run relevant targeted tests (single-file/test-title filters first).
-- If schema changed: regenerate `web/app/lib/database.types.ts`.
-
-20) Default decision rules for agents
-- If a rule is ambiguous, follow existing nearby code patterns first.
-- If a change touches auth/session behavior, preserve headers and test redirects.
-- If a change touches routes or schemas, run regeneration commands before handoff.
-- If uncertain about style, prefer minimal edits over broad cleanup.
-
-21) Maintenance note
-- Keep this handbook near 150 lines.
-- Keep command examples current with `web/package.json` and `web/playwright.config.ts`.
-- Update this file whenever workflows, conventions, or tooling change.
-
-End of handbook.
+## Generated files and auth/session gotchas
+- Never manually edit generated router types in `web/.react-router/types/`.
+- Route modules commonly import generated `./+types/*`; rerun `npm run typecheck` after route changes.
+- Server auth helpers (`web/app/lib/supabase/server.ts`) return `headers`; preserve/pass these headers on auth redirects/responses or sessions can break.
+- Email templates under `supabase/templates/` are inline-styled HTML; keep styles inline (no `<style>` blocks).

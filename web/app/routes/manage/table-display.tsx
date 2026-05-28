@@ -1,6 +1,8 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'react-router'
+import { Filter } from 'lucide-react'
 
 import { Combobox } from '@/components/ui/combobox'
 import { Constants, type Database } from '@/lib/database.types'
@@ -45,6 +47,12 @@ type LoaderData = {
 }
 
 const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500] as const
+const FILTER_EMPTY_TOKEN = '__none__'
+const FILTER_POPOVER_WIDTH = 256
+const FILTER_POPOVER_MARGIN = 8
+const FILTER_POPOVER_ESTIMATED_HEIGHT = 340
+const hasOwn = (obj: object, key: string) => Object.prototype.hasOwnProperty.call(obj, key)
 
 const isTimestampColumn = (column: string) => column.endsWith('_at') || timestampColumns.has(column)
 
@@ -106,6 +114,9 @@ const getDirectionIndicator = (stage: 0 | 1 | 2) => {
   if (stage === 2) return '↑'
   return ''
 }
+
+const normalizeFilterValues = (values: string[]) =>
+  Array.from(new Set(values.filter(value => value !== undefined)))
 
 const toLocalDateTimeValue = (value: unknown) =>
   typeof value === 'string' && value ? toLocalDateTimeInputValue(value) : ''
@@ -187,26 +198,49 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
   const [searchParams, setSearchParams] = useSearchParams()
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortStage, setSortStage] = useState<0 | 1 | 2>(0)
-  const [filters, setFilters] = useState<Record<string, string>>({})
+  const [filters, setFilters] = useState<Record<string, string[]>>({})
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(50)
+  const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null)
+  const [filterSearch, setFilterSearch] = useState<Record<string, string>>({})
+  const [filterPopoverPosition, setFilterPopoverPosition] = useState<{ top: number; left: number } | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [createValues, setCreateValues] = useState<Record<string, string>>({})
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Record<string, string>>({})
+  const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const filterPopoverRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const nextSort = searchParams.get('sort')
     const nextDir = searchParams.get('dir')
-    const nextFilters = Array.from(searchParams.entries()).reduce<Record<string, string>>((acc, [key, value]) => {
-      if (key.startsWith('f_')) {
-        acc[key.slice(2)] = value
+    const nextFilters = columns.reduce<Record<string, string[]>>((acc, column) => {
+      const values = normalizeFilterValues(searchParams.getAll(`f_${column}`))
+      if (!values.length) {
+        return acc
+      }
+      const explicitValues = values.filter(value => value !== FILTER_EMPTY_TOKEN)
+      const hasEmptySelection = values.includes(FILTER_EMPTY_TOKEN)
+      if (hasEmptySelection && !explicitValues.length) {
+        acc[column] = []
+      } else if (explicitValues.length) {
+        acc[column] = explicitValues
       }
       return acc
     }, {})
+    const nextPageRaw = Number(searchParams.get('page') ?? '1')
+    const nextPage = Number.isFinite(nextPageRaw) && nextPageRaw > 0 ? Math.floor(nextPageRaw) : 1
+    const nextPageSizeRaw = Number(searchParams.get('pageSize') ?? '50')
+    const nextPageSize = PAGE_SIZE_OPTIONS.includes(nextPageSizeRaw as (typeof PAGE_SIZE_OPTIONS)[number])
+      ? nextPageSizeRaw
+      : 50
 
     setSortColumn(nextSort)
     setSortStage(nextSort ? (nextDir === 'asc' ? 2 : 1) : 0)
     setFilters(nextFilters)
-  }, [searchParams])
+    setPage(nextPage)
+    setPageSize(nextPageSize)
+  }, [searchParams, columns])
 
   useEffect(() => {
     if (!editorFetcher.data?.success) return
@@ -216,35 +250,54 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     setEditValues({})
   }, [editorFetcher.data])
 
-  const syncSearch = (nextFilters: Record<string, string>, nextSortColumn: string | null, nextSortStage: 0 | 1 | 2) => {
+  const syncSearch = (
+    nextFilters: Record<string, string[]>,
+    nextSortColumn: string | null,
+    nextSortStage: 0 | 1 | 2,
+    nextPage: number,
+    nextPageSize: number
+  ) => {
     const next = new URLSearchParams()
     if (nextSortColumn && nextSortStage > 0) {
       next.set('sort', nextSortColumn)
       next.set('dir', nextSortStage === 2 ? 'asc' : 'desc')
     }
-    for (const [column, value] of Object.entries(nextFilters)) {
-      if (value) {
-        next.set(`f_${column}`, value)
+    for (const column of columns) {
+      if (!hasOwn(nextFilters, column)) continue
+      const values = nextFilters[column] ?? []
+      if (!values.length) {
+        next.append(`f_${column}`, FILTER_EMPTY_TOKEN)
+        continue
       }
+      for (const value of values) {
+        next.append(`f_${column}`, value)
+      }
+    }
+    if (nextPage > 1) {
+      next.set('page', String(nextPage))
+    }
+    if (nextPageSize !== 50) {
+      next.set('pageSize', String(nextPageSize))
     }
     setSearchParams(next, { replace: true })
   }
 
+  const rowMatchesFilters = (
+    row: Record<string, unknown>,
+    nextFilters: Record<string, string[]>,
+    excludedColumn?: string
+  ) =>
+    columns.every(column => {
+      if (column === excludedColumn) return true
+      if (!hasOwn(nextFilters, column)) return true
+      const selectedValues = nextFilters[column] ?? []
+      if (!selectedValues.length) return false
+      const cellValue = getCellValue(column, row, tableName)
+      return selectedValues.includes(cellValue)
+    })
+
   const derivedRows = useMemo(() => {
-    let adjustedRows = [...rows]
-    adjustedRows = adjustedRows.filter(row =>
-      columns.every(column => {
-        const filter = filters[column]
-        if (!filter) return true
-        const tokens = filter
-          .split(',')
-          .map(token => token.trim())
-          .filter(Boolean)
-        if (!tokens.length) return true
-        const cellValue = getCellValue(column, row, tableName).toLowerCase()
-        return tokens.some(token => cellValue.includes(token.toLowerCase()))
-      })
-    )
+    let adjustedRows = rows.filter(row => rowMatchesFilters(row, filters))
     if (sortColumn && sortStage > 0) {
       adjustedRows.sort((a, b) => {
         const aValue = getCellValue(sortColumn, a)
@@ -257,47 +310,170 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     return adjustedRows
   }, [rows, columns, filters, sortColumn, sortStage, tableName])
 
+  const filterOptionsByColumn = useMemo(() => {
+    return columns.reduce<Record<string, string[]>>((acc, column) => {
+      const nextOptions = new Set<string>()
+      for (const row of rows) {
+        if (!rowMatchesFilters(row, filters, column)) continue
+        nextOptions.add(getCellValue(column, row, tableName))
+      }
+      acc[column] = Array.from(nextOptions).sort((a, b) => a.localeCompare(b))
+      return acc
+    }, {})
+  }, [columns, rows, filters, tableName])
+
+  const totalRows = derivedRows.length
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
+  const effectivePage = Math.min(page, totalPages)
+
+  useEffect(() => {
+    if (effectivePage === page) return
+    setPage(effectivePage)
+    syncSearch(filters, sortColumn, sortStage, effectivePage, pageSize)
+  }, [effectivePage, page, filters, sortColumn, sortStage, pageSize])
+
+  const paginatedRows = useMemo(() => {
+    const start = (effectivePage - 1) * pageSize
+    return derivedRows.slice(start, start + pageSize)
+  }, [derivedRows, effectivePage, pageSize])
+
   const updateSort = (column: string) => {
     if (sortColumn !== column) {
       const nextStage: 0 | 1 | 2 = 1
       setSortColumn(column)
       setSortStage(nextStage)
-      syncSearch(filters, column, nextStage)
+      setPage(1)
+      syncSearch(filters, column, nextStage, 1, pageSize)
       return
     }
     setSortStage(prev => {
       const next = prev + 1
       if (next > 2) {
         setSortColumn(null)
-        syncSearch(filters, null, 0)
+        setPage(1)
+        syncSearch(filters, null, 0, 1, pageSize)
         return 0
       }
-      syncSearch(filters, column, next as 0 | 1 | 2)
+      setPage(1)
+      syncSearch(filters, column, next as 0 | 1 | 2, 1, pageSize)
       return next as 0 | 1 | 2
     })
   }
 
-  const updateFilter = (column: string, value: string) => {
+  const updateFilterValues = (column: string, values: string[], emptyBehavior: 'none' | 'all' = 'none') => {
     setFilters(prev => {
-      const next = { ...prev, [column]: value }
-      syncSearch(next, sortColumn, sortStage)
+      const next = { ...prev }
+      const normalized = normalizeFilterValues(values)
+      const allOptions = filterOptionsByColumn[column] ?? []
+      const isAllSelected = allOptions.length > 0 && normalized.length === allOptions.length
+
+      if (!normalized.length) {
+        if (emptyBehavior === 'all') {
+          delete next[column]
+        } else {
+          next[column] = []
+        }
+      } else if (isAllSelected) {
+        delete next[column]
+      } else {
+        next[column] = normalized
+      }
+      setPage(1)
+      syncSearch(next, sortColumn, sortStage, 1, pageSize)
       return next
     })
   }
 
-  const appendFilter = (column: string, value: string) => {
-    if (!value) return
-    setFilters(prev => {
-      const current = prev[column] ?? ''
-      if (current.toLowerCase().includes(value.toLowerCase())) {
-        return prev
-      }
-      const nextValue = current ? `${current}, ${value}` : value
-      const next = { ...prev, [column]: nextValue }
-      syncSearch(next, sortColumn, sortStage)
-      return next
-    })
+  const setColumnUnfiltered = (column: string) => {
+    updateFilterValues(column, [], 'all')
   }
+
+  const clearColumnFilter = (column: string) => {
+    updateFilterValues(column, [], 'none')
+  }
+
+  const appendFilter = (column: string, value: string) => {
+    const current = filters[column] ?? []
+    if (current.includes(value)) return
+    updateFilterValues(column, [...current, value])
+  }
+
+  const setPageAndSync = (nextPage: number, nextPageSize = pageSize) => {
+    const boundedPage = Math.max(1, nextPage)
+    setPage(boundedPage)
+    if (nextPageSize !== pageSize) {
+      setPageSize(nextPageSize)
+    }
+    syncSearch(filters, sortColumn, sortStage, boundedPage, nextPageSize)
+  }
+
+  const effectiveSelectedValuesForColumn = (column: string) => {
+    if (hasOwn(filters, column)) {
+      return filters[column] ?? []
+    }
+    return filterOptionsByColumn[column] ?? []
+  }
+
+  const updateFilterPopoverPosition = () => {
+    if (!openFilterColumn) {
+      setFilterPopoverPosition(null)
+      return
+    }
+
+    const button = filterButtonRefs.current[openFilterColumn]
+    if (!button) return
+
+    const rect = button.getBoundingClientRect()
+    const popoverHeight = filterPopoverRef.current?.offsetHeight ?? FILTER_POPOVER_ESTIMATED_HEIGHT
+    let left = rect.right - FILTER_POPOVER_WIDTH
+    left = Math.max(
+      FILTER_POPOVER_MARGIN,
+      Math.min(left, window.innerWidth - FILTER_POPOVER_WIDTH - FILTER_POPOVER_MARGIN)
+    )
+
+    let top = rect.bottom + 4
+    const estimatedBottom = top + popoverHeight
+    if (estimatedBottom > window.innerHeight - FILTER_POPOVER_MARGIN) {
+      top = Math.max(FILTER_POPOVER_MARGIN, rect.top - popoverHeight - 4)
+    }
+
+    setFilterPopoverPosition({ top, left })
+  }
+
+  useEffect(() => {
+    if (!openFilterColumn) {
+      setFilterPopoverPosition(null)
+      return
+    }
+
+    updateFilterPopoverPosition()
+
+    const onWindowChange = () => updateFilterPopoverPosition()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenFilterColumn(null)
+      }
+    }
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      const button = filterButtonRefs.current[openFilterColumn]
+      const popover = filterPopoverRef.current
+      if (button?.contains(target) || popover?.contains(target)) return
+      setOpenFilterColumn(null)
+    }
+
+    window.addEventListener('resize', onWindowChange)
+    window.addEventListener('scroll', onWindowChange, true)
+    window.addEventListener('keydown', onKeyDown)
+    document.addEventListener('mousedown', onMouseDown)
+
+    return () => {
+      window.removeEventListener('resize', onWindowChange)
+      window.removeEventListener('scroll', onWindowChange, true)
+      window.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('mousedown', onMouseDown)
+    }
+  }, [openFilterColumn])
 
   const isClassAttendance = tableName === 'class-attendance'
   const isWorkshopEnrollment = tableName === 'class-enrollment'
@@ -512,12 +688,25 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     )
   }
 
+  const openFilterOptions = openFilterColumn
+    ? filterOptionsByColumn[openFilterColumn] ?? []
+    : []
+  const openFilterSearch = openFilterColumn ? filterSearch[openFilterColumn] ?? '' : ''
+  const visibleFilterOptions = openFilterOptions.filter(option =>
+    option.toLowerCase().includes(openFilterSearch.toLowerCase())
+  )
+  const openFilterSelectedValues = openFilterColumn
+    ? effectiveSelectedValuesForColumn(openFilterColumn)
+    : []
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">{label}</h1>
-          <p className="text-sm text-muted-foreground">Showing live entries from the {label.toLowerCase()} table ({derivedRows.length} rows).</p>
+          <p className="text-sm text-muted-foreground">
+            Showing live entries from the {label.toLowerCase()} table ({totalRows} rows).
+          </p>
           <p className="text-xs text-muted-foreground">Time values shown in {displayTimeZone}.</p>
         </div>
         {headerActions ? <div className="ml-auto">{headerActions}</div> : null}
@@ -561,73 +750,106 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
 
       {editorFetcher.data?.error ? <p className="text-sm text-destructive">{editorFetcher.data.error}</p> : null}
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Page {effectivePage} of {totalPages}
+        </p>
+        <div className="flex items-center gap-2 text-xs">
+          <label className="text-muted-foreground" htmlFor="page-size">
+            Rows per page
+          </label>
+          <select
+            id="page-size"
+            value={pageSize}
+            onChange={event => {
+              const nextPageSize = Number(event.target.value)
+              if (!PAGE_SIZE_OPTIONS.includes(nextPageSize as (typeof PAGE_SIZE_OPTIONS)[number])) return
+              setPageAndSync(1, nextPageSize)
+            }}
+            className="h-8 rounded border border-input bg-background px-2"
+          >
+            {PAGE_SIZE_OPTIONS.map(option => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setPageAndSync(effectivePage - 1)}
+            disabled={effectivePage <= 1}
+            className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            onClick={() => setPageAndSync(effectivePage + 1)}
+            disabled={effectivePage >= totalPages}
+            className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+
       <div className="overflow-x-auto rounded-lg border">
-        <table className="min-w-max table-auto text-sm">
+        <table className="w-full table-auto text-sm">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground">
             <tr>
-              {columns.map(column => (
-                <th
-                  key={`head-${column}`}
-                  className={isNumericColumn(column) ? 'w-24 px-4 py-2 text-left' : 'px-4 py-2 text-left'}
-                >
-                  <button
-                    type="button"
-                    onClick={() => updateSort(column)}
-                    className="flex items-center gap-1 font-semibold hover:underline hover:underline-offset-4"
+              {columns.map(column => {
+                const hasActiveFilter = hasOwn(filters, column)
+                return (
+                  <th
+                    key={`head-${column}`}
+                    className={isNumericColumn(column) ? 'w-24 px-4 py-2 text-left' : 'px-4 py-2 text-left'}
                   >
-                    {(columnMeta[column]?.label ?? column).replace(/_/g, ' ')}
-                    {getDirectionIndicator(sortColumn === column ? sortStage : 0)}
-                  </button>
-                </th>
-              ))}
-              {canInlineUpdate ? <th className="px-4 py-2 text-left">actions</th> : null}
-            </tr>
-            <tr className="bg-muted/10">
-              {columns.map(column => (
-                <th key={`filter-${column}`} className="px-4 py-1">
-                  {columnMeta[column]?.filterable === false ? null : (
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={filters[column] ?? ''}
-                        onChange={event => updateFilter(column, event.target.value)}
-                        placeholder="Filter"
-                        className={
-                          isNumericColumn(column)
-                            ? 'w-full max-w-24 rounded border border-border px-2 py-1 pr-7 text-xs'
-                            : 'w-full rounded border border-border px-2 py-1 pr-7 text-xs'
-                        }
-                      />
-                      {filters[column] ? (
+                    <div className="relative flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => updateSort(column)}
+                        className="flex min-w-0 items-center gap-1 font-semibold hover:underline hover:underline-offset-4"
+                      >
+                        <span className="truncate">{(columnMeta[column]?.label ?? column).replace(/_/g, ' ')}</span>
+                        {getDirectionIndicator(sortColumn === column ? sortStage : 0)}
+                      </button>
+                      {columnMeta[column]?.filterable === false ? null : (
                         <button
                           type="button"
-                          onClick={() => updateFilter(column, '')}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                          aria-label={`Clear ${column} filter`}
+                          ref={element => {
+                            filterButtonRefs.current[column] = element
+                          }}
+                          onClick={event => {
+                            event.stopPropagation()
+                            setOpenFilterColumn(prev => (prev === column ? null : column))
+                          }}
+                          className={`ml-auto rounded p-1 hover:bg-muted ${hasActiveFilter ? 'text-foreground' : 'text-muted-foreground'}`}
+                          aria-label={`Filter ${column}`}
                         >
-                          x
+                          <Filter className={`size-3.5 ${hasActiveFilter ? 'fill-current' : ''}`} />
                         </button>
-                      ) : null}
+                      )}
                     </div>
-                  )}
-                </th>
-              ))}
-              {canInlineUpdate ? <th className="px-4 py-1" /> : null}
+                  </th>
+                )
+              })}
+              {canInlineUpdate ? <th className="px-4 py-2 text-left">actions</th> : null}
             </tr>
           </thead>
           <tbody>
-            {derivedRows.map((row, rowIndex) => {
+            {paginatedRows.map((row, rowIndex) => {
+              const absoluteRowIndex = (effectivePage - 1) * pageSize + rowIndex
               const rowKey = rowKeyFor(row, editorConfig)
               const isEditing = Boolean(canInlineUpdate && editingRowKey === rowKey)
 
               return (
-                <Fragment key={`fragment-${rowKey || rowIndex}`}>
+                <Fragment key={`fragment-${rowKey || absoluteRowIndex}`}>
                   <tr
-                    key={`row-${rowIndex}`}
+                    key={`row-${absoluteRowIndex}`}
                     className={
                       typeof row._row_class === 'string'
                         ? row._row_class
-                        : rowIndex % 2 === 0
+                        : absoluteRowIndex % 2 === 0
                           ? 'bg-card'
                           : ''
                     }
@@ -636,7 +858,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                       if (isClassAttendance && column === 'status' && canEditStatus) {
                         const statusValue = typeof row.status === 'string' ? row.status : ''
                         return (
-                          <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2 font-mono">
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={statusValue || '(empty)'}>
                             <select
                               value={statusValue}
                               onChange={event => updateAttendanceStatus(row, event.target.value)}
@@ -662,7 +884,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               : ''
 
                         return (
-                          <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2 font-mono">
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={cameraValue || '(empty)'}>
                             <select
                               value={cameraValue}
                               onChange={event => updateAttendanceCameraOn(row, event.target.value)}
@@ -679,7 +901,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                       if (isWorkshopEnrollment && column === 'status' && canEditStatus) {
                         const statusValue = typeof row.status === 'string' ? row.status : ''
                         return (
-                          <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2 font-mono">
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={statusValue || '(empty)'}>
                             <select
                               value={statusValue}
                               onChange={event => updateWorkshopEnrollmentStatus(row, event.target.value)}
@@ -698,7 +920,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                       if (tableName === 'email-message' && column === 'resend') {
                         const emailMessageId = typeof row.id === 'string' ? row.id : ''
                         return (
-                          <td key={`cell-${rowIndex}-${column}`} className="px-4 py-2">
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="Resend email message">
                             <button
                               type="button"
                               disabled={!emailMessageId || statusFetcher.state === 'submitting'}
@@ -727,12 +949,12 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
 
                       return (
                         <td
-                          key={`cell-${rowIndex}-${column}`}
-                          title={cellValue}
+                          key={`cell-${absoluteRowIndex}-${column}`}
+                          title={cellValue || '(empty)'}
                           className={
                             isNumericColumn(column)
                               ? 'w-24 cursor-pointer whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums hover:bg-muted/30'
-                              : `${shouldTruncate ? 'max-w-xs truncate' : 'whitespace-nowrap'} cursor-pointer px-4 py-2 font-mono hover:bg-muted/30`
+                              : 'cursor-pointer px-4 py-2 font-mono hover:bg-muted/30'
                           }
                           onClick={() => {
                             if (!filterable) return
@@ -750,7 +972,9 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               onClick={event => event.stopPropagation()}
                               className="underline decoration-dotted underline-offset-2 hover:text-primary"
                             >
-                              {cellValue}
+                              <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
+                                {cellValue}
+                              </span>
                             </Link>
                           ) : isFormAnswersLink ? (
                             <Link
@@ -763,7 +987,9 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               onClick={event => event.stopPropagation()}
                               className="underline decoration-dotted underline-offset-2 hover:text-primary"
                             >
-                              {cellValue}
+                              <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
+                                {cellValue}
+                              </span>
                             </Link>
                           ) : personLink ? (
                             <Link
@@ -771,16 +997,20 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               onClick={event => event.stopPropagation()}
                               className="underline decoration-dotted underline-offset-2 hover:text-primary"
                             >
-                              {cellValue}
+                              <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
+                                {cellValue}
+                              </span>
                             </Link>
                           ) : (
-                            cellValue
+                            <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
+                              {cellValue}
+                            </span>
                           )}
                         </td>
                       )
                     })}
                     {canInlineUpdate ? (
-                      <td className="px-4 py-2">
+                      <td className="px-4 py-2" title={isEditing ? 'Cancel editing row' : 'Edit row'}>
                         <button
                           type="button"
                           className="rounded border border-input px-2 py-1 text-xs"
@@ -826,6 +1056,83 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
           </tbody>
         </table>
       </div>
+
+      {openFilterColumn && filterPopoverPosition
+        ? createPortal(
+            <div
+              ref={filterPopoverRef}
+              style={{
+                position: 'fixed',
+                top: `${filterPopoverPosition.top}px`,
+                left: `${filterPopoverPosition.left}px`,
+                width: `${FILTER_POPOVER_WIDTH}px`,
+              }}
+              className="z-50 rounded-md border bg-popover p-2 text-xs text-popover-foreground shadow-lg"
+            >
+              <input
+                type="text"
+                value={openFilterSearch}
+                onChange={event => {
+                  const nextValue = event.target.value
+                  setFilterSearch(prev => ({ ...prev, [openFilterColumn]: nextValue }))
+                }}
+                placeholder="Search options"
+                className="mb-2 h-8 w-full rounded border border-input bg-background px-2 text-xs"
+              />
+
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setColumnUnfiltered(openFilterColumn)}
+                  className="rounded border border-input px-2 py-1 hover:bg-muted"
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => clearColumnFilter(openFilterColumn)}
+                  className="rounded border border-input px-2 py-1 hover:bg-muted"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <div className="max-h-56 space-y-1 overflow-auto rounded border border-border/50 p-1">
+                {visibleFilterOptions.map(option => {
+                  const selected = openFilterSelectedValues.includes(option)
+                  const labelText = option || '(empty)'
+                  return (
+                    <label
+                      key={`${openFilterColumn}-${option || '__empty__'}`}
+                      className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-accent"
+                      title={labelText}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={event => {
+                          if (event.target.checked) {
+                            updateFilterValues(openFilterColumn, [...openFilterSelectedValues, option])
+                          } else {
+                            updateFilterValues(
+                              openFilterColumn,
+                              openFilterSelectedValues.filter(value => value !== option)
+                            )
+                          }
+                        }}
+                      />
+                      <span className="truncate">{labelText}</span>
+                    </label>
+                  )
+                })}
+                {visibleFilterOptions.length === 0 ? (
+                  <p className="px-1 py-2 text-muted-foreground">No options</p>
+                ) : null}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   )
 }
