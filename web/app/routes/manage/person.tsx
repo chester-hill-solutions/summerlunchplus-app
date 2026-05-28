@@ -168,6 +168,8 @@ export default function ManagePersonLayoutPage() {
   const data = useLoaderData() as PersonLoaderData
   const { profile, suspiciousSignals } = data
   const location = useLocation()
+  const returnTo = new URLSearchParams(location.search).get('returnTo')
+  const backTo = returnTo && returnTo.startsWith('/') ? returnTo : '/manage/participants'
   const openSignalCount = suspiciousSignals.filter(signal => signal.status === 'open').length
 
   return (
@@ -183,7 +185,7 @@ export default function ManagePersonLayoutPage() {
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <Link to="/manage/participants">Back to participants</Link>
+          <Link to={backTo}>Back</Link>
         </Button>
       </div>
 

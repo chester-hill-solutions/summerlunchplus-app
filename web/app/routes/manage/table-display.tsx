@@ -138,29 +138,36 @@ const rowKeyFor = (row: Record<string, unknown>, editorConfig?: EditorConfig) =>
 const personLinkForCell = (
   tableName: string,
   column: string,
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
+  returnTo: string
 ) => {
+  const withReturnTo = (pathname: string, params: Record<string, string>) => {
+    const search = new URLSearchParams(params)
+    search.set('returnTo', returnTo)
+    return `${pathname}?${search.toString()}`
+  }
+
   const profileId =
     (typeof row.profile_id === 'string' && row.profile_id) ||
     (typeof row.id === 'string' && (tableName === 'profile' || tableName === 'participants') ? row.id : '')
 
   if (column === 'profile_display' && profileId) {
-    return `/manage/person?profileId=${encodeURIComponent(profileId)}`
+    return withReturnTo('/manage/person', { profileId })
   }
   if (column === 'subject_profile_display' && typeof row.subject_profile_id === 'string') {
-    return `/manage/person?profileId=${encodeURIComponent(row.subject_profile_id)}`
+    return withReturnTo('/manage/person', { profileId: row.subject_profile_id })
   }
   if (column === 'suspicious_signal' && profileId) {
-    return `/manage/person/discrepancies?profileId=${encodeURIComponent(profileId)}`
+    return withReturnTo('/manage/person/discrepancies', { profileId })
   }
   if (column === 'guardian_display' && typeof row.guardian_profile_id === 'string') {
-    return `/manage/person?profileId=${encodeURIComponent(row.guardian_profile_id)}`
+    return withReturnTo('/manage/person', { profileId: row.guardian_profile_id })
   }
   if (column === 'child_display' && typeof row.child_profile_id === 'string') {
-    return `/manage/person?profileId=${encodeURIComponent(row.child_profile_id)}`
+    return withReturnTo('/manage/person', { profileId: row.child_profile_id })
   }
   if ((tableName === 'profile' || tableName === 'participants') && ['email', 'firstname', 'surname', 'role', 'is_user'].includes(column) && profileId) {
-    return `/manage/person?profileId=${encodeURIComponent(profileId)}`
+    return withReturnTo('/manage/person', { profileId })
   }
 
   const userIdColumns: Record<string, string> = {
@@ -173,7 +180,7 @@ const personLinkForCell = (
   }
   const userIdColumn = userIdColumns[column]
   if (userIdColumn && typeof row[userIdColumn] === 'string' && row[userIdColumn]) {
-    return `/manage/person?userId=${encodeURIComponent(String(row[userIdColumn]))}`
+    return withReturnTo('/manage/person', { userId: String(row[userIdColumn]) })
   }
 
   return null
@@ -946,7 +953,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
 
                       const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
                       const isFormAnswersLink = tableName === 'form' && column === 'answers' && typeof row.id === 'string'
-                      const personLink = personLinkForCell(tableName, column, row)
+                      const personLink = personLinkForCell(tableName, column, row, `${location.pathname}${location.search}`)
                       const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
                       const filterable = columnMeta[column]?.filterable ?? true
                       const cellValue = getCellValue(column, row, tableName)
