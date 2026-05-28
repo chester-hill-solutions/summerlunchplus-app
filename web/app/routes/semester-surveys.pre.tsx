@@ -291,7 +291,7 @@ export default function SemesterPreSurveyPage() {
   const { semesterId, formName, formId, questions, answers, returnTo } = useLoaderData() as LoaderData
   const actionData = useActionData() as ActionData | undefined
   const navigation = useNavigation()
-  const isSubmitting = navigation.state === 'submitting'
+  const isSubmitting = navigation.state !== 'idle'
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-10">
@@ -327,7 +327,7 @@ export default function SemesterPreSurveyPage() {
                 <Link to="/home">Cancel</Link>
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Saving...' : 'Save and continue'}
+                {isSubmitting ? 'Loading next step...' : 'Save and continue'}
               </Button>
             </div>
           </Form>

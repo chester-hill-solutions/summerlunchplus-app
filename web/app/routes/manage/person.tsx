@@ -14,6 +14,7 @@ const personTabs = [
   { to: '/manage/person', label: 'Overview' },
   { to: '/manage/person/family', label: 'Family' },
   { to: '/manage/person/enrollments', label: 'Enrollments' },
+  { to: '/manage/person/form-submissions', label: 'Form submissions' },
   { to: '/manage/person/attendance', label: 'Attendance' },
   { to: '/manage/person/discrepancies', label: 'Discrepancies' },
 ]
@@ -93,6 +94,39 @@ export async function loader({ request }: LoaderFunctionArgs) {
     signal.family_profile_ids?.some(profileId => familyProfileIds.includes(profileId))
   )
 
+  const familyUserIds = Array.from(
+    new Set(familyProfiles.map(profile => profile.user_id).filter((userId): userId is string => Boolean(userId)))
+  )
+
+  const { data: profileLinkedSubmissionsRaw } = familyProfileIds.length
+    ? await adminClient
+        .from('form_submission')
+        .select('id, profile_id, user_id, form_id, submitted_at')
+        .in('profile_id', familyProfileIds)
+        .order('submitted_at', { ascending: false })
+    : { data: [] }
+
+  const { data: userLinkedSubmissionsRaw } = familyUserIds.length
+    ? await adminClient
+        .from('form_submission')
+        .select('id, profile_id, user_id, form_id, submitted_at')
+        .in('user_id', familyUserIds)
+        .order('submitted_at', { ascending: false })
+    : { data: [] }
+
+  const formSubmissionsById = new Map<string, PersonLoaderData['formSubmissions'][number]>()
+  for (const submission of [
+    ...((profileLinkedSubmissionsRaw ?? []) as PersonLoaderData['formSubmissions']),
+    ...((userLinkedSubmissionsRaw ?? []) as PersonLoaderData['formSubmissions']),
+  ]) {
+    if (!submission.id || !submission.form_id) continue
+    formSubmissionsById.set(submission.id, submission)
+  }
+
+  const formSubmissions = Array.from(formSubmissionsById.values()).sort(
+    (left, right) => new Date(right.submitted_at).getTime() - new Date(left.submitted_at).getTime()
+  )
+
   const primaryChildByGuardian: Record<string, string> = {}
   for (const edge of edges) {
     if (edge.primary_child) {
@@ -110,6 +144,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : { data: [] }
 
   const workshopById = Object.fromEntries((workshopsRaw ?? []).map(workshop => [workshop.id, workshop])) as PersonLoaderData['workshopById']
+
+  const formIds = Array.from(new Set(formSubmissions.map(row => row.form_id).filter((id): id is string => Boolean(id))))
+
+  const { data: formsRaw } = formIds.length
+    ? await adminClient
+        .from('form')
+        .select('id, name')
+        .in('id', formIds)
+    : { data: [] }
+
+  const formNameById = Object.fromEntries(
+    (formsRaw ?? []).map(formRow => [formRow.id, formRow.name ?? formRow.id.slice(0, 8)])
+  ) as PersonLoaderData['formNameById']
 
   const semesterIds = Array.from(new Set((workshopsRaw ?? []).map(workshop => workshop.semester_id).filter(Boolean)))
   const { data: semestersRaw } = semesterIds.length
@@ -157,6 +204,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     primaryChildByGuardian,
     enrollments,
     workshopById,
+    formSubmissions,
+    formNameById,
     semesterById,
     classByWorkshop,
     attendanceByClass,
@@ -168,6 +217,8 @@ export default function ManagePersonLayoutPage() {
   const data = useLoaderData() as PersonLoaderData
   const { profile, suspiciousSignals } = data
   const location = useLocation()
+  const returnTo = new URLSearchParams(location.search).get('returnTo')
+  const backTo = returnTo && returnTo.startsWith('/') ? returnTo : '/manage/participants'
   const openSignalCount = suspiciousSignals.filter(signal => signal.status === 'open').length
 
   return (
@@ -183,7 +234,7 @@ export default function ManagePersonLayoutPage() {
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <Link to="/manage/participants">Back to participants</Link>
+          <Link to={backTo}>Back</Link>
         </Button>
       </div>
 

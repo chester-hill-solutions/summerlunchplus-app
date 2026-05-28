@@ -1,4 +1,4 @@
-import { Link, redirect, useLoaderData } from 'react-router'
+import { Link, redirect, useLoaderData, useNavigation } from 'react-router'
 
 import type { Route } from './+types/enroll'
 import { Button } from '@/components/ui/button'
@@ -416,39 +416,53 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const notificationEventKey = `workshop_enrollment:${enrollmentRow.id}:family_requested:v1`
-  const notificationResults = await Promise.all(
-    Array.from(emailByLowercase.entries()).map(async ([normalizedEmail, recipient]) => {
-      return sendTemplateEmail({
-        toEmail: normalizedEmail,
-        templateKey: 'family_enrollment_requested_v1',
-        templateData: {
-          actorName,
-          actorEmail,
-          workshopName,
-        },
-        eventKey: notificationEventKey,
-        triggeredByUserId: auth.user.id,
-        recipientUserId: recipient.userId,
-        profileId: recipient.profileId,
-        familyProfileId: targetProfileId,
-        workshopEnrollmentId: enrollmentRow.id,
+  setTimeout(() => {
+    void Promise.all(
+      Array.from(emailByLowercase.entries()).map(async ([normalizedEmail, recipient]) => {
+        return sendTemplateEmail({
+          toEmail: normalizedEmail,
+          templateKey: 'family_enrollment_requested_v1',
+          templateData: {
+            actorName,
+            actorEmail,
+            workshopName,
+          },
+          eventKey: notificationEventKey,
+          triggeredByUserId: auth.user.id,
+          recipientUserId: recipient.userId,
+          profileId: recipient.profileId,
+          familyProfileId: targetProfileId,
+          workshopEnrollmentId: enrollmentRow.id,
+        })
       })
-    })
-  )
-
-  const failedNotifications = notificationResults.filter(result => result.status === 'failed')
-  if (failedNotifications.length > 0) {
-    console.error('[enroll] failed to send some family enrollment notifications', {
-      workshopEnrollmentId: enrollmentRow.id,
-      failures: failedNotifications,
-    })
-  }
+    )
+      .then(notificationResults => {
+        const failedNotifications = notificationResults.filter(result => result.status === 'failed')
+        if (failedNotifications.length > 0) {
+          console.error('[enroll] failed to send some family enrollment notifications', {
+            workshopEnrollmentId: enrollmentRow.id,
+            failures: failedNotifications,
+          })
+        }
+      })
+      .catch(error => {
+        console.error('[enroll] notification dispatch failed', {
+          workshopEnrollmentId: enrollmentRow.id,
+          error,
+        })
+      })
+  }, 0)
 
   return redirectWithEnrollmentMessage('success', ENROLLMENT_SUCCESS_MESSAGE)
 }
 
 export default function EnrollPage() {
   const { semesters, enrollments, workshopCapacityById, nextClassByWorkshopId, preSurveyBySemester, selectedSemesterId } = useLoaderData<LoaderData>()
+  const navigation = useNavigation()
+  const mutationLocked =
+    navigation.state !== 'idle' &&
+    typeof navigation.formMethod === 'string' &&
+    navigation.formMethod.toLowerCase() === 'post'
 
   const semesterId = selectedSemesterId
   const selectedSemester = semesterId ? semesters.find(semester => semester.id === semesterId) : null
@@ -616,7 +630,7 @@ export default function EnrollPage() {
                         <TableCell className="text-right">
                           <form method="post" className="inline-flex justify-end">
                             <input type="hidden" name="workshop_id" value={workshop.id} />
-                            <Button type="submit" disabled={isFull} size="sm">
+                            <Button type="submit" disabled={isFull || mutationLocked} size="sm">
                               {isFull ? 'Full' : actionLabel}
                             </Button>
                           </form>

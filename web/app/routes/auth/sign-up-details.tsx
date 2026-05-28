@@ -1134,11 +1134,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (pid) {
-    try {
-      await refreshSuspiciousSignalsForProfile(pid)
-    } catch (error) {
-      console.error('[suspicious-signal] refresh failed', error)
-    }
+    setTimeout(() => {
+      void refreshSuspiciousSignalsForProfile(pid).catch(error => {
+        console.error('[suspicious-signal] refresh failed', error)
+      })
+    }, 0)
   }
 
   return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&form_id=${formId}`, { headers })
@@ -1162,7 +1162,7 @@ export default function SignUpDetails() {
   } = data
 
   const error = fetcher.data?.error
-  const loading = fetcher.state === 'submitting'
+  const loading = fetcher.state !== 'idle'
 
   const [answerState, setAnswerState] = useState<Record<string, Json>>(
     mergeAnswerMaps(allAnswers, currentFormAnswers)
@@ -1257,6 +1257,17 @@ export default function SignUpDetails() {
   const [clientTimezone, setClientTimezone] = useState('')
   const [clientOffsetMinutes, setClientOffsetMinutes] = useState('')
   const [clientLocale, setClientLocale] = useState('')
+  const [submitLocked, setSubmitLocked] = useState(false)
+
+  useEffect(() => {
+    setSubmitLocked(false)
+  }, [currentForm?.formId])
+
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcher.data?.error) {
+      setSubmitLocked(false)
+    }
+  }, [fetcher.data?.error, fetcher.state])
 
   useEffect(() => {
     if (!isAdditionalGuardianStep) return
@@ -1293,7 +1304,16 @@ export default function SignUpDetails() {
     [additionalGuardianQuestionCodes, answerState]
   )
 
-  const disableContinue = loading || (isAdditionalGuardianStep && wantsAdditionalGuardian && !additionalGuardianFieldsComplete)
+  const disableContinue =
+    loading ||
+    submitLocked ||
+    (isAdditionalGuardianStep && wantsAdditionalGuardian && !additionalGuardianFieldsComplete)
+  const continueLabel =
+    fetcher.state === 'submitting'
+      ? 'Saving...'
+      : fetcher.state === 'loading' || submitLocked
+        ? 'Loading next step...'
+        : 'Save and continue'
 
   return (
     <AuthStickerBackground maxWidthClassName="max-w-3xl" dense scrollContent>
@@ -1323,7 +1343,12 @@ export default function SignUpDetails() {
               </div>
             )}
             {currentForm ? (
-              <fetcher.Form method="post" className="flex flex-col gap-6" onChange={handleChange}>
+              <fetcher.Form
+                method="post"
+                className="flex flex-col gap-6"
+                onChange={handleChange}
+                onSubmit={() => setSubmitLocked(true)}
+              >
                 <input type="hidden" name="role" value={role} />
                 <input type="hidden" name="pid" value={pid} />
                 <input type="hidden" name="form_id" value={currentForm.formId} />
@@ -1392,9 +1417,9 @@ export default function SignUpDetails() {
                   type="submit"
                   className={`w-full ${loading ? 'translate-y-px brightness-95' : ''}`}
                   disabled={disableContinue}
-                  aria-busy={loading}
+                  aria-busy={disableContinue}
                 >
-                  {loading ? 'Saving...' : 'Save and continue'}
+                  {continueLabel}
                 </Button>
               </fetcher.Form>
             ) : (

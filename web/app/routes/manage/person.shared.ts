@@ -45,6 +45,14 @@ export type PersonLoaderData = {
   semesterById: Record<string, { id: string; name: string | null; starts_at: string; ends_at: string }>
   classByWorkshop: Record<string, Array<{ id: string; starts_at: string; ends_at: string }>>
   attendanceByClass: Record<string, Array<{ profile_id: string; status: string | null }>>
+  formSubmissions: Array<{
+    id: string
+    profile_id: string | null
+    user_id: string | null
+    form_id: string
+    submitted_at: string
+  }>
+  formNameById: Record<string, string>
   suspiciousSignals: SuspiciousSignalRow[]
 }
 

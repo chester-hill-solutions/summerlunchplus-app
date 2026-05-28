@@ -39,6 +39,7 @@ export default [
       index("routes/manage/person.overview.tsx"),
       route("family", "routes/manage/person.family.tsx"),
       route("enrollments", "routes/manage/person.enrollments.tsx"),
+      route("form-submissions", "routes/manage/person.form-submissions.tsx"),
       route("attendance", "routes/manage/person.attendance.tsx"),
       route("discrepancies", "routes/manage/person.discrepancies.tsx"),
     ]),

@@ -40,7 +40,7 @@ type LoaderData = {
   label: string
   tableName: string
   tableVariant?: 'default' | 'pivot'
-  columnMeta?: Record<string, { label?: string; truncate?: boolean; filterable?: boolean }>
+  columnMeta?: Record<string, { label?: string; truncate?: boolean; filterable?: boolean; numeric?: boolean }>
   canEditStatus?: boolean
   editorConfig?: EditorConfig
   foreignKeyOptions?: Record<string, ForeignKeyOption[]>
@@ -115,6 +115,10 @@ const getDirectionIndicator = (stage: 0 | 1 | 2) => {
   return ''
 }
 
+const FORM_SELECT_CLASS_NAME = 'h-9 rounded border border-input bg-background px-2 pr-8'
+const TABLE_SELECT_CLASS_NAME =
+  'h-8 min-w-32 w-full rounded border border-input bg-background px-2 pr-8 text-xs'
+
 const normalizeFilterValues = (values: string[]) =>
   Array.from(new Set(values.filter(value => value !== undefined)))
 
@@ -134,29 +138,36 @@ const rowKeyFor = (row: Record<string, unknown>, editorConfig?: EditorConfig) =>
 const personLinkForCell = (
   tableName: string,
   column: string,
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
+  returnTo: string
 ) => {
+  const withReturnTo = (pathname: string, params: Record<string, string>) => {
+    const search = new URLSearchParams(params)
+    search.set('returnTo', returnTo)
+    return `${pathname}?${search.toString()}`
+  }
+
   const profileId =
     (typeof row.profile_id === 'string' && row.profile_id) ||
     (typeof row.id === 'string' && (tableName === 'profile' || tableName === 'participants') ? row.id : '')
 
   if (column === 'profile_display' && profileId) {
-    return `/manage/person?profileId=${encodeURIComponent(profileId)}`
+    return withReturnTo('/manage/person', { profileId })
   }
   if (column === 'subject_profile_display' && typeof row.subject_profile_id === 'string') {
-    return `/manage/person?profileId=${encodeURIComponent(row.subject_profile_id)}`
+    return withReturnTo('/manage/person', { profileId: row.subject_profile_id })
   }
   if (column === 'suspicious_signal' && profileId) {
-    return `/manage/person/discrepancies?profileId=${encodeURIComponent(profileId)}`
+    return withReturnTo('/manage/person/discrepancies', { profileId })
   }
   if (column === 'guardian_display' && typeof row.guardian_profile_id === 'string') {
-    return `/manage/person?profileId=${encodeURIComponent(row.guardian_profile_id)}`
+    return withReturnTo('/manage/person', { profileId: row.guardian_profile_id })
   }
   if (column === 'child_display' && typeof row.child_profile_id === 'string') {
-    return `/manage/person?profileId=${encodeURIComponent(row.child_profile_id)}`
+    return withReturnTo('/manage/person', { profileId: row.child_profile_id })
   }
   if ((tableName === 'profile' || tableName === 'participants') && ['email', 'firstname', 'surname', 'role', 'is_user'].includes(column) && profileId) {
-    return `/manage/person?profileId=${encodeURIComponent(profileId)}`
+    return withReturnTo('/manage/person', { profileId })
   }
 
   const userIdColumns: Record<string, string> = {
@@ -169,7 +180,7 @@ const personLinkForCell = (
   }
   const userIdColumn = userIdColumns[column]
   if (userIdColumn && typeof row[userIdColumn] === 'string' && row[userIdColumn]) {
-    return `/manage/person?userId=${encodeURIComponent(String(row[userIdColumn]))}`
+    return withReturnTo('/manage/person', { userId: String(row[userIdColumn]) })
   }
 
   return null
@@ -519,7 +530,8 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
   }
 
   const fieldKeys = editorConfig ? Object.keys(editorConfig.fields) : []
-  const isNumericColumn = (column: string) => editorConfig?.fields[column]?.type === 'number'
+  const isNumericColumn = (column: string) =>
+    editorConfig?.fields[column]?.type === 'number' || columnMeta[column]?.numeric === true
 
   const beginEdit = (row: Record<string, unknown>) => {
     if (!editorConfig) return
@@ -614,7 +626,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
               const nextValue = event.target.value
               setValues(prev => ({ ...prev, [fieldName]: nextValue }))
             }}
-            className="h-9 rounded border border-input bg-background px-2"
+            className={FORM_SELECT_CLASS_NAME}
           >
             {field.nullable ? <option value="">(none)</option> : null}
             <option value="true">true</option>
@@ -634,7 +646,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
               const nextValue = event.target.value
               setValues(prev => ({ ...prev, [fieldName]: nextValue }))
             }}
-            className="h-9 rounded border border-input bg-background px-2"
+            className={FORM_SELECT_CLASS_NAME}
           >
             {field.nullable ? <option value="">(none)</option> : null}
             {(field.enumValues ?? []).map(option => (
@@ -766,7 +778,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
               if (!PAGE_SIZE_OPTIONS.includes(nextPageSize as (typeof PAGE_SIZE_OPTIONS)[number])) return
               setPageAndSync(1, nextPageSize)
             }}
-            className="h-8 rounded border border-input bg-background px-2"
+            className="h-8 rounded border border-input bg-background px-2 pr-8"
           >
             {PAGE_SIZE_OPTIONS.map(option => (
               <option key={option} value={option}>
@@ -862,7 +874,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                             <select
                               value={statusValue}
                               onChange={event => updateAttendanceStatus(row, event.target.value)}
-                              className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
+                              className={TABLE_SELECT_CLASS_NAME}
                             >
                               <option value="">(none)</option>
                               <option value="unknown">unknown</option>
@@ -888,7 +900,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                             <select
                               value={cameraValue}
                               onChange={event => updateAttendanceCameraOn(row, event.target.value)}
-                              className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
+                              className={TABLE_SELECT_CLASS_NAME}
                             >
                               <option value="">(none)</option>
                               <option value="true">true</option>
@@ -905,7 +917,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                             <select
                               value={statusValue}
                               onChange={event => updateWorkshopEnrollmentStatus(row, event.target.value)}
-                              className="h-8 w-full rounded border border-input bg-background px-2 text-xs"
+                              className={TABLE_SELECT_CLASS_NAME}
                             >
                               {Constants.public.Enums.workshop_enrollment_status.map((status: Database['public']['Enums']['workshop_enrollment_status']) => (
                                 <option key={status} value={status}>
@@ -942,7 +954,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
 
                       const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
                       const isFormAnswersLink = tableName === 'form' && column === 'answers' && typeof row.id === 'string'
-                      const personLink = personLinkForCell(tableName, column, row)
+                      const personLink = personLinkForCell(tableName, column, row, `${location.pathname}${location.search}`)
                       const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
                       const filterable = columnMeta[column]?.filterable ?? true
                       const cellValue = getCellValue(column, row, tableName)
@@ -1036,7 +1048,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                             {fieldKeys.map(fieldName => renderField(fieldName, editorConfig.fields[fieldName], editValues, setEditValues))}
                           </div>
-                          <div>
+                          <div className="flex items-center gap-2">
                             <button
                               type="button"
                               onClick={() => submitUpdate(row)}
@@ -1044,6 +1056,16 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               className="rounded bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
                             >
                               {editorFetcher.state === 'submitting' ? 'Saving...' : 'Save changes'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingRowKey(null)
+                                setEditValues({})
+                              }}
+                              className="rounded border border-input px-3 py-2 text-xs"
+                            >
+                              Cancel
                             </button>
                           </div>
                         </div>
