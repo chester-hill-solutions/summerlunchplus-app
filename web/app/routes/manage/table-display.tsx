@@ -1040,7 +1040,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                             {fieldKeys.map(fieldName => renderField(fieldName, editorConfig.fields[fieldName], editValues, setEditValues))}
                           </div>
-                          <div>
+                          <div className="flex items-center gap-2">
                             <button
                               type="button"
                               onClick={() => submitUpdate(row)}
@@ -1048,6 +1048,16 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                               className="rounded bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
                             >
                               {editorFetcher.state === 'submitting' ? 'Saving...' : 'Save changes'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingRowKey(null)
+                                setEditValues({})
+                              }}
+                              className="rounded border border-input px-3 py-2 text-xs"
+                            >
+                              Cancel
                             </button>
                           </div>
                         </div>
