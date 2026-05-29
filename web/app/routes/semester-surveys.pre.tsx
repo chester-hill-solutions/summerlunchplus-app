@@ -1,5 +1,6 @@
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router'
 
+import AuthStickerBackground from '@/components/auth/sticker-background'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -294,46 +295,48 @@ export default function SemesterPreSurveyPage() {
   const isSubmitting = navigation.state !== 'idle'
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-10">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">{formName}</CardTitle>
-          <CardDescription>
-            Complete this pre-program survey before enrolling in workshops for this semester.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form method="post" className="space-y-6">
-            <input type="hidden" name="return_to" value={returnTo} />
-            <p className="text-sm text-slate-500">Semester: {semesterId}</p>
+    <AuthStickerBackground maxWidthClassName="max-w-3xl" dense scrollContent>
+      <div className="w-full py-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-2xl">{formName}</CardTitle>
+            <CardDescription>
+              Complete this pre-program survey before enrolling in workshops for this semester.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Form method="post" className="space-y-6">
+              <input type="hidden" name="return_to" value={returnTo} />
+              <p className="text-sm text-slate-500">Semester: {semesterId}</p>
 
-            {questions.map(question => {
-              const metadata = (question.metadata ?? {}) as Record<string, Json>
-              const isOptional = metadata.optional === true
-              return (
-                <FormQuestion
-                  key={question.question_code}
-                  question={question}
-                  value={answers[question.question_code]}
-                  required={!isOptional && question.type !== 'no-input-text'}
-                />
-              )
-            })}
+              {questions.map(question => {
+                const metadata = (question.metadata ?? {}) as Record<string, Json>
+                const isOptional = metadata.optional === true
+                return (
+                  <FormQuestion
+                    key={question.question_code}
+                    question={question}
+                    value={answers[question.question_code]}
+                    required={!isOptional && question.type !== 'no-input-text'}
+                  />
+                )
+              })}
 
-            {actionData?.error ? <p className="text-sm text-red-500">{actionData.error}</p> : null}
+              {actionData?.error ? <p className="text-sm text-red-500">{actionData.error}</p> : null}
 
-            <div className="flex items-center justify-end gap-3">
-              <Button variant="ghost" asChild>
-                <Link to="/home">Cancel</Link>
-              </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Loading next step...' : 'Save and continue'}
-              </Button>
-            </div>
-          </Form>
-        </CardContent>
-      </Card>
-      <p className="mt-3 text-xs text-slate-500">Form ID: {formId}</p>
-    </main>
+              <div className="flex items-center justify-end gap-3">
+                <Button variant="ghost" asChild>
+                  <Link to="/home">Cancel</Link>
+                </Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? 'Loading next step...' : 'Save and continue'}
+                </Button>
+              </div>
+            </Form>
+          </CardContent>
+        </Card>
+        <p className="mt-3 text-xs text-slate-500">Form ID: {formId}</p>
+      </div>
+    </AuthStickerBackground>
   )
 }
