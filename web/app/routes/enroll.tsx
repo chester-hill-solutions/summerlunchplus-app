@@ -1,4 +1,5 @@
-import { Link, redirect, useLoaderData, useNavigation } from 'react-router'
+import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router'
+import { useEffect, useState } from 'react'
 
 import type { Route } from './+types/enroll'
 import { Button } from '@/components/ui/button'
@@ -49,6 +50,10 @@ type LoaderData = {
   nextClassByWorkshopId: Record<string, string | null>
   preSurveyBySemester: Record<string, { required: boolean; completed: boolean; preSurveyPath: string | null }>
   selectedSemesterId: string | null
+}
+
+type ActionData = {
+  error?: string
 }
 
 const ENROLLMENT_SUCCESS_MESSAGE =
@@ -280,7 +285,7 @@ export async function action({ request }: Route.ActionArgs) {
     family = await resolveFamilyGraph(supabase, auth.user.id)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Profile not found'
-    return redirectWithEnrollmentMessage('error', message)
+    return { error: message } satisfies ActionData
   }
 
   const { data: workshopRow, error: workshopError } = await supabase
@@ -290,7 +295,7 @@ export async function action({ request }: Route.ActionArgs) {
     .single()
 
   if (workshopError || !workshopRow?.semester_id) {
-    return redirectWithEnrollmentMessage('error', 'Workshop not found')
+    return { error: 'Workshop not found' } satisfies ActionData
   }
 
   const nowIso = new Date().toISOString()
@@ -298,7 +303,7 @@ export async function action({ request }: Route.ActionArgs) {
   const enrollmentCloseAt = workshopRow.enrollment_close_at
   const isOpen = (!enrollmentOpenAt || nowIso >= enrollmentOpenAt) && (!enrollmentCloseAt || nowIso <= enrollmentCloseAt)
   if (!isOpen) {
-    return redirectWithEnrollmentMessage('error', 'Enrollment is closed for this workshop')
+    return { error: 'Enrollment is closed for this workshop' } satisfies ActionData
   }
 
   const { data: existingEnrollment } = await supabase
@@ -310,18 +315,18 @@ export async function action({ request }: Route.ActionArgs) {
     .maybeSingle()
 
   if (existingEnrollment?.id) {
-    return redirectWithEnrollmentMessage('error', 'Your family is already enrolled in one workshop for this semester.')
+    return { error: 'Your family is already enrolled in one workshop for this semester.' } satisfies ActionData
   }
 
   const targetProfileId = getFamilyEnrollmentProfileId(family)
   if (!targetProfileId) {
-    return redirectWithEnrollmentMessage('error', 'Family enrollment profile not found.')
+    return { error: 'Family enrollment profile not found.' } satisfies ActionData
   }
 
   const preSurveyForm = await resolveSemesterSurveyForm(workshopRow.semester_id, 'pre_program_survey')
 
   if (!preSurveyForm.formId) {
-    return redirectWithEnrollmentMessage('error', 'Pre-program survey is not configured for this semester.')
+    return { error: 'Pre-program survey is not configured for this semester.' } satisfies ActionData
   }
 
   const { data: preSurveySubmission } = preSurveyForm.required
@@ -336,7 +341,7 @@ export async function action({ request }: Route.ActionArgs) {
     : { data: { id: 'not-required' } }
 
   if (preSurveyForm.required && !preSurveySubmission?.id) {
-    return redirectWithEnrollmentMessage('error', 'Please complete the pre-program survey before enrolling.')
+    return { error: 'Please complete the pre-program survey before enrolling.' } satisfies ActionData
   }
 
   const { data: workshopEnrollments } = await supabase
@@ -356,12 +361,12 @@ export async function action({ request }: Route.ActionArgs) {
   ).get(workshop_id)
 
   if (!capacitySnapshot) {
-    return redirectWithEnrollmentMessage('error', 'Unable to evaluate workshop capacity')
+    return { error: 'Unable to evaluate workshop capacity' } satisfies ActionData
   }
 
   const enrollmentAction = getWorkshopEnrollmentAction(capacitySnapshot)
   if (enrollmentAction === 'full') {
-    return redirectWithEnrollmentMessage('error', 'This workshop and its waitlist are full')
+    return { error: 'This workshop and its waitlist are full' } satisfies ActionData
   }
 
   const status = enrollmentAction === 'waitlist' ? 'waitlisted' : 'pending'
@@ -377,7 +382,7 @@ export async function action({ request }: Route.ActionArgs) {
     .single()
 
   if (enrollmentError || !enrollmentRow?.id) {
-    return redirectWithEnrollmentMessage('error', enrollmentError?.message ?? 'Unable to create enrollment')
+    return { error: enrollmentError?.message ?? 'Unable to create enrollment' } satisfies ActionData
   }
 
   const { data: familyProfilesData } = await adminClient
@@ -458,8 +463,18 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function EnrollPage() {
   const { semesters, enrollments, workshopCapacityById, nextClassByWorkshopId, preSurveyBySemester, selectedSemesterId } = useLoaderData<LoaderData>()
+  const actionData = useActionData<ActionData>()
   const navigation = useNavigation()
+  const [submitLocked, setSubmitLocked] = useState(false)
+
+  useEffect(() => {
+    if (navigation.state === 'idle' && actionData?.error) {
+      setSubmitLocked(false)
+    }
+  }, [actionData?.error, navigation.state])
+
   const mutationLocked =
+    submitLocked ||
     navigation.state !== 'idle' &&
     typeof navigation.formMethod === 'string' &&
     navigation.formMethod.toLowerCase() === 'post'
@@ -485,6 +500,7 @@ export default function EnrollPage() {
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold">Manage Enrollments</h1>
         <p className="text-sm text-muted-foreground">Step 1: select a semester. Step 2: complete pre-program survey. Step 3: choose one workshop.</p>
+        {actionData?.error ? <p className="text-sm text-destructive">{actionData.error}</p> : null}
       </div>
 
       {!selectedSemester ? (
@@ -566,6 +582,9 @@ export default function EnrollPage() {
             </div>
           ) : (
             <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Here are the cooking classes we are offering this summer. Please take a moment to sign up for one class that works best for your schedule, choosing a date and time that you can attend each week. Please note some classes are running in different time zones.
+              </p>
               <p className="text-sm text-muted-foreground">You can enroll in one workshop for this semester.</p>
               {(() => {
                 const sortedWorkshops = selectedSemester.workshops
@@ -628,12 +647,12 @@ export default function EnrollPage() {
                           {(workshop.enrollment_close_at ? formatDate(workshop.enrollment_close_at) : 'Close')}
                         </TableCell>
                         <TableCell className="text-right">
-                          <form method="post" className="inline-flex justify-end">
+                          <Form method="post" className="inline-flex justify-end" onSubmit={() => setSubmitLocked(true)}>
                             <input type="hidden" name="workshop_id" value={workshop.id} />
                             <Button type="submit" disabled={isFull || mutationLocked} size="sm">
-                              {isFull ? 'Full' : actionLabel}
+                              {isFull ? 'Full' : mutationLocked ? 'Submitting...' : actionLabel}
                             </Button>
-                          </form>
+                          </Form>
                         </TableCell>
                       </TableRow>
                     )
