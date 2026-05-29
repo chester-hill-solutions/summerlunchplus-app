@@ -582,6 +582,9 @@ export default function EnrollPage() {
             </div>
           ) : (
             <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Here are the cooking classes we are offering this summer. Please take a moment to sign up for one class that works best for your schedule, choosing a date and time that you can attend each week. Please note some classes are running in different time zones.
+              </p>
               <p className="text-sm text-muted-foreground">You can enroll in one workshop for this semester.</p>
               {(() => {
                 const sortedWorkshops = selectedSemester.workshops
