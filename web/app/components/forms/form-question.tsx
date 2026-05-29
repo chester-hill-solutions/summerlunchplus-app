@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { Database, Json } from '@/lib/database.types'
@@ -37,9 +39,48 @@ type FormQuestionProps = {
   required?: boolean
 }
 
+const parseInlineMarkdown = (text: string): ReactNode[] => {
+  const tokenRegex = /(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|`[^`]+`)/g
+  const parts = text.split(tokenRegex)
+
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`md-${index}`}>{part.slice(2, -2)}</strong>
+    }
+    if (part.startsWith('__') && part.endsWith('__')) {
+      return <strong key={`md-${index}`}>{part.slice(2, -2)}</strong>
+    }
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return <em key={`md-${index}`}>{part.slice(1, -1)}</em>
+    }
+    if (part.startsWith('_') && part.endsWith('_')) {
+      return <em key={`md-${index}`}>{part.slice(1, -1)}</em>
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return (
+        <code key={`md-${index}`} className="rounded bg-muted px-1 py-0.5 text-[0.92em]">
+          {part.slice(1, -1)}
+        </code>
+      )
+    }
+
+    return <span key={`md-${index}`}>{part}</span>
+  })
+}
+
+const renderPromptMarkdown = (text: string) => {
+  const lines = text.split('\n')
+  return lines.map((line, index) => (
+    <span key={`line-${index}`}>
+      {parseInlineMarkdown(line)}
+      {index < lines.length - 1 ? <br /> : null}
+    </span>
+  ))
+}
+
 const LabelWithRequired = ({ text, required }: { text: string; required?: boolean }) => (
   <>
-    {text}
+    {renderPromptMarkdown(text)}
     {required ? <span className="ml-1 text-destructive">*</span> : null}
   </>
 )
@@ -100,7 +141,7 @@ export function FormQuestion({ question, value, required }: FormQuestionProps) {
   if (question.type === 'no-input-text') {
     return (
       <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-        {question.prompt}
+        {renderPromptMarkdown(question.prompt)}
       </div>
     )
   }

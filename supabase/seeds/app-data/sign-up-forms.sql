@@ -173,7 +173,7 @@ select 'guardian_consent_privacy', 'I understand that summerlunch+ is dedicated 
 union all
 select 'guardian_consent_presence', 'I understand that a guardian/caregiver or elder sibling must be present during live cooking classes to ensure the safety of the summerlunch+ participant.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
-select 'guardian_consent_camera', 'I understand that cameras must remain ON during live cooking classes for engagement and safety purposes. If cameras are not on, you must provide a photo of one of the recipes that you prepared.', 'checkbox'::form_question_type, '[]'::jsonb
+select 'guardian_consent_camera', 'I understand that **cameras must remain ON** during live cooking classes for engagement and safety purposes. If cameras are not on, you must provide a photo of one of the recipes that you prepared.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_consent_attendance', 'I understand that if my child(ren) do(es) not participate in two weeks of programming without notice, they will forfeit their spot in the program. Please let the summerlunch+ team know in advance if you need to miss a week.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
