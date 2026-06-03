@@ -120,6 +120,127 @@ export type Database = {
           },
         ]
       }
+      email_draft: {
+        Row: {
+          channel: Database["public"]["Enums"]["email_draft_channel"]
+          created_at: string
+          created_by_user_id: string | null
+          current_body_markdown: string
+          current_subject_markdown: string
+          description: string | null
+          draft_key: string
+          id: string
+          is_system: boolean
+          published_version_id: string | null
+          status: Database["public"]["Enums"]["email_draft_status"]
+          title: string
+          updated_at: string
+          updated_by_user_id: string | null
+          variables_schema: Json
+        }
+        Insert: {
+          channel: Database["public"]["Enums"]["email_draft_channel"]
+          created_at?: string
+          created_by_user_id?: string | null
+          current_body_markdown?: string
+          current_subject_markdown?: string
+          description?: string | null
+          draft_key: string
+          id?: string
+          is_system?: boolean
+          published_version_id?: string | null
+          status?: Database["public"]["Enums"]["email_draft_status"]
+          title: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+          variables_schema?: Json
+        }
+        Update: {
+          channel?: Database["public"]["Enums"]["email_draft_channel"]
+          created_at?: string
+          created_by_user_id?: string | null
+          current_body_markdown?: string
+          current_subject_markdown?: string
+          description?: string | null
+          draft_key?: string
+          id?: string
+          is_system?: boolean
+          published_version_id?: string | null
+          status?: Database["public"]["Enums"]["email_draft_status"]
+          title?: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+          variables_schema?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_draft_published_version_id_fkey"
+            columns: ["published_version_id"]
+            isOneToOne: false
+            referencedRelation: "email_draft_version"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_draft_version: {
+        Row: {
+          body_markdown: string
+          change_note: string | null
+          created_at: string
+          created_by_user_id: string | null
+          email_draft_id: string
+          html_rendered: string
+          id: string
+          published_at: string | null
+          published_by_user_id: string | null
+          subject_markdown: string
+          subject_rendered: string
+          text_rendered: string
+          variables_schema: Json
+          version_number: number
+        }
+        Insert: {
+          body_markdown: string
+          change_note?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          email_draft_id: string
+          html_rendered: string
+          id?: string
+          published_at?: string | null
+          published_by_user_id?: string | null
+          subject_markdown: string
+          subject_rendered: string
+          text_rendered: string
+          variables_schema?: Json
+          version_number: number
+        }
+        Update: {
+          body_markdown?: string
+          change_note?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          email_draft_id?: string
+          html_rendered?: string
+          id?: string
+          published_at?: string | null
+          published_by_user_id?: string | null
+          subject_markdown?: string
+          subject_rendered?: string
+          text_rendered?: string
+          variables_schema?: Json
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_draft_version_email_draft_id_fkey"
+            columns: ["email_draft_id"]
+            isOneToOne: false
+            referencedRelation: "email_draft"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_message: {
         Row: {
           created_at: string
@@ -207,6 +328,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      federal_electoral_district: {
+        Row: {
+          code: number
+          created_at: string
+          meal_kit: boolean
+          name: string
+          updated_at: string
+          whitelist: boolean
+        }
+        Insert: {
+          code: number
+          created_at?: string
+          meal_kit?: boolean
+          name: string
+          updated_at?: string
+          whitelist?: boolean
+        }
+        Update: {
+          code?: number
+          created_at?: string
+          meal_kit?: boolean
+          name?: string
+          updated_at?: string
+          whitelist?: boolean
+        }
+        Relationships: []
       }
       form: {
         Row: {
@@ -675,6 +823,7 @@ export type Database = {
           created_at: string
           date_of_birth: string | null
           email: string | null
+          federal_electoral_district_name: string | null
           firstname: string | null
           household_children_count: number | null
           household_size: number | null
@@ -684,6 +833,9 @@ export type Database = {
           phone: string | null
           postcode: string | null
           province: string | null
+          riding_lookup_error: string | null
+          riding_lookup_last_attempt_at: string | null
+          riding_lookup_status: string | null
           role: Database["public"]["Enums"]["app_role"]
           street_address: string | null
           surname: string | null
@@ -695,6 +847,7 @@ export type Database = {
           created_at?: string
           date_of_birth?: string | null
           email?: string | null
+          federal_electoral_district_name?: string | null
           firstname?: string | null
           household_children_count?: number | null
           household_size?: number | null
@@ -704,6 +857,9 @@ export type Database = {
           phone?: string | null
           postcode?: string | null
           province?: string | null
+          riding_lookup_error?: string | null
+          riding_lookup_last_attempt_at?: string | null
+          riding_lookup_status?: string | null
           role: Database["public"]["Enums"]["app_role"]
           street_address?: string | null
           surname?: string | null
@@ -715,6 +871,7 @@ export type Database = {
           created_at?: string
           date_of_birth?: string | null
           email?: string | null
+          federal_electoral_district_name?: string | null
           firstname?: string | null
           household_children_count?: number | null
           household_size?: number | null
@@ -724,13 +881,24 @@ export type Database = {
           phone?: string | null
           postcode?: string | null
           province?: string | null
+          riding_lookup_error?: string | null
+          riding_lookup_last_attempt_at?: string | null
+          riding_lookup_status?: string | null
           role?: Database["public"]["Enums"]["app_role"]
           street_address?: string | null
           surname?: string | null
           updated_at?: string
           user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profile_federal_electoral_district_name_fkey"
+            columns: ["federal_electoral_district_name"]
+            isOneToOne: false
+            referencedRelation: "federal_electoral_district"
+            referencedColumns: ["name"]
+          },
+        ]
       }
       role_permission: {
         Row: {
@@ -1234,6 +1402,8 @@ export type Database = {
         | "student"
         | "guardian"
       class_attendance_status: "unknown" | "present" | "absent"
+      email_draft_channel: "transactional" | "auth"
+      email_draft_status: "draft" | "published" | "archived"
       email_message_status: "queued" | "sent" | "failed" | "skipped"
       form_assignment_status: "pending" | "submitted"
       form_question_type:
@@ -1448,6 +1618,8 @@ export const Constants = {
         "guardian",
       ],
       class_attendance_status: ["unknown", "present", "absent"],
+      email_draft_channel: ["transactional", "auth"],
+      email_draft_status: ["draft", "published", "archived"],
       email_message_status: ["queued", "sent", "failed", "skipped"],
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [

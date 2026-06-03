@@ -63,6 +63,8 @@ export default [
     route("form-submission", "routes/manage/form-submission.tsx"),
     route("login-event", "routes/manage/login-event.tsx"),
     route("email-message", "routes/manage/email-message.tsx"),
+    route("email-drafts", "routes/manage/email-drafts.tsx"),
+    route("email-drafts/:draftId", "routes/manage/email-drafts.$draftId.tsx"),
     route("form-answer", "routes/manage/form-answer.tsx"),
     route("gift-cards", "routes/manage/gift-cards.tsx"),
     route("role-permission", "routes/manage/role-permission.tsx"),

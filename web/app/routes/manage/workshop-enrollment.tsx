@@ -23,6 +23,8 @@ const ENROLLMENT_STATUS_ORDER: Record<Database['public']['Enums']['workshop_enro
 }
 
 const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
+const RELATIONSHIP_BATCH_SIZE = 100
+const IN_CLAUSE_BATCH_SIZE = 250
 
 const toTime = (value: unknown) => {
   if (typeof value !== 'string' || !value) return Number.POSITIVE_INFINITY
@@ -94,6 +96,16 @@ const fullNameFromProfile = (profile: RidingProfileRow | null | undefined) => {
   const surname = normalizeText(profile?.surname)
   const fullName = [firstname, surname].filter(Boolean).join(' ').trim()
   return fullName || null
+}
+
+const chunkArray = <T,>(items: T[], size: number): T[][] => {
+  if (size <= 0 || !items.length) return []
+
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
 }
 
 const pushEdge = (
@@ -193,13 +205,17 @@ export async function loader(args: Route.LoaderArgs) {
     const familyEdges: GuardianChildEdge[] = []
 
     while (queue.length) {
-      const batch = queue.splice(0, queue.length)
+      const batch = queue.splice(0, Math.min(queue.length, RELATIONSHIP_BATCH_SIZE))
       const { data: batchEdges, error: familyEdgesError } = await adminClient
         .from('person_guardian_child')
         .select('guardian_profile_id, child_profile_id, primary_child')
         .or(`guardian_profile_id.in.(${batch.join(',')}),child_profile_id.in.(${batch.join(',')})`)
 
       if (familyEdgesError) {
+        console.error('[workshop enrollment] failed to load family edges', {
+          batchSize: batch.length,
+          error: familyEdgesError.message,
+        })
         break
       }
 
@@ -240,14 +256,27 @@ export async function loader(args: Route.LoaderArgs) {
       familyAdjacency.get(edge.child_profile_id)?.add(edge.guardian_profile_id)
     }
 
-    const { data: profileRows, error: profileRowsError } = await adminClient
-      .from('profile')
-      .select('id, role, firstname, surname, email, federal_electoral_district_name')
-      .in('id', profileScope)
+    const profileRows: RidingProfileRow[] = []
+    for (const profileChunk of chunkArray(profileScope, IN_CLAUSE_BATCH_SIZE)) {
+      const { data, error } = await adminClient
+        .from('profile')
+        .select('id, role, firstname, surname, email, federal_electoral_district_name')
+        .in('id', profileChunk)
 
-    if (!profileRowsError) {
+      if (error) {
+        console.error('[workshop enrollment] failed to load profile rows', {
+          chunkSize: profileChunk.length,
+          error: error.message,
+        })
+        continue
+      }
+
+      profileRows.push(...((data ?? []) as RidingProfileRow[]))
+    }
+
+    if (profileRows.length) {
       profileById = new Map(
-        ((profileRows ?? []) as RidingProfileRow[])
+        profileRows
           .filter(profile => typeof profile.id === 'string' && profile.id)
           .map(profile => [profile.id, profile])
       )
@@ -280,7 +309,7 @@ export async function loader(args: Route.LoaderArgs) {
 
       const ridingNames = Array.from(
         new Set(
-          (profileRows ?? [])
+          profileRows
             .map(profile => normalizeRiding(profile.federal_electoral_district_name))
             .filter((riding): riding is string => Boolean(riding))
         )
@@ -288,12 +317,20 @@ export async function loader(args: Route.LoaderArgs) {
 
       const mealKitByRidingName = new Map<string, boolean>()
       if (ridingNames.length) {
-        const { data: ridingRows, error: ridingRowsError } = await adminClient
-          .from('federal_electoral_district')
-          .select('name, meal_kit')
-          .in('name', ridingNames)
+        for (const ridingChunk of chunkArray(ridingNames, IN_CLAUSE_BATCH_SIZE)) {
+          const { data: ridingRows, error: ridingRowsError } = await adminClient
+            .from('federal_electoral_district')
+            .select('name, meal_kit')
+            .in('name', ridingChunk)
 
-        if (!ridingRowsError) {
+          if (ridingRowsError) {
+            console.error('[workshop enrollment] failed to load riding meal-kit rows', {
+              chunkSize: ridingChunk.length,
+              error: ridingRowsError.message,
+            })
+            continue
+          }
+
           for (const riding of ridingRows ?? []) {
             if (typeof riding.name !== 'string') continue
             mealKitByRidingName.set(riding.name, riding.meal_kit === true)
@@ -311,30 +348,54 @@ export async function loader(args: Route.LoaderArgs) {
         mealKitByProfileId.set(profile.id, mealKitByRidingName.get(ridingName) === true)
       }
 
-      const { data: submissionRows, error: submissionRowsError } = await adminClient
-        .from('form_submission')
-        .select('id, profile_id, submitted_at')
-        .in('profile_id', profileScope)
-        .order('submitted_at', { ascending: false })
+      const submissions: FormSubmissionRow[] = []
+      for (const profileChunk of chunkArray(profileScope, IN_CLAUSE_BATCH_SIZE)) {
+        const { data: submissionRows, error } = await adminClient
+          .from('form_submission')
+          .select('id, profile_id, submitted_at')
+          .in('profile_id', profileChunk)
 
-      if (!submissionRowsError) {
-        const submissions = (submissionRows ?? []) as FormSubmissionRow[]
+        if (error) {
+          console.error('[workshop enrollment] failed to load form submissions', {
+            chunkSize: profileChunk.length,
+            error: error.message,
+          })
+          continue
+        }
+
+        submissions.push(...((submissionRows ?? []) as FormSubmissionRow[]))
+      }
+
+      if (submissions.length) {
         const submissionIds = submissions
           .map(submission => submission.id)
           .filter((submissionId): submissionId is string => Boolean(submissionId))
 
         if (submissionIds.length) {
-          const { data: answerRows, error: answerRowsError } = await adminClient
-            .from('form_answer')
-            .select('submission_id, value')
-            .eq('question_code', GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
-            .in('submission_id', submissionIds)
+          const answerRows: FormAnswerRow[] = []
+          for (const submissionChunk of chunkArray(submissionIds, IN_CLAUSE_BATCH_SIZE)) {
+            const { data, error } = await adminClient
+              .from('form_answer')
+              .select('submission_id, value')
+              .eq('question_code', GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+              .in('submission_id', submissionChunk)
 
-          if (!answerRowsError) {
+            if (error) {
+              console.error('[workshop enrollment] failed to load gift card answers', {
+                chunkSize: submissionChunk.length,
+                error: error.message,
+              })
+              continue
+            }
+
+            answerRows.push(...((data ?? []) as FormAnswerRow[]))
+          }
+
+          if (answerRows.length) {
             const submissionById = new Map(submissions.map(submission => [submission.id, submission]))
             const latestGiftCardByProfileId = new Map<string, { value: string; submittedAt: number }>()
 
-            for (const answer of (answerRows ?? []) as FormAnswerRow[]) {
+            for (const answer of answerRows) {
               const submission = submissionById.get(answer.submission_id)
               const profileId = submission?.profile_id
               if (!profileId) continue
