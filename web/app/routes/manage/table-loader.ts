@@ -24,8 +24,9 @@ const profileDisplay = (profileRow: Record<string, unknown> | null, fallbackId: 
   const firstname = typeof profileRow?.firstname === 'string' ? profileRow.firstname.trim() : ''
   const surname = typeof profileRow?.surname === 'string' ? profileRow.surname.trim() : ''
   const email = typeof profileRow?.email === 'string' ? profileRow.email.trim() : ''
+  const fullName = [firstname, surname].filter(Boolean).join(' ').trim()
+  if (fullName) return fullName
   if (email) return email
-  if (firstname && surname) return `${firstname} ${surname}`
   return `ID ${fallbackId}`
 }
 
@@ -34,7 +35,8 @@ const submissionDisplay = (formRow: Record<string, unknown> | null, profileRow: 
   const firstname = typeof profileRow?.firstname === 'string' ? profileRow.firstname.trim() : ''
   const surname = typeof profileRow?.surname === 'string' ? profileRow.surname.trim() : ''
   const email = typeof profileRow?.email === 'string' ? profileRow.email.trim() : ''
-  const profileLabel = email || (firstname && surname ? `${firstname} ${surname}` : `ID ${fallbackId}`)
+  const fullName = [firstname, surname].filter(Boolean).join(' ').trim()
+  const profileLabel = fullName || email || `ID ${fallbackId}`
 
   let submittedDate = ''
   if (typeof submittedAt === 'string') {
@@ -85,8 +87,9 @@ const userProfileDisplay = (profileRow: Record<string, unknown> | null, fallback
   const email = typeof profileRow?.email === 'string' ? profileRow.email.trim() : ''
   const firstname = typeof profileRow?.firstname === 'string' ? profileRow.firstname.trim() : ''
   const surname = typeof profileRow?.surname === 'string' ? profileRow.surname.trim() : ''
+  const fullName = [firstname, surname].filter(Boolean).join(' ').trim()
+  if (fullName) return fullName
   if (email) return email
-  if (firstname && surname) return `${firstname} ${surname}`
   return `ID ${fallbackId}`
 }
 
