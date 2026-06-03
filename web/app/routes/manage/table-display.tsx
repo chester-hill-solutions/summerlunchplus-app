@@ -46,6 +46,18 @@ type HoverCardConfig = {
   fields: HoverCardField[]
 }
 
+type WorkshopEnrollmentEnrichment = {
+  riding_display: string
+  giftcard_display: string
+  profile_hover_name: string
+  profile_hover_email: string
+  profile_hover_parent_email: string
+}
+
+type WorkshopEnrollmentEnrichmentResponse = {
+  byProfileId: Record<string, WorkshopEnrollmentEnrichment>
+}
+
 type LoaderData = {
   columns: string[]
   rows: Record<string, unknown>[]
@@ -57,6 +69,7 @@ type LoaderData = {
     truncate?: boolean
     filterable?: boolean
     numeric?: boolean
+    maxChars?: number
     hoverCard?: HoverCardConfig
   }>
   canEditStatus?: boolean
@@ -261,8 +274,11 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
   const [createValues, setCreateValues] = useState<Record<string, string>>({})
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Record<string, string>>({})
+  const [enrichmentByProfileId, setEnrichmentByProfileId] = useState<Record<string, WorkshopEnrollmentEnrichment>>({})
+  const loadingEnrichmentProfileIdsRef = useRef<Set<string>>(new Set())
   const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const filterPopoverRef = useRef<HTMLDivElement | null>(null)
+  const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
 
   useEffect(() => {
     const nextSort = searchParams.get('sort')
@@ -349,8 +365,20 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
       return selectedValues.includes(cellValue)
     })
 
+  const rowsWithEnrichment = useMemo(() => {
+    if (!isWorkshopEnrollmentTable) return rows
+
+    return rows.map(row => {
+      const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+      if (!profileId) return row
+      const enrichment = enrichmentByProfileId[profileId]
+      if (!enrichment) return row
+      return { ...row, ...enrichment }
+    })
+  }, [enrichmentByProfileId, isWorkshopEnrollmentTable, rows])
+
   const derivedRows = useMemo(() => {
-    let adjustedRows = rows.filter(row => rowMatchesFilters(row, filters))
+    let adjustedRows = rowsWithEnrichment.filter(row => rowMatchesFilters(row, filters))
     if (sortColumn && sortStage > 0) {
       adjustedRows.sort((a, b) => {
         const aValue = getCellValue(sortColumn, a)
@@ -361,19 +389,19 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
       })
     }
     return adjustedRows
-  }, [rows, columns, filters, sortColumn, sortStage, tableName])
+  }, [rowsWithEnrichment, columns, filters, sortColumn, sortStage, tableName])
 
   const filterOptionsByColumn = useMemo(() => {
     return columns.reduce<Record<string, string[]>>((acc, column) => {
       const nextOptions = new Set<string>()
-      for (const row of rows) {
+      for (const row of rowsWithEnrichment) {
         if (!rowMatchesFilters(row, filters, column)) continue
         nextOptions.add(getCellValue(column, row, tableName))
       }
       acc[column] = Array.from(nextOptions).sort((a, b) => a.localeCompare(b))
       return acc
     }, {})
-  }, [columns, rows, filters, tableName])
+  }, [columns, rowsWithEnrichment, filters, tableName])
 
   const totalRows = derivedRows.length
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
@@ -389,6 +417,71 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     const start = (effectivePage - 1) * pageSize
     return derivedRows.slice(start, start + pageSize)
   }, [derivedRows, effectivePage, pageSize])
+
+  useEffect(() => {
+    if (!isWorkshopEnrollmentTable) return
+
+    const missingProfileIds = Array.from(
+      new Set(
+        paginatedRows
+          .map(row => (typeof row.profile_id === 'string' ? row.profile_id : ''))
+          .filter(profileId =>
+            Boolean(profileId) &&
+            !enrichmentByProfileId[profileId] &&
+            !loadingEnrichmentProfileIdsRef.current.has(profileId)
+          )
+      )
+    )
+
+    if (!missingProfileIds.length) return
+
+    const requestProfileIds = missingProfileIds.slice(0, 40)
+    requestProfileIds.forEach(profileId => loadingEnrichmentProfileIdsRef.current.add(profileId))
+
+    const abortController = new AbortController()
+    void (async () => {
+      try {
+        const searchParams = new URLSearchParams()
+        requestProfileIds.forEach(profileId => searchParams.append('profileId', profileId))
+        const response = await fetch(`/manage/workshop-enrollment/enrichment?${searchParams.toString()}`, {
+          signal: abortController.signal,
+        })
+
+        if (!response.ok) return
+        const payload = (await response.json()) as WorkshopEnrollmentEnrichmentResponse
+        const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
+          riding_display: '',
+          giftcard_display: 'N/A',
+          profile_hover_name: 'N/A',
+          profile_hover_email: 'N/A',
+          profile_hover_parent_email: 'N/A',
+        }
+
+        const resolvedByProfileId = requestProfileIds.reduce<Record<string, WorkshopEnrollmentEnrichment>>(
+          (acc, profileId) => {
+            acc[profileId] = payload?.byProfileId?.[profileId] ?? fallbackEnrichment
+            return acc
+          },
+          {}
+        )
+
+        setEnrichmentByProfileId(prev => ({
+          ...prev,
+          ...resolvedByProfileId,
+        }))
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          console.error('[table display] enrichment fetch failed', error)
+        }
+      } finally {
+        requestProfileIds.forEach(profileId => loadingEnrichmentProfileIdsRef.current.delete(profileId))
+      }
+    })()
+
+    return () => {
+      abortController.abort()
+    }
+  }, [enrichmentByProfileId, isWorkshopEnrollmentTable, paginatedRows])
 
   const updateSort = (column: string) => {
     if (sortColumn !== column) {
@@ -529,7 +622,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
   }, [openFilterColumn])
 
   const isClassAttendance = tableName === 'class-attendance'
-  const isWorkshopEnrollment = tableName === 'class-enrollment'
+  const isWorkshopEnrollment = isWorkshopEnrollmentTable
   const canInlineInsert = Boolean(editorConfig?.allowInsert)
   const canInlineUpdate = Boolean(editorConfig?.allowUpdate)
 
@@ -1000,6 +1093,11 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                       const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
                       const filterable = columnMeta[column]?.filterable ?? true
                       const cellValue = getCellValue(column, row, tableName)
+                      const maxChars = columnMeta[column]?.maxChars
+                      const displayValue =
+                        typeof maxChars === 'number' && maxChars > 0 && cellValue.length > maxChars
+                          ? `${cellValue.slice(0, maxChars)}...`
+                          : cellValue
                       const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard)
 
                       const content = isFormNameLink ? (
@@ -1014,7 +1112,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                           className="underline decoration-dotted underline-offset-2 hover:text-primary"
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
-                            {cellValue}
+                            {displayValue}
                           </span>
                         </Link>
                       ) : isFormAnswersLink ? (
@@ -1029,7 +1127,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                           className="underline decoration-dotted underline-offset-2 hover:text-primary"
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
-                            {cellValue}
+                            {displayValue}
                           </span>
                         </Link>
                       ) : personLink ? (
@@ -1039,12 +1137,12 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                           className="underline decoration-dotted underline-offset-2 hover:text-primary"
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
-                            {cellValue}
+                            {displayValue}
                           </span>
                         </Link>
                       ) : (
                         <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
-                          {cellValue}
+                          {displayValue}
                         </span>
                       )
 
