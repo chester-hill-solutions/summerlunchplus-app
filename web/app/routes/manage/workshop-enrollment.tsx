@@ -22,6 +22,8 @@ const ENROLLMENT_STATUS_ORDER: Record<Database['public']['Enums']['workshop_enro
   rejected: 4,
 }
 
+const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
+
 const toTime = (value: unknown) => {
   if (typeof value !== 'string' || !value) return Number.POSITIVE_INFINITY
   const parsed = Date.parse(value)
@@ -65,6 +67,17 @@ type GuardianChildEdge = {
   guardian_profile_id: string
   child_profile_id: string
   primary_child: boolean
+}
+
+type FormSubmissionRow = {
+  id: string
+  profile_id: string | null
+  submitted_at: string | null
+}
+
+type FormAnswerRow = {
+  submission_id: string
+  value: unknown
 }
 
 const normalizeRiding = (value: unknown) =>
@@ -157,32 +170,67 @@ export async function loader(args: Route.LoaderArgs) {
   let profileById = new Map<string, RidingProfileRow>()
   let guardiansByChildId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
   let childrenByGuardianId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
+  let familyProfileIdsByProfileId = new Map<string, string[]>()
+  let mealKitByProfileId = new Map<string, boolean>()
+  let giftCardPreferenceByProfileId = new Map<string, string>()
 
   if (profileIds.length) {
-    const { data: familyEdges, error: familyEdgesError } = await adminClient
-      .from('person_guardian_child')
-      .select('guardian_profile_id, child_profile_id, primary_child')
-      .or(`guardian_profile_id.in.(${profileIds.join(',')}),child_profile_id.in.(${profileIds.join(',')})`)
+    const seen = new Set<string>(profileIds)
+    const queue = [...profileIds]
+    const familyEdges: GuardianChildEdge[] = []
 
-    if (!familyEdgesError) {
-      for (const edge of (familyEdges ?? []) as GuardianChildEdge[]) {
-        pushEdge(guardiansByChildId, edge.child_profile_id, edge.guardian_profile_id, edge.primary_child)
-        pushEdge(childrenByGuardianId, edge.guardian_profile_id, edge.child_profile_id, edge.primary_child)
+    while (queue.length) {
+      const batch = queue.splice(0, queue.length)
+      const { data: batchEdges, error: familyEdgesError } = await adminClient
+        .from('person_guardian_child')
+        .select('guardian_profile_id, child_profile_id, primary_child')
+        .or(`guardian_profile_id.in.(${batch.join(',')}),child_profile_id.in.(${batch.join(',')})`)
+
+      if (familyEdgesError) {
+        break
+      }
+
+      for (const edge of (batchEdges ?? []) as GuardianChildEdge[]) {
+        familyEdges.push(edge)
+        if (!seen.has(edge.guardian_profile_id)) {
+          seen.add(edge.guardian_profile_id)
+          queue.push(edge.guardian_profile_id)
+        }
+        if (!seen.has(edge.child_profile_id)) {
+          seen.add(edge.child_profile_id)
+          queue.push(edge.child_profile_id)
+        }
       }
     }
 
-    const profileScope = new Set<string>(profileIds)
-    for (const edgeList of guardiansByChildId.values()) {
-      for (const edge of edgeList) profileScope.add(edge.profileId)
+    for (const edge of familyEdges) {
+      pushEdge(guardiansByChildId, edge.child_profile_id, edge.guardian_profile_id, edge.primary_child)
+      pushEdge(childrenByGuardianId, edge.guardian_profile_id, edge.child_profile_id, edge.primary_child)
     }
-    for (const edgeList of childrenByGuardianId.values()) {
-      for (const edge of edgeList) profileScope.add(edge.profileId)
+
+    const profileScope = Array.from(seen)
+    const familyAdjacency = new Map<string, Set<string>>()
+    for (const profileId of profileScope) {
+      if (!familyAdjacency.has(profileId)) {
+        familyAdjacency.set(profileId, new Set())
+      }
+    }
+
+    for (const edge of familyEdges) {
+      if (!familyAdjacency.has(edge.guardian_profile_id)) {
+        familyAdjacency.set(edge.guardian_profile_id, new Set())
+      }
+      if (!familyAdjacency.has(edge.child_profile_id)) {
+        familyAdjacency.set(edge.child_profile_id, new Set())
+      }
+      familyAdjacency.get(edge.guardian_profile_id)?.add(edge.child_profile_id)
+      familyAdjacency.get(edge.child_profile_id)?.add(edge.guardian_profile_id)
     }
 
     const { data: profileRows, error: profileRowsError } = await adminClient
       .from('profile')
       .select('id, role, federal_electoral_district_name')
-      .in('id', Array.from(profileScope))
+      .in('id', profileScope)
 
     if (!profileRowsError) {
       profileById = new Map(
@@ -190,6 +238,115 @@ export async function loader(args: Route.LoaderArgs) {
           .filter(profile => typeof profile.id === 'string' && profile.id)
           .map(profile => [profile.id, profile])
       )
+
+      const visited = new Set<string>()
+      for (const rootProfileId of profileScope) {
+        if (visited.has(rootProfileId)) continue
+
+        const familyIds: string[] = []
+        const bfsQueue = [rootProfileId]
+        visited.add(rootProfileId)
+
+        while (bfsQueue.length) {
+          const currentProfileId = bfsQueue.shift()
+          if (!currentProfileId) continue
+          familyIds.push(currentProfileId)
+
+          for (const neighbor of familyAdjacency.get(currentProfileId) ?? []) {
+            if (visited.has(neighbor)) continue
+            visited.add(neighbor)
+            bfsQueue.push(neighbor)
+          }
+        }
+
+        familyIds.sort((left, right) => left.localeCompare(right))
+        for (const familyProfileId of familyIds) {
+          familyProfileIdsByProfileId.set(familyProfileId, familyIds)
+        }
+      }
+
+      const ridingNames = Array.from(
+        new Set(
+          (profileRows ?? [])
+            .map(profile => normalizeRiding(profile.federal_electoral_district_name))
+            .filter((riding): riding is string => Boolean(riding))
+        )
+      )
+
+      const mealKitByRidingName = new Map<string, boolean>()
+      if (ridingNames.length) {
+        const { data: ridingRows, error: ridingRowsError } = await adminClient
+          .from('federal_electoral_district')
+          .select('name, meal_kit')
+          .in('name', ridingNames)
+
+        if (!ridingRowsError) {
+          for (const riding of ridingRows ?? []) {
+            if (typeof riding.name !== 'string') continue
+            mealKitByRidingName.set(riding.name, riding.meal_kit === true)
+          }
+        }
+      }
+
+      for (const profile of profileById.values()) {
+        const ridingName = normalizeRiding(profile.federal_electoral_district_name)
+        if (!ridingName) {
+          mealKitByProfileId.set(profile.id, false)
+          continue
+        }
+
+        mealKitByProfileId.set(profile.id, mealKitByRidingName.get(ridingName) === true)
+      }
+
+      const { data: submissionRows, error: submissionRowsError } = await adminClient
+        .from('form_submission')
+        .select('id, profile_id, submitted_at')
+        .in('profile_id', profileScope)
+        .order('submitted_at', { ascending: false })
+
+      if (!submissionRowsError) {
+        const submissions = (submissionRows ?? []) as FormSubmissionRow[]
+        const submissionIds = submissions
+          .map(submission => submission.id)
+          .filter((submissionId): submissionId is string => Boolean(submissionId))
+
+        if (submissionIds.length) {
+          const { data: answerRows, error: answerRowsError } = await adminClient
+            .from('form_answer')
+            .select('submission_id, value')
+            .eq('question_code', GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+            .in('submission_id', submissionIds)
+
+          if (!answerRowsError) {
+            const submissionById = new Map(submissions.map(submission => [submission.id, submission]))
+            const latestGiftCardByProfileId = new Map<string, { value: string; submittedAt: number }>()
+
+            for (const answer of (answerRows ?? []) as FormAnswerRow[]) {
+              const submission = submissionById.get(answer.submission_id)
+              const profileId = submission?.profile_id
+              if (!profileId) continue
+
+              const value = typeof answer.value === 'string' ? answer.value.trim() : ''
+              if (!value) continue
+
+              const submittedAt = Date.parse(submission?.submitted_at ?? '')
+              const submittedAtTime = Number.isNaN(submittedAt) ? 0 : submittedAt
+              const existing = latestGiftCardByProfileId.get(profileId)
+
+              if (!existing || submittedAtTime > existing.submittedAt) {
+                latestGiftCardByProfileId.set(profileId, {
+                  value,
+                  submittedAt: submittedAtTime,
+                })
+              }
+            }
+
+            giftCardPreferenceByProfileId = new Map(
+              Array.from(latestGiftCardByProfileId.entries()).map(([profileId, entry]) => [profileId, entry.value])
+            )
+          }
+        }
+      }
     }
   }
 
@@ -234,10 +391,41 @@ export async function loader(args: Route.LoaderArgs) {
 
     const ridingDisplay = studentRiding ?? parentRiding ?? normalizeRiding(enrollmentProfile?.federal_electoral_district_name) ?? ''
 
+    const candidateProfileIds: string[] = []
+    const addCandidate = (candidateId: string | null) => {
+      if (!candidateId || candidateProfileIds.includes(candidateId)) return
+      candidateProfileIds.push(candidateId)
+    }
+
+    addCandidate(inferredStudentProfileId)
+    addCandidate(inferredParentProfileId)
+
+    for (const familyProfileId of familyProfileIdsByProfileId.get(profileId) ?? []) {
+      addCandidate(familyProfileId)
+    }
+
+    addCandidate(profileId || null)
+
+    const giftcardDisplay = (() => {
+      for (const candidateProfileId of candidateProfileIds) {
+        if (mealKitByProfileId.get(candidateProfileId) === true) {
+          return 'Meal Kit'
+        }
+
+        const giftCardChoice = giftCardPreferenceByProfileId.get(candidateProfileId)
+        if (giftCardChoice) {
+          return giftCardChoice
+        }
+      }
+
+      return 'N/A'
+    })()
+
     const baseRow = {
       ...row,
       enrolled_capacity: capacity === null ? `${approved}/-` : `${approved}/${capacity}`,
       riding_display: ridingDisplay,
+      giftcard_display: giftcardDisplay,
     }
 
     if (!profileSignals.length) {
@@ -293,6 +481,20 @@ export async function loader(args: Route.LoaderArgs) {
     }
   }
 
+  if (!columns.includes('giftcard_display')) {
+    const ridingIndex = columns.indexOf('riding_display')
+    if (ridingIndex >= 0) {
+      columns = [...columns.slice(0, ridingIndex + 1), 'giftcard_display', ...columns.slice(ridingIndex + 1)]
+    } else {
+      const profileIndex = columns.indexOf('profile_display')
+      if (profileIndex >= 0) {
+        columns = [...columns.slice(0, profileIndex + 1), 'giftcard_display', ...columns.slice(profileIndex + 1)]
+      } else {
+        columns = [...columns, 'giftcard_display']
+      }
+    }
+  }
+
   if (columns.includes('semester_range')) {
     columns = [...columns.filter(column => column !== 'semester_range'), 'semester_range']
   }
@@ -308,6 +510,9 @@ export async function loader(args: Route.LoaderArgs) {
       },
       riding_display: {
         label: 'riding',
+      },
+      giftcard_display: {
+        label: 'giftcard',
       },
     },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
