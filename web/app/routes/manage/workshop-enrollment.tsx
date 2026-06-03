@@ -60,6 +60,9 @@ const parseEnrollmentField = (
 type RidingProfileRow = {
   id: string
   role: string | null
+  firstname: string | null
+  surname: string | null
+  email: string | null
   federal_electoral_district_name: string | null
 }
 
@@ -82,6 +85,16 @@ type FormAnswerRow = {
 
 const normalizeRiding = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : null
+
+const normalizeText = (value: unknown) =>
+  typeof value === 'string' && value.trim() ? value.trim() : null
+
+const fullNameFromProfile = (profile: RidingProfileRow | null | undefined) => {
+  const firstname = normalizeText(profile?.firstname)
+  const surname = normalizeText(profile?.surname)
+  const fullName = [firstname, surname].filter(Boolean).join(' ').trim()
+  return fullName || null
+}
 
 const pushEdge = (
   map: Map<string, Array<{ profileId: string; primary: boolean }>>,
@@ -229,7 +242,7 @@ export async function loader(args: Route.LoaderArgs) {
 
     const { data: profileRows, error: profileRowsError } = await adminClient
       .from('profile')
-      .select('id, role, federal_electoral_district_name')
+      .select('id, role, firstname, surname, email, federal_electoral_district_name')
       .in('id', profileScope)
 
     if (!profileRowsError) {
@@ -390,6 +403,11 @@ export async function loader(args: Route.LoaderArgs) {
       : null
 
     const ridingDisplay = studentRiding ?? parentRiding ?? normalizeRiding(enrollmentProfile?.federal_electoral_district_name) ?? ''
+    const profileHoverName = fullNameFromProfile(enrollmentProfile) ?? 'N/A'
+    const profileHoverEmail = normalizeText(enrollmentProfile?.email) ?? 'N/A'
+    const profileHoverParentEmail = inferredParentProfileId
+      ? normalizeText(profileById.get(inferredParentProfileId)?.email) ?? 'N/A'
+      : 'N/A'
 
     const candidateProfileIds: string[] = []
     const addCandidate = (candidateId: string | null) => {
@@ -426,6 +444,9 @@ export async function loader(args: Route.LoaderArgs) {
       enrolled_capacity: capacity === null ? `${approved}/-` : `${approved}/${capacity}`,
       riding_display: ridingDisplay,
       giftcard_display: giftcardDisplay,
+      profile_hover_name: profileHoverName,
+      profile_hover_email: profileHoverEmail,
+      profile_hover_parent_email: profileHoverParentEmail,
     }
 
     if (!profileSignals.length) {
@@ -499,12 +520,28 @@ export async function loader(args: Route.LoaderArgs) {
     columns = [...columns.filter(column => column !== 'semester_range'), 'semester_range']
   }
 
+  const baseColumnMeta = (base.columnMeta ?? {}) as Record<
+    string,
+    { label?: string; truncate?: boolean; filterable?: boolean; numeric?: boolean }
+  >
+
   return {
     ...base,
     columns,
     rows: enrichedRows,
     columnMeta: {
-      ...(base.columnMeta ?? {}),
+      ...baseColumnMeta,
+      profile_display: {
+        ...(baseColumnMeta.profile_display ?? {}),
+        hoverCard: {
+          titleField: 'profile_hover_name',
+          titleFallback: 'N/A',
+          fields: [
+            { label: 'Email', field: 'profile_hover_email', fallback: 'N/A' },
+            { label: 'Parent Email', field: 'profile_hover_parent_email', fallback: 'N/A' },
+          ],
+        },
+      },
       enrolled_capacity: {
         label: 'enrolled/capacity',
       },

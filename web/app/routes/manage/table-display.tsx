@@ -34,13 +34,31 @@ type ForeignKeyOption = {
   label: string
 }
 
+type HoverCardField = {
+  label: string
+  field: string
+  fallback?: string
+}
+
+type HoverCardConfig = {
+  titleField?: string
+  titleFallback?: string
+  fields: HoverCardField[]
+}
+
 type LoaderData = {
   columns: string[]
   rows: Record<string, unknown>[]
   label: string
   tableName: string
   tableVariant?: 'default' | 'pivot'
-  columnMeta?: Record<string, { label?: string; truncate?: boolean; filterable?: boolean; numeric?: boolean }>
+  columnMeta?: Record<string, {
+    label?: string
+    truncate?: boolean
+    filterable?: boolean
+    numeric?: boolean
+    hoverCard?: HoverCardConfig
+  }>
   canEditStatus?: boolean
   editorConfig?: EditorConfig
   foreignKeyOptions?: Record<string, ForeignKeyOption[]>
@@ -107,6 +125,30 @@ const getCellValue = (column: string, row: Record<string, unknown>, tableName?: 
     return formatTimestamp(value)
   }
   return (value ?? '').toString()
+}
+
+const normalizeHoverCardValue = (value: unknown) => {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return ''
+}
+
+const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardConfig) => {
+  if (!config?.fields.length) return null
+
+  const titleRaw = config.titleField ? normalizeHoverCardValue(row[config.titleField]) : ''
+  const title = titleRaw || config.titleFallback || ''
+  const fields = config.fields.map(field => {
+    const rawValue = normalizeHoverCardValue(row[field.field])
+    return {
+      label: field.label,
+      value: rawValue || field.fallback || '',
+    }
+  })
+
+  const hasValue = Boolean(title) || fields.some(field => Boolean(field.value))
+  return hasValue ? { title, fields } : null
 }
 
 const getDirectionIndicator = (stage: 0 | 1 | 2) => {
@@ -958,6 +1000,53 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                       const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
                       const filterable = columnMeta[column]?.filterable ?? true
                       const cellValue = getCellValue(column, row, tableName)
+                      const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard)
+
+                      const content = isFormNameLink ? (
+                        <Link
+                          to={{
+                            pathname: `/manage/form/${row.id}`,
+                            search: new URLSearchParams({
+                              returnTo: `${location.pathname}${location.search}`,
+                            }).toString(),
+                          }}
+                          onClick={event => event.stopPropagation()}
+                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                        >
+                          <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
+                            {cellValue}
+                          </span>
+                        </Link>
+                      ) : isFormAnswersLink ? (
+                        <Link
+                          to={{
+                            pathname: `/manage/form/${row.id}/answers`,
+                            search: new URLSearchParams({
+                              returnTo: `${location.pathname}${location.search}`,
+                            }).toString(),
+                          }}
+                          onClick={event => event.stopPropagation()}
+                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                        >
+                          <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
+                            {cellValue}
+                          </span>
+                        </Link>
+                      ) : personLink ? (
+                        <Link
+                          to={personLink}
+                          onClick={event => event.stopPropagation()}
+                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                        >
+                          <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
+                            {cellValue}
+                          </span>
+                        </Link>
+                      ) : (
+                        <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
+                          {cellValue}
+                        </span>
+                      )
 
                       return (
                         <td
@@ -973,50 +1062,25 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                             appendFilter(column, cellValue)
                           }}
                         >
-                          {isFormNameLink ? (
-                            <Link
-                              to={{
-                                pathname: `/manage/form/${row.id}`,
-                                search: new URLSearchParams({
-                                  returnTo: `${location.pathname}${location.search}`,
-                                }).toString(),
-                              }}
-                              onClick={event => event.stopPropagation()}
-                              className="underline decoration-dotted underline-offset-2 hover:text-primary"
-                            >
-                              <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
-                                {cellValue}
-                              </span>
-                            </Link>
-                          ) : isFormAnswersLink ? (
-                            <Link
-                              to={{
-                                pathname: `/manage/form/${row.id}/answers`,
-                                search: new URLSearchParams({
-                                  returnTo: `${location.pathname}${location.search}`,
-                                }).toString(),
-                              }}
-                              onClick={event => event.stopPropagation()}
-                              className="underline decoration-dotted underline-offset-2 hover:text-primary"
-                            >
-                              <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
-                                {cellValue}
-                              </span>
-                            </Link>
-                          ) : personLink ? (
-                            <Link
-                              to={personLink}
-                              onClick={event => event.stopPropagation()}
-                              className="underline decoration-dotted underline-offset-2 hover:text-primary"
-                            >
-                              <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
-                                {cellValue}
-                              </span>
-                            </Link>
+                          {hoverCardData ? (
+                            <div className="group/hovercard relative inline-block max-w-full">
+                              {content}
+                              <div className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-72 rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:visible group-hover/hovercard:opacity-100">
+                                {hoverCardData.title ? (
+                                  <p className="mb-1 truncate font-semibold text-foreground">{hoverCardData.title}</p>
+                                ) : null}
+                                <div className="space-y-1">
+                                  {hoverCardData.fields.map(field => (
+                                    <p key={`${column}-${field.label}`} className="break-words">
+                                      <span className="font-medium text-foreground">{field.label}: </span>
+                                      <span>{field.value || 'N/A'}</span>
+                                    </p>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
                           ) : (
-                            <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
-                              {cellValue}
-                            </span>
+                            content
                           )}
                         </td>
                       )
