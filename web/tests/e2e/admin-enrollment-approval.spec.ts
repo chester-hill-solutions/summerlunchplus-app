@@ -12,7 +12,10 @@ const uniqueSuffix = () => {
   return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}${String(now.getMilliseconds()).padStart(3, '0')}`
 }
 
-const fillRequiredFields = async (page: import('@playwright/test').Page) => {
+const fillRequiredFields = async (
+  page: import('@playwright/test').Page,
+  context?: { firstName?: string; surname?: string }
+) => {
   const form = page.locator('form').first()
 
   const requiredTextInputs = form.locator(
@@ -45,6 +48,16 @@ const fillRequiredFields = async (page: import('@playwright/test').Page) => {
 
     if (inputName.includes('postcode') || inputName.includes('postal')) {
       await input.fill('K1A 0B1')
+      continue
+    }
+
+    if (inputName.includes('firstname') || inputName.includes('first_name')) {
+      await input.fill(context?.firstName ?? 'Sai')
+      continue
+    }
+
+    if (inputName.includes('surname') || inputName.includes('last_name') || inputName.includes('lastname')) {
+      await input.fill(context?.surname ?? 'tests')
       continue
     }
 
@@ -149,10 +162,11 @@ const countMissingRequiredFields = async (page: import('@playwright/test').Page)
 const submitStepWithRetry = async (
   page: import('@playwright/test').Page,
   submitName: RegExp | string,
-  maxAttempts = 3
+  maxAttempts = 3,
+  context?: { firstName?: string; surname?: string }
 ) => {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    await fillRequiredFields(page)
+    await fillRequiredFields(page, context)
 
     const missingBeforeSubmit = await countMissingRequiredFields(page)
     if (missingBeforeSubmit > 0) {
@@ -174,8 +188,11 @@ const submitStepWithRetry = async (
 }
 
 const guardianSignupAndRequestEnrollment = async (page: import('@playwright/test').Page) => {
-  const email = `sai+tests${uniqueSuffix()}@chsolutions.ca`
+  const suffix = uniqueSuffix()
+  const email = `sai+tests${suffix}@chsolutions.ca`
   const password = 'Password123456!'
+  const firstName = 'Sai'
+  const surname = `tests${suffix}`
 
   await page.goto('/sign-up')
   await page.getByRole('button', { name: 'I am a Guardian' }).click()
@@ -206,7 +223,10 @@ const guardianSignupAndRequestEnrollment = async (page: import('@playwright/test
       await page.locator('input[name="additional_guardian_choice"][value="no"]').check()
     }
 
-    await submitStepWithRetry(page, /Save and continue|Saving\.\.\./)
+    await submitStepWithRetry(page, /Save and continue|Saving\.\.\./, 3, {
+      firstName,
+      surname,
+    })
     await page.waitForLoadState('networkidle')
   }
 
@@ -266,7 +286,10 @@ const guardianSignupAndRequestEnrollment = async (page: import('@playwright/test
 
   await expect(preProgramLink).toBeVisible()
   await preProgramLink.click()
-  await submitStepWithRetry(page, 'Save and continue', 4)
+  await submitStepWithRetry(page, 'Save and continue', 4, {
+    firstName,
+    surname,
+  })
 
   const enrollAction = page.getByRole('button', { name: /Request enrollment|Join waitlist/ }).first()
   await expect(enrollAction).toBeVisible()
@@ -275,7 +298,7 @@ const guardianSignupAndRequestEnrollment = async (page: import('@playwright/test
   await expect(page).toHaveURL(/\/home\?/)
   await expect(page).toHaveURL(/enrollmentStatus=success/)
 
-  return { guardianEmail: email }
+  return { guardianEmail: email, firstName, surname }
 }
 
 const getLatestEnrollmentForGuardian = async (guardianEmail: string) => {
@@ -291,19 +314,106 @@ const getLatestEnrollmentForGuardian = async (guardianEmail: string) => {
     throw new Error(guardianProfileError?.message ?? 'Guardian profile not found')
   }
 
-  const { data: enrollment, error: enrollmentError } = await adminSupabase
+  const { data: enrollments, error: enrollmentError } = await adminSupabase
     .from('workshop_enrollment')
-    .select('id, status')
+    .select('id, status, requested_at')
     .eq('profile_id', guardianProfile.id)
     .order('requested_at', { ascending: false })
-    .limit(1)
-    .single()
+    .limit(25)
 
-  if (enrollmentError || !enrollment?.id) {
+  if (enrollmentError) {
     throw new Error(enrollmentError?.message ?? 'Enrollment not found for guardian')
   }
 
+  const enrollment = (enrollments ?? []).find(row => row.status === 'pending' || row.status === 'waitlisted')
+    ?? (enrollments ?? [])[0]
+
+  if (!enrollment?.id) {
+    throw new Error('Enrollment not found for guardian')
+  }
+
   return enrollment
+}
+
+const waitForEnrollmentStatus = async (guardianEmail: string, expectedStatus: 'approved') => {
+  const enrollment = await getLatestEnrollmentForGuardian(guardianEmail)
+  return waitForEnrollmentRecordStatus(enrollment.id, expectedStatus)
+}
+
+const waitForEnrollmentRecordStatus = async (enrollmentId: string, expectedStatus: 'approved') => {
+  const adminSupabase = getAdminSupabaseClient()
+  const started = Date.now()
+  while (Date.now() - started < 20_000) {
+    const { data, error } = await adminSupabase
+      .from('workshop_enrollment')
+      .select('id, status, requested_at')
+      .eq('id', enrollmentId)
+      .single()
+
+    if (error) {
+      throw new Error(error.message)
+    }
+
+    if (data?.status === expectedStatus) return data
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+  throw new Error(`Enrollment did not reach status ${expectedStatus} in time`)
+}
+
+const waitForAcceptedEmailLog = async ({
+  enrollmentId,
+  recipientEmail,
+}: {
+  enrollmentId: string
+  recipientEmail: string
+}) => {
+  const adminSupabase = getAdminSupabaseClient()
+  const normalizedEmail = recipientEmail.toLowerCase()
+  const started = Date.now()
+
+  while (Date.now() - started < 20_000) {
+    const { data, error } = await adminSupabase
+      .from('email_message')
+      .select('id, status, template_key, to_email, workshop_enrollment_id, error_message, created_at')
+      .eq('workshop_enrollment_id', enrollmentId)
+      .eq('template_key', 'family_enrollment_accepted_v1')
+      .eq('to_email', normalizedEmail)
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (error) throw new Error(error.message)
+    if ((data ?? []).length > 0) {
+      return data?.[0]
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+
+  throw new Error('No accepted-email log row found for guardian after approval')
+}
+
+const assertGuardianProfileName = async ({
+  guardianEmail,
+  firstName,
+  surname,
+}: {
+  guardianEmail: string
+  firstName: string
+  surname: string
+}) => {
+  const adminSupabase = getAdminSupabaseClient()
+  const { data, error } = await adminSupabase
+    .from('profile')
+    .select('firstname, surname')
+    .eq('email', guardianEmail)
+    .single()
+
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Guardian profile not found for name verification')
+  }
+
+  expect(data.firstname).toBe(firstName)
+  expect(data.surname).toBe(surname)
 }
 
 test.describe.serial('admin-managed enrollment lifecycle', () => {
@@ -319,7 +429,9 @@ test.describe.serial('admin-managed enrollment lifecycle', () => {
   })
 
   test('guardian requests enrollment and admin accepts it', async ({ page }) => {
-    const { guardianEmail } = await guardianSignupAndRequestEnrollment(page)
+    const { guardianEmail, firstName, surname } = await guardianSignupAndRequestEnrollment(page)
+    await assertGuardianProfileName({ guardianEmail, firstName, surname })
+
     const enrollment = await getLatestEnrollmentForGuardian(guardianEmail)
 
     await expect(['pending', 'waitlisted']).toContain(enrollment.status)
@@ -336,7 +448,14 @@ test.describe.serial('admin-managed enrollment lifecycle', () => {
 
     expect(response.ok()).toBeTruthy()
 
-    const updated = await getLatestEnrollmentForGuardian(guardianEmail)
+    const updated = await waitForEnrollmentRecordStatus(enrollment.id, 'approved')
     expect(updated.status).toBe('approved')
+
+    const acceptedEmailLog = await waitForAcceptedEmailLog({
+      enrollmentId: enrollment.id,
+      recipientEmail: guardianEmail,
+    })
+    expect(acceptedEmailLog.template_key).toBe('family_enrollment_accepted_v1')
+    expect(acceptedEmailLog.to_email).toBe(guardianEmail.toLowerCase())
   })
 })
