@@ -314,10 +314,26 @@ const getLatestEnrollmentForGuardian = async (guardianEmail: string) => {
     throw new Error(guardianProfileError?.message ?? 'Guardian profile not found')
   }
 
+  const { data: links, error: linksError } = await adminSupabase
+    .from('person_guardian_child')
+    .select('child_profile_id')
+    .eq('guardian_profile_id', guardianProfile.id)
+
+  if (linksError) {
+    throw new Error(linksError.message)
+  }
+
+  const familyProfileIds = Array.from(
+    new Set([
+      guardianProfile.id,
+      ...(links ?? []).map(link => link.child_profile_id).filter((id): id is string => Boolean(id)),
+    ])
+  )
+
   const { data: enrollments, error: enrollmentError } = await adminSupabase
     .from('workshop_enrollment')
     .select('id, status, requested_at')
-    .eq('profile_id', guardianProfile.id)
+    .in('profile_id', familyProfileIds)
     .order('requested_at', { ascending: false })
     .limit(25)
 
