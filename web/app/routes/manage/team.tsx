@@ -56,16 +56,16 @@ export default function TeamLayout() {
   }
 
   return (
-    <main className="flex min-h-[calc(100svh-4rem)] w-full">
+    <main className="flex w-full items-start">
       <aside
         className={cn(
-          'relative z-50 shrink-0 overflow-visible border-r bg-card transition-[width] duration-200',
+          'sticky top-16 z-50 h-[calc(100svh-4rem)] shrink-0 overflow-y-auto overflow-x-visible border-r bg-card transition-[width] duration-200',
           sidebarCollapsed ? 'w-16' : 'w-64'
         )}
       >
         <div
           className={cn(
-            'flex h-full flex-col p-2',
+            'flex flex-col p-2',
             sidebarCollapsed ? 'overflow-visible' : 'overflow-visible'
           )}
         >
@@ -183,7 +183,7 @@ export default function TeamLayout() {
         </div>
       </aside>
 
-      <section className="relative z-0 min-w-0 flex-1 space-y-6 p-6">
+      <section className="relative z-0 min-w-0 flex-1 space-y-6 px-6 pt-6 pb-0">
         <Outlet />
       </section>
     </main>
