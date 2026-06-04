@@ -66,7 +66,7 @@ export default function TeamLayout() {
         <div
           className={cn(
             'flex h-full flex-col p-2',
-            sidebarCollapsed ? 'overflow-visible' : 'overflow-y-auto overflow-x-hidden'
+            sidebarCollapsed ? 'overflow-visible' : 'overflow-visible'
           )}
         >
           <div className={cn('flex items-center', sidebarCollapsed ? 'justify-center' : 'justify-between')}>
