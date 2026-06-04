@@ -22,15 +22,29 @@ export const listDrafts = listEmailDrafts
 export const createDraft = async ({
   draftKey,
   title,
+  triggerSummary,
+  triggerEventKey,
+  triggerOwner,
   channel,
   actorUserId,
 }: {
   draftKey: string
   title: string
+  triggerSummary: string
+  triggerEventKey?: string | null
+  triggerOwner?: string | null
   channel: EmailDraftChannel
   actorUserId: string
 }) => {
-  return createEmailDraft({ draftKey, title, channel, actorUserId })
+  return createEmailDraft({
+    draftKey,
+    title,
+    triggerSummary,
+    triggerEventKey,
+    triggerOwner,
+    channel,
+    actorUserId,
+  })
 }
 
 export const getDraftForEditor = async (draftId: string) => {
@@ -47,6 +61,9 @@ export const saveDraft = async ({
   actorUserId,
   title,
   description,
+  triggerSummary,
+  triggerEventKey,
+  triggerOwner,
   status,
   subjectMarkdown,
   bodyMarkdown,
@@ -56,6 +73,9 @@ export const saveDraft = async ({
   actorUserId: string
   title: string
   description: string | null
+  triggerSummary: string
+  triggerEventKey: string | null
+  triggerOwner: string | null
   status: EmailDraftStatus
   subjectMarkdown: string
   bodyMarkdown: string
@@ -67,6 +87,9 @@ export const saveDraft = async ({
     payload: {
       title,
       description,
+      triggerSummary,
+      triggerEventKey,
+      triggerOwner,
       status,
       subjectMarkdown,
       bodyMarkdown,
@@ -87,6 +110,8 @@ export const publishDraft = async ({
   const draft = await getEmailDraftById(draftId)
   const schema = (draft.variables_schema ?? {}) as EmailDraftSchema
   const validation = validateDraftForPublish({
+    channel: draft.channel,
+    triggerSummary: draft.trigger_summary,
     subjectMarkdown: draft.current_subject_markdown,
     bodyMarkdown: draft.current_body_markdown,
     variablesSchema: schema,
@@ -169,7 +194,13 @@ export const resolvePublishedDraftByKey = async ({
   draftKey: string
   variables?: Record<string, unknown>
 }) => {
-  const draft = await getEmailDraftByKey(draftKey)
+  let draft
+
+  try {
+    draft = await getEmailDraftByKey(draftKey)
+  } catch {
+    return null
+  }
 
   if (!draft.published_version_id) {
     return null
