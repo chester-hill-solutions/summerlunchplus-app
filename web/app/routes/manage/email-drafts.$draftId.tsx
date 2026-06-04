@@ -264,7 +264,7 @@ export default function EmailDraftEditorPage() {
         <div>
           <h1 className="text-2xl font-semibold">{draft.title}</h1>
           <p className="text-sm text-muted-foreground">
-            <span className="font-mono text-xs">{draft.draft_key}</span> - {draft.channel} - {draft.status}
+            {draft.channel} - {draft.status}
           </p>
         </div>
         <Button asChild variant="outline">
@@ -329,25 +329,6 @@ export default function EmailDraftEditorPage() {
               />
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="trigger-event-key">Trigger event key (optional)</Label>
-                <Input
-                  id="trigger-event-key"
-                  name="trigger_event_key"
-                  defaultValue={draft.trigger_event_key ?? ''}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="trigger-owner">Trigger owner file (optional)</Label>
-                <Input
-                  id="trigger-owner"
-                  name="trigger_owner"
-                  defaultValue={draft.trigger_owner ?? ''}
-                />
-              </div>
-            </div>
-
             <div className="grid gap-2">
               <Label htmlFor="subject-markdown">Subject markdown</Label>
               <Input
@@ -370,16 +351,45 @@ export default function EmailDraftEditorPage() {
               />
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="variables-schema">Variables schema (JSON)</Label>
-              <textarea
-                id="variables-schema"
-                name="variables_schema"
-                defaultValue={schemaText}
-                rows={8}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
-              />
-            </div>
+            <details className="rounded-md border bg-muted/10">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Advanced</summary>
+              <div className="space-y-4 border-t px-3 py-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="draft-key">Draft key</Label>
+                  <Input id="draft-key" value={draft.draft_key} readOnly className="font-mono text-xs" />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="trigger-event-key">Trigger event key (optional)</Label>
+                    <Input
+                      id="trigger-event-key"
+                      name="trigger_event_key"
+                      defaultValue={draft.trigger_event_key ?? ''}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="trigger-owner">Trigger owner file (optional)</Label>
+                    <Input
+                      id="trigger-owner"
+                      name="trigger_owner"
+                      defaultValue={draft.trigger_owner ?? ''}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="variables-schema">Variables schema (JSON)</Label>
+                  <textarea
+                    id="variables-schema"
+                    name="variables_schema"
+                    defaultValue={schemaText}
+                    rows={8}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
+                  />
+                </div>
+              </div>
+            </details>
 
             <div className="flex items-center gap-3">
               <Button type="submit" disabled={isSubmitting}>
