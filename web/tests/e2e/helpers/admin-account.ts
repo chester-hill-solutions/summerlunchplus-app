@@ -135,7 +135,15 @@ export const ensureReusableAdminAccount = async () => {
 }
 
 export const loginAsAdmin = async (page: import('@playwright/test').Page) => {
+  await page.context().clearCookies()
   await page.goto('/login')
+
+  const emailInput = page.getByLabel('Email')
+  if (!(await emailInput.isVisible({ timeout: 3000 }).catch(() => false))) {
+    await page.goto('/logout')
+    await page.goto('/login')
+  }
+
   await page.getByLabel('Email').fill(ADMIN_EMAIL)
   await page.getByLabel('Password').fill(ADMIN_PASSWORD)
   await page.getByRole('button', { name: 'Login' }).click()
