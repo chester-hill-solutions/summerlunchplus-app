@@ -183,7 +183,7 @@ export default function TeamLayout() {
         </div>
       </aside>
 
-      <section className="relative z-0 min-w-0 flex-1 space-y-6 overflow-y-auto p-6">
+      <section className="relative z-0 min-w-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto p-6">
         <Outlet />
       </section>
     </main>
