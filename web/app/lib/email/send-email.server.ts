@@ -1,6 +1,11 @@
 import type { Json } from '@/lib/database.types'
 import { resolvePublishedDraftByKey } from '@/lib/email/drafts/service.server'
 import {
+  compareRenderedEmail,
+  parseTemplateMigrationMode,
+  type TemplateMigrationMode,
+} from '@/lib/email/migration'
+import {
   emailTemplates,
   type EmailTemplateKey,
   type EmailTemplateMap,
@@ -40,11 +45,10 @@ type SendTransactionalEmailResult = {
   error: string | null
 }
 
-const parseBooleanFlag = (value: string | undefined) =>
-  value === '1' || value === 'true' || value === 'yes' || value === 'on'
-
-const migrationFlagForTemplate = (templateKey: string) =>
-  `EMAIL_DRAFT_USE_${templateKey.toUpperCase().replaceAll(/[^A-Z0-9]/g, '_')}`
+const TEMPLATE_FALLBACK_POLICY =
+  (process.env.EMAIL_DRAFT_FALLBACK_POLICY === 'fail-closed'
+    ? 'fail-closed'
+    : 'fallback-legacy') as 'fallback-legacy' | 'fail-closed'
 
 const normalizeTemplateVariables = (value: Json): Record<string, unknown> => {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -52,6 +56,44 @@ const normalizeTemplateVariables = (value: Json): Record<string, unknown> => {
   }
   return {}
 }
+
+const withMigrationMeta = ({
+  templateData,
+  mode,
+  source,
+  parity,
+  fallbackApplied,
+  fallbackReason,
+}: {
+  templateData: Json
+  mode: TemplateMigrationMode
+  source: 'legacy' | 'draft'
+  parity?: {
+    matched: boolean
+    subjectMatch: boolean
+    textMatch: boolean
+    htmlMatch: boolean
+  }
+  fallbackApplied?: boolean
+  fallbackReason?: string
+}): Json => {
+  if (!templateData || typeof templateData !== 'object' || Array.isArray(templateData)) {
+    return templateData
+  }
+
+  const payload = templateData as Record<string, unknown>
+  return {
+    ...payload,
+    _migration_mode: mode,
+    _template_source: source,
+    ...(parity ? { _parity_check: parity } : {}),
+    ...(fallbackApplied ? { _fallback_applied: true } : {}),
+    ...(fallbackReason ? { _fallback_reason: fallbackReason } : {}),
+  }
+}
+
+const renderLegacyTemplate = <K extends EmailTemplateKey>(templateKey: K, templateData: EmailTemplateMap[K]) =>
+  emailTemplates[templateKey].render(templateData)
 
 export const sendTransactionalEmail = async ({
   toEmail,
@@ -178,41 +220,143 @@ export const sendTemplateEmail = async <K extends EmailTemplateKey>({
   familyProfileId,
   workshopEnrollmentId,
 }: SendTemplateEmailArgs<K>) => {
-  const migrationFlag = migrationFlagForTemplate(templateKey)
-  const shouldUseDraft = parseBooleanFlag(process.env[migrationFlag])
-  let resolved = null as { subject: string; html: string; text: string } | null
+  const mode = parseTemplateMigrationMode({
+    templateKey,
+    env: process.env,
+  })
 
-  if (shouldUseDraft) {
-    try {
-      resolved = await resolvePublishedDraftByKey({
-        draftKey: templateKey,
-        variables: templateData as Record<string, unknown>,
-      })
+  const legacy = renderLegacyTemplate(templateKey, templateData)
+  const draft = await resolvePublishedDraftByKey({
+    draftKey: templateKey,
+    variables: templateData as Record<string, unknown>,
+  })
 
-      if (!resolved) {
-        console.warn('[email] draft resolver returned null, using legacy template', {
+  if (mode === 'shadow') {
+    if (draft) {
+      const parity = compareRenderedEmail({ legacy, draft })
+      console.info(
+        parity.matched
+          ? '[email][migration][shadow][match]'
+          : '[email][migration][shadow][mismatch]',
+        {
           templateKey,
-          migrationFlag,
-        })
-      }
-    } catch (error) {
-      console.error('[email] draft resolver failed, using legacy template', {
+          parity,
+        }
+      )
+
+      return sendTransactionalEmail({
+        toEmail,
+        subject: legacy.subject,
+        html: legacy.html,
+        text: legacy.text,
         templateKey,
-        migrationFlag,
-        error,
+        templateData: withMigrationMeta({
+          templateData: templateData as Json,
+          mode,
+          source: 'legacy',
+          parity,
+        }),
+        eventKey,
+        triggeredByUserId,
+        recipientUserId,
+        profileId,
+        familyProfileId,
+        workshopEnrollmentId,
       })
     }
+
+    console.warn('[email][migration][shadow][published-draft-not-found]', { templateKey })
+
+    return sendTransactionalEmail({
+      toEmail,
+      subject: legacy.subject,
+      html: legacy.html,
+      text: legacy.text,
+      templateKey,
+      templateData: withMigrationMeta({
+        templateData: templateData as Json,
+        mode,
+        source: 'legacy',
+        fallbackApplied: true,
+        fallbackReason: 'published-draft-not-found',
+      }),
+      eventKey,
+      triggeredByUserId,
+      recipientUserId,
+      profileId,
+      familyProfileId,
+      workshopEnrollmentId,
+    })
   }
 
-  const template = resolved ?? emailTemplates[templateKey].render(templateData)
+  if (mode === 'draft') {
+    if (draft) {
+      return sendTransactionalEmail({
+        toEmail,
+        subject: draft.subject,
+        html: draft.html,
+        text: draft.text,
+        templateKey,
+        templateData: withMigrationMeta({
+          templateData: templateData as Json,
+          mode,
+          source: 'draft',
+        }),
+        eventKey,
+        triggeredByUserId,
+        recipientUserId,
+        profileId,
+        familyProfileId,
+        workshopEnrollmentId,
+      })
+    }
+
+    if (TEMPLATE_FALLBACK_POLICY === 'fail-closed') {
+      return {
+        status: 'failed',
+        id: null,
+        error: `Draft mode enabled but no published draft found for template ${templateKey}`,
+      }
+    }
+
+    console.warn('[email][migration][draft][fallback-legacy]', {
+      templateKey,
+      fallbackPolicy: TEMPLATE_FALLBACK_POLICY,
+    })
+
+    return sendTransactionalEmail({
+      toEmail,
+      subject: legacy.subject,
+      html: legacy.html,
+      text: legacy.text,
+      templateKey,
+      templateData: withMigrationMeta({
+        templateData: templateData as Json,
+        mode,
+        source: 'legacy',
+        fallbackApplied: true,
+        fallbackReason: 'published-draft-not-found',
+      }),
+      eventKey,
+      triggeredByUserId,
+      recipientUserId,
+      profileId,
+      familyProfileId,
+      workshopEnrollmentId,
+    })
+  }
 
   return sendTransactionalEmail({
     toEmail,
-    subject: template.subject,
-    html: template.html,
-    text: template.text,
+    subject: legacy.subject,
+    html: legacy.html,
+    text: legacy.text,
     templateKey,
-    templateData: templateData as Json,
+    templateData: withMigrationMeta({
+      templateData: templateData as Json,
+      mode,
+      source: 'legacy',
+    }),
     eventKey,
     triggeredByUserId,
     recipientUserId,
@@ -241,19 +385,28 @@ export const resendEmailMessageById = async ({
     return { ok: false, error: error?.message ?? 'Email message not found' }
   }
 
+  const mode = parseTemplateMigrationMode({
+    templateKey: message.template_key,
+    env: process.env,
+  })
+
   const draftRendered = await resolvePublishedDraftByKey({
     draftKey: message.template_key,
     variables: normalizeTemplateVariables(message.template_data),
   })
 
-  if (draftRendered) {
+  if (draftRendered && mode !== 'legacy') {
     const resendResult = await sendTransactionalEmail({
       toEmail: message.to_email,
       subject: draftRendered.subject,
       html: draftRendered.html,
       text: draftRendered.text,
       templateKey: message.template_key,
-      templateData: message.template_data,
+      templateData: withMigrationMeta({
+        templateData: message.template_data,
+        mode,
+        source: 'draft',
+      }),
       eventKey: null,
       triggeredByUserId,
       recipientUserId: message.recipient_user_id,
@@ -282,7 +435,17 @@ export const resendEmailMessageById = async ({
     html: rendered.html,
     text: rendered.text,
     templateKey: message.template_key,
-    templateData: message.template_data,
+    templateData: withMigrationMeta({
+      templateData: message.template_data,
+      mode,
+      source: 'legacy',
+      ...(mode !== 'legacy'
+        ? {
+            fallbackApplied: true,
+            fallbackReason: draftRendered ? 'mode-set-legacy' : 'published-draft-not-found',
+          }
+        : {}),
+    }),
     eventKey: null,
     triggeredByUserId,
     recipientUserId: message.recipient_user_id,
