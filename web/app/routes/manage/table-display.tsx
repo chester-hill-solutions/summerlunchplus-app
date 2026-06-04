@@ -847,7 +847,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     : []
 
   return (
-    <div className="-mx-6 flex min-w-0 flex-col gap-4">
+    <div className="-mx-6 flex w-[calc(100%+3rem)] min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3 px-6">
         <div>
           <h1 className="text-2xl font-semibold">{label}</h1>
