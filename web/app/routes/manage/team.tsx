@@ -56,7 +56,7 @@ export default function TeamLayout() {
   }
 
   return (
-    <main className="flex min-h-[calc(100svh-4rem)] w-full overflow-x-hidden">
+    <main className="flex min-h-[calc(100svh-4rem)] w-full">
       <aside
         className={cn(
           'relative z-50 shrink-0 overflow-visible border-r bg-card transition-[width] duration-200',
@@ -183,7 +183,7 @@ export default function TeamLayout() {
         </div>
       </aside>
 
-      <section className="relative z-0 min-w-0 flex-1 space-y-6 overflow-x-hidden p-6">
+      <section className="relative z-0 min-w-0 flex-1 space-y-6 p-6">
         <Outlet />
       </section>
     </main>

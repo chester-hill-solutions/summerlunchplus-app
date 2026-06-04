@@ -940,8 +940,8 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
         </div>
       </div>
 
-      <div className="min-w-0 overflow-x-auto overflow-y-hidden border-y">
-        <table className="w-full table-auto text-sm">
+      <div className="min-w-0 border-y">
+        <table className="min-w-full w-max table-auto text-sm">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground">
             <tr>
               {columns.map(column => {
