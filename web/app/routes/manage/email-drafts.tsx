@@ -1,4 +1,5 @@
 import { Link, redirect, useFetcher, useLoaderData } from 'react-router'
+import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -108,16 +109,23 @@ export default function EmailDraftsPage() {
   const { drafts, channelFilter, statusFilter } = useLoaderData<typeof loader>()
   const fetcher = useFetcher<ActionData>()
   const creating = fetcher.state === 'submitting'
+  const [showCreateForm, setShowCreateForm] = useState(false)
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Create email draft</CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-xl">Create email draft</CardTitle>
+            <Button type="button" variant="outline" onClick={() => setShowCreateForm(previous => !previous)}>
+              {showCreateForm ? 'Hide form' : 'New draft'}
+            </Button>
+          </div>
           <CardDescription>
             Draft keys are stable identifiers used by send logic. Add a short plain-language trigger.
           </CardDescription>
         </CardHeader>
+        {showCreateForm ? (
         <CardContent>
           <fetcher.Form method="post" className="grid gap-4 md:grid-cols-2">
             <input type="hidden" name="intent" value="create-draft" />
@@ -176,6 +184,7 @@ export default function EmailDraftsPage() {
           </fetcher.Form>
           {fetcher.data?.error ? <p className="mt-3 text-sm text-red-500">{fetcher.data.error}</p> : null}
         </CardContent>
+        ) : null}
       </Card>
 
       <Card>
