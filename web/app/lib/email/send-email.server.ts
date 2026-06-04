@@ -1,4 +1,5 @@
 import type { Json } from '@/lib/database.types'
+import { resolvePublishedDraftByKey } from '@/lib/email/drafts/service.server'
 import {
   emailTemplates,
   type EmailTemplateKey,
@@ -37,6 +38,19 @@ type SendTransactionalEmailResult = {
   status: 'sent' | 'failed' | 'skipped'
   id: string | null
   error: string | null
+}
+
+const parseBooleanFlag = (value: string | undefined) =>
+  value === '1' || value === 'true' || value === 'yes' || value === 'on'
+
+const migrationFlagForTemplate = (templateKey: string) =>
+  `EMAIL_DRAFT_USE_${templateKey.toUpperCase().replaceAll(/[^A-Z0-9]/g, '_')}`
+
+const normalizeTemplateVariables = (value: Json): Record<string, unknown> => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return {}
 }
 
 export const sendTransactionalEmail = async ({
@@ -164,7 +178,33 @@ export const sendTemplateEmail = async <K extends EmailTemplateKey>({
   familyProfileId,
   workshopEnrollmentId,
 }: SendTemplateEmailArgs<K>) => {
-  const template = emailTemplates[templateKey].render(templateData)
+  const migrationFlag = migrationFlagForTemplate(templateKey)
+  const shouldUseDraft = parseBooleanFlag(process.env[migrationFlag])
+  let resolved = null as { subject: string; html: string; text: string } | null
+
+  if (shouldUseDraft) {
+    try {
+      resolved = await resolvePublishedDraftByKey({
+        draftKey: templateKey,
+        variables: templateData as Record<string, unknown>,
+      })
+
+      if (!resolved) {
+        console.warn('[email] draft resolver returned null, using legacy template', {
+          templateKey,
+          migrationFlag,
+        })
+      }
+    } catch (error) {
+      console.error('[email] draft resolver failed, using legacy template', {
+        templateKey,
+        migrationFlag,
+        error,
+      })
+    }
+  }
+
+  const template = resolved ?? emailTemplates[templateKey].render(templateData)
 
   return sendTransactionalEmail({
     toEmail,
@@ -199,6 +239,34 @@ export const resendEmailMessageById = async ({
 
   if (error || !message) {
     return { ok: false, error: error?.message ?? 'Email message not found' }
+  }
+
+  const draftRendered = await resolvePublishedDraftByKey({
+    draftKey: message.template_key,
+    variables: normalizeTemplateVariables(message.template_data),
+  })
+
+  if (draftRendered) {
+    const resendResult = await sendTransactionalEmail({
+      toEmail: message.to_email,
+      subject: draftRendered.subject,
+      html: draftRendered.html,
+      text: draftRendered.text,
+      templateKey: message.template_key,
+      templateData: message.template_data,
+      eventKey: null,
+      triggeredByUserId,
+      recipientUserId: message.recipient_user_id,
+      profileId: message.profile_id,
+      familyProfileId: message.family_profile_id,
+      workshopEnrollmentId: message.workshop_enrollment_id,
+    })
+
+    if (resendResult.status === 'failed') {
+      return { ok: false, error: resendResult.error ?? 'Resend failed' }
+    }
+
+    return { ok: true }
   }
 
   const templateEntry = (emailTemplates as Record<string, { render: (data: unknown) => { subject: string; html: string; text: string } }>)[message.template_key]

@@ -5,7 +5,7 @@ export type ManageNavItem = {
 }
 
 export type ManageNavSection = {
-  key: 'class-management' | 'form-management' | 'user-management' | 'system'
+  key: 'class-management' | 'form-management' | 'user-management' | 'email' | 'system'
   label: string
   stickerSrc: string
   defaultCollapsed: boolean
@@ -60,14 +60,22 @@ export const manageSections: ManageNavSection[] = [
     ],
   },
   {
+    key: 'email',
+    label: 'Email',
+    stickerSrc: '/stickers/radish.png',
+    defaultCollapsed: true,
+    items: [
+      { to: '/manage/email-message', label: 'Email messages', description: 'Outbound transactional email log with delivery status and template data.' },
+      { to: '/manage/email-drafts', label: 'Email drafts', description: 'Markdown drafts with versioning, preview, and publish flow.' },
+    ],
+  },
+  {
     key: 'system',
     label: 'System',
     stickerSrc: '/stickers/radish.png',
     defaultCollapsed: true,
     items: [
       { to: '/manage/login-event', label: 'Login events', description: 'Successful sign-in metadata and source context.' },
-      { to: '/manage/email-message', label: 'Email messages', description: 'Outbound transactional email log with delivery status and template data.' },
-      { to: '/manage/email-drafts', label: 'Email drafts', description: 'Markdown drafts with versioning, preview, and publish flow.' },
       { to: '/manage/semester-form-requirement', label: 'Semester surveys', description: 'Map one pre/post survey form per semester.' },
       { to: '/manage/role-permission', label: 'Role permissions', description: 'Permissions assigned to each role.' },
       { to: '/manage/request-metadata', label: 'Request metadata', description: 'Validate proxy headers and extracted request metadata.' },

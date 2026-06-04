@@ -12,12 +12,13 @@ type DraftListFilters = {
   status?: EmailDraftStatus | 'all'
 }
 
+const EMAIL_DRAFT_SELECT =
+  'id, draft_key, title, description, trigger_summary, trigger_event_key, trigger_owner, channel, status, is_system, variables_schema, current_subject_markdown, current_body_markdown, published_version_id, created_by_user_id, updated_by_user_id, created_at, updated_at'
+
 export const listEmailDrafts = async (filters: DraftListFilters = {}) => {
   let query = adminClient
     .from('email_draft')
-    .select(
-      'id, draft_key, title, description, channel, status, is_system, variables_schema, current_subject_markdown, current_body_markdown, published_version_id, created_by_user_id, updated_by_user_id, created_at, updated_at'
-    )
+    .select(EMAIL_DRAFT_SELECT)
     .order('updated_at', { ascending: false })
 
   if (filters.channel && filters.channel !== 'all') {
@@ -36,11 +37,17 @@ export const listEmailDrafts = async (filters: DraftListFilters = {}) => {
 export const createEmailDraft = async ({
   draftKey,
   title,
+  triggerSummary,
+  triggerEventKey,
+  triggerOwner,
   channel,
   actorUserId,
 }: {
   draftKey: string
   title: string
+  triggerSummary: string
+  triggerEventKey?: string | null
+  triggerOwner?: string | null
   channel: EmailDraftChannel
   actorUserId: string
 }) => {
@@ -49,13 +56,14 @@ export const createEmailDraft = async ({
     .insert({
       draft_key: draftKey,
       title,
+      trigger_summary: triggerSummary,
+      trigger_event_key: triggerEventKey ?? null,
+      trigger_owner: triggerOwner ?? null,
       channel,
       created_by_user_id: actorUserId,
       updated_by_user_id: actorUserId,
     })
-    .select(
-      'id, draft_key, title, description, channel, status, is_system, variables_schema, current_subject_markdown, current_body_markdown, published_version_id, created_by_user_id, updated_by_user_id, created_at, updated_at'
-    )
+    .select(EMAIL_DRAFT_SELECT)
     .single()
 
   if (error) throw new Error(error.message)
@@ -65,9 +73,7 @@ export const createEmailDraft = async ({
 export const getEmailDraftById = async (draftId: string) => {
   const { data, error } = await adminClient
     .from('email_draft')
-    .select(
-      'id, draft_key, title, description, channel, status, is_system, variables_schema, current_subject_markdown, current_body_markdown, published_version_id, created_by_user_id, updated_by_user_id, created_at, updated_at'
-    )
+    .select(EMAIL_DRAFT_SELECT)
     .eq('id', draftId)
     .single()
 
@@ -78,9 +84,7 @@ export const getEmailDraftById = async (draftId: string) => {
 export const getEmailDraftByKey = async (draftKey: string) => {
   const { data, error } = await adminClient
     .from('email_draft')
-    .select(
-      'id, draft_key, title, description, channel, status, is_system, variables_schema, current_subject_markdown, current_body_markdown, published_version_id, created_by_user_id, updated_by_user_id, created_at, updated_at'
-    )
+    .select(EMAIL_DRAFT_SELECT)
     .eq('draft_key', draftKey)
     .single()
 
@@ -111,6 +115,9 @@ export const updateEmailDraft = async ({
   payload: {
     title?: string
     description?: string | null
+    triggerSummary?: string
+    triggerEventKey?: string | null
+    triggerOwner?: string | null
     status?: EmailDraftStatus
     subjectMarkdown?: string
     bodyMarkdown?: string
@@ -123,6 +130,9 @@ export const updateEmailDraft = async ({
 
   if (typeof payload.title === 'string') updatePayload.title = payload.title
   if (payload.description !== undefined) updatePayload.description = payload.description
+  if (typeof payload.triggerSummary === 'string') updatePayload.trigger_summary = payload.triggerSummary
+  if (payload.triggerEventKey !== undefined) updatePayload.trigger_event_key = payload.triggerEventKey
+  if (payload.triggerOwner !== undefined) updatePayload.trigger_owner = payload.triggerOwner
   if (payload.status) updatePayload.status = payload.status
   if (typeof payload.subjectMarkdown === 'string') {
     updatePayload.current_subject_markdown = payload.subjectMarkdown
@@ -138,9 +148,7 @@ export const updateEmailDraft = async ({
     .from('email_draft')
     .update(updatePayload)
     .eq('id', draftId)
-    .select(
-      'id, draft_key, title, description, channel, status, is_system, variables_schema, current_subject_markdown, current_body_markdown, published_version_id, created_by_user_id, updated_by_user_id, created_at, updated_at'
-    )
+    .select(EMAIL_DRAFT_SELECT)
     .single()
 
   if (error) throw new Error(error.message)
@@ -222,9 +230,7 @@ export const setPublishedVersion = async ({
       updated_by_user_id: actorUserId,
     })
     .eq('id', draftId)
-    .select(
-      'id, draft_key, title, description, channel, status, is_system, variables_schema, current_subject_markdown, current_body_markdown, published_version_id, created_by_user_id, updated_by_user_id, created_at, updated_at'
-    )
+    .select(EMAIL_DRAFT_SELECT)
     .single()
 
   if (error) throw new Error(error.message)

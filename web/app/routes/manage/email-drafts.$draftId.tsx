@@ -52,6 +52,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const { draft, versions } = await getDraftForEditor(draftId)
   const schema = (draft.variables_schema ?? {}) as EmailDraftSchema
   const validation = validateDraftForPublish({
+    channel: draft.channel,
+    triggerSummary: draft.trigger_summary,
     subjectMarkdown: draft.current_subject_markdown,
     bodyMarkdown: draft.current_body_markdown,
     variablesSchema: schema,
@@ -168,6 +170,9 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (intent === 'save-draft') {
     const title = String(formData.get('title') ?? '').trim()
     const description = String(formData.get('description') ?? '').trim()
+    const triggerSummary = String(formData.get('trigger_summary') ?? '').trim()
+    const triggerEventKey = String(formData.get('trigger_event_key') ?? '').trim()
+    const triggerOwner = String(formData.get('trigger_owner') ?? '').trim()
     const status = normalizeStatus(String(formData.get('status') ?? 'draft'))
     const subjectMarkdown = String(formData.get('subject_markdown') ?? '')
     const bodyMarkdown = String(formData.get('body_markdown') ?? '')
@@ -175,6 +180,14 @@ export async function action({ request, params }: Route.ActionArgs) {
 
     if (!title) {
       return { error: 'Title is required.' } satisfies ActionData
+    }
+
+    if (!triggerSummary) {
+      return { error: 'When this email sends is required.' } satisfies ActionData
+    }
+
+    if (triggerSummary.length > 200) {
+      return { error: 'When this email sends must be 200 characters or fewer.' } satisfies ActionData
     }
 
     const parsedSchema = parseSchemaInput(schemaText)
@@ -187,6 +200,9 @@ export async function action({ request, params }: Route.ActionArgs) {
       actorUserId: auth.user.id,
       title,
       description: description || null,
+      triggerSummary,
+      triggerEventKey: triggerEventKey || null,
+      triggerOwner: triggerOwner || null,
       status,
       subjectMarkdown,
       bodyMarkdown,
@@ -248,7 +264,7 @@ export default function EmailDraftEditorPage() {
         <div>
           <h1 className="text-2xl font-semibold">{draft.title}</h1>
           <p className="text-sm text-muted-foreground">
-            <span className="font-mono text-xs">{draft.draft_key}</span> - {draft.channel} - {draft.status}
+            {draft.channel} - {draft.status}
           </p>
         </div>
         <Button asChild variant="outline">
@@ -270,7 +286,7 @@ export default function EmailDraftEditorPage() {
         <CardHeader>
           <CardTitle>Draft editor</CardTitle>
           <CardDescription>
-            Edit markdown content, schema, and status. Save before publishing.
+            Edit markdown content. Use Advanced for trigger and metadata settings.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -298,11 +314,6 @@ export default function EmailDraftEditorPage() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="description">Description</Label>
-              <Input id="description" name="description" defaultValue={draft.description ?? ''} />
-            </div>
-
-            <div className="grid gap-2">
               <Label htmlFor="subject-markdown">Subject markdown</Label>
               <Input
                 id="subject-markdown"
@@ -324,16 +335,61 @@ export default function EmailDraftEditorPage() {
               />
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="variables-schema">Variables schema (JSON)</Label>
-              <textarea
-                id="variables-schema"
-                name="variables_schema"
-                defaultValue={schemaText}
-                rows={8}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
-              />
-            </div>
+            <details className="rounded-md border bg-muted/10">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Advanced</summary>
+              <div className="space-y-4 border-t px-3 py-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="draft-key">Draft key</Label>
+                  <Input id="draft-key" value={draft.draft_key} readOnly className="font-mono text-xs" />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="description">Description</Label>
+                  <Input id="description" name="description" defaultValue={draft.description ?? ''} />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="trigger-summary">When this email sends (plain language)</Label>
+                  <Input
+                    id="trigger-summary"
+                    name="trigger_summary"
+                    defaultValue={draft.trigger_summary}
+                    maxLength={200}
+                    required
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="trigger-event-key">Trigger event key (optional)</Label>
+                    <Input
+                      id="trigger-event-key"
+                      name="trigger_event_key"
+                      defaultValue={draft.trigger_event_key ?? ''}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="trigger-owner">Trigger owner file (optional)</Label>
+                    <Input
+                      id="trigger-owner"
+                      name="trigger_owner"
+                      defaultValue={draft.trigger_owner ?? ''}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="variables-schema">Variables schema (JSON)</Label>
+                  <textarea
+                    id="variables-schema"
+                    name="variables_schema"
+                    defaultValue={schemaText}
+                    rows={8}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
+                  />
+                </div>
+              </div>
+            </details>
 
             <div className="flex items-center gap-3">
               <Button type="submit" disabled={isSubmitting}>
@@ -344,6 +400,11 @@ export default function EmailDraftEditorPage() {
               ) : (
                 <span className="text-xs text-emerald-600">Current draft passes publish validation.</span>
               )}
+            </div>
+
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              <span className="font-medium">This email sends when:</span>{' '}
+              {draft.trigger_summary || 'Trigger summary is missing.'}
             </div>
           </fetcher.Form>
         </CardContent>

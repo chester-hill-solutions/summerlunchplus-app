@@ -7,6 +7,9 @@ create table public.email_draft (
   draft_key text not null unique,
   title text not null,
   description text,
+  trigger_summary text not null default '',
+  trigger_event_key text,
+  trigger_owner text,
   channel public.email_draft_channel not null,
   status public.email_draft_status not null default 'draft',
   is_system boolean not null default false,
@@ -17,7 +20,10 @@ create table public.email_draft (
   created_by_user_id uuid references auth.users (id) on delete set null,
   updated_by_user_id uuid references auth.users (id) on delete set null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint email_draft_trigger_summary_length_check check (char_length(trigger_summary) <= 200),
+  constraint email_draft_trigger_summary_required_for_transactional
+    check (channel <> 'transactional' or char_length(btrim(trigger_summary)) > 0)
 );
 
 create table public.email_draft_version (

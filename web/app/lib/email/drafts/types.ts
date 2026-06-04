@@ -14,6 +14,9 @@ export type EmailDraftRecord = {
   draft_key: string
   title: string
   description: string | null
+  trigger_summary: string
+  trigger_event_key: string | null
+  trigger_owner: string | null
   channel: EmailDraftChannel
   status: EmailDraftStatus
   is_system: boolean

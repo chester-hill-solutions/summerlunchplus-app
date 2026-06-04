@@ -1,5 +1,9 @@
 import { collectPlaceholders } from '@/lib/email/drafts/renderer.server'
-import type { EmailDraftSchema, ValidateDraftResult } from '@/lib/email/drafts/types'
+import type {
+  EmailDraftChannel,
+  EmailDraftSchema,
+  ValidateDraftResult,
+} from '@/lib/email/drafts/types'
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -51,10 +55,14 @@ export const parseSchemaInput = (schemaText: string) => {
 }
 
 export const validateDraftForPublish = ({
+  channel,
+  triggerSummary,
   subjectMarkdown,
   bodyMarkdown,
   variablesSchema,
 }: {
+  channel: EmailDraftChannel
+  triggerSummary: string
   subjectMarkdown: string
   bodyMarkdown: string
   variablesSchema: EmailDraftSchema
@@ -67,6 +75,15 @@ export const validateDraftForPublish = ({
 
   if (!bodyMarkdown.trim()) {
     errors.push('Body markdown is required.')
+  }
+
+  if (channel === 'transactional') {
+    const normalized = triggerSummary.trim()
+    if (!normalized) {
+      errors.push('A short trigger summary is required for transactional drafts.')
+    } else if (normalized.length > 200) {
+      errors.push('Trigger summary must be 200 characters or fewer.')
+    }
   }
 
   const required = Array.isArray(variablesSchema.required)

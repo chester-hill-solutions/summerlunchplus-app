@@ -134,6 +134,9 @@ export type Database = {
           published_version_id: string | null
           status: Database["public"]["Enums"]["email_draft_status"]
           title: string
+          trigger_event_key: string | null
+          trigger_owner: string | null
+          trigger_summary: string
           updated_at: string
           updated_by_user_id: string | null
           variables_schema: Json
@@ -151,6 +154,9 @@ export type Database = {
           published_version_id?: string | null
           status?: Database["public"]["Enums"]["email_draft_status"]
           title: string
+          trigger_event_key?: string | null
+          trigger_owner?: string | null
+          trigger_summary?: string
           updated_at?: string
           updated_by_user_id?: string | null
           variables_schema?: Json
@@ -168,6 +174,9 @@ export type Database = {
           published_version_id?: string | null
           status?: Database["public"]["Enums"]["email_draft_status"]
           title?: string
+          trigger_event_key?: string | null
+          trigger_owner?: string | null
+          trigger_summary?: string
           updated_at?: string
           updated_by_user_id?: string | null
           variables_schema?: Json
