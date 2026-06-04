@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'react-router'
 import { Filter } from 'lucide-react'
 
+import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { Constants, type Database } from '@/lib/database.types'
 import { getOffsetMinutesForLocalDateTime, toLocalDateTimeInputValue } from '@/lib/datetime'
@@ -243,9 +244,12 @@ const personLinkForCell = (
 
 type TableDisplayProps = {
   headerActions?: ReactNode
+  data?: LoaderData
 }
 
-export default function TableDisplay({ headerActions }: TableDisplayProps = {}) {
+export default function TableDisplay({ headerActions, data }: TableDisplayProps = {}) {
+  const routeData = useLoaderData() as LoaderData | undefined
+  const source = data ?? routeData
   const {
     columns = [],
     rows = [],
@@ -256,7 +260,7 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
     canEditStatus,
     editorConfig,
     foreignKeyOptions = {},
-  } = useLoaderData() as LoaderData
+  } = source ?? ({} as LoaderData)
   const location = useLocation()
 
   const statusFetcher = useFetcher()
@@ -1083,6 +1087,31 @@ export default function TableDisplay({ headerActions }: TableDisplayProps = {}) 
                             >
                               Resend
                             </button>
+                          </td>
+                        )
+                      }
+
+                      if (tableName === 'person-form-submissions' && column === 'view_answers') {
+                        const formId = typeof row.form_id === 'string' ? row.form_id : ''
+                        const submissionId = typeof row.id === 'string' ? row.id : ''
+                        const returnTo = `${location.pathname}${location.search}`
+
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="View form answers">
+                            <Button asChild variant="outline" size="xs">
+                              <Link
+                                to={{
+                                  pathname: `/manage/form/${formId}/answers`,
+                                  search: new URLSearchParams({
+                                    returnTo,
+                                    submissionId,
+                                  }).toString(),
+                                }}
+                                onClick={event => event.stopPropagation()}
+                              >
+                                View answers
+                              </Link>
+                            </Button>
                           </td>
                         )
                       }

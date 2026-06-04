@@ -44,6 +44,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const { supabase, headers } = createClient(request)
   const url = new URL(request.url)
+  const submissionId = url.searchParams.get('submissionId')
   const { data: formRow, error: formError } = await supabase
     .from('form')
     .select('id, name')
@@ -66,10 +67,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const answerColumns = (questionRows ?? []).map(row => String(row.question_code ?? ''))
 
-  const { data: submissionRows, error: submissionError } = await supabase
+  let submissionQuery = supabase
     .from('form_submission')
     .select('id, profile_id, submitted_at, profile:profile_id ( id, firstname, surname, email )')
     .eq('form_id', formId)
+
+  if (submissionId) {
+    submissionQuery = submissionQuery.eq('id', submissionId)
+  }
+
+  const { data: submissionRows, error: submissionError } = await submissionQuery
     .order('submitted_at', { ascending: false })
 
   if (submissionError) {
@@ -133,6 +140,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
 export default function ManageFormAnswersPage() {
   const { form, returnTo } = useLoaderData() as LoaderData
+  const backLabel = returnTo.startsWith('/manage/person') ? 'Back to person' : 'Back to forms'
 
   return (
     <TableDisplay
@@ -149,7 +157,7 @@ export default function ManageFormAnswersPage() {
             </Link>
           </Button>
           <Button asChild variant="outline" size="sm">
-            <Link to={returnTo}>Back to forms</Link>
+            <Link to={returnTo}>{backLabel}</Link>
           </Button>
         </div>
       }
