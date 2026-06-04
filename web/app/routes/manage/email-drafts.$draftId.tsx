@@ -286,7 +286,7 @@ export default function EmailDraftEditorPage() {
         <CardHeader>
           <CardTitle>Draft editor</CardTitle>
           <CardDescription>
-            Edit markdown content and define a short trigger summary. Save before publishing.
+            Edit markdown content. Use Advanced for trigger and metadata settings.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -311,22 +311,6 @@ export default function EmailDraftEditorPage() {
                   <option value="archived">archived</option>
                 </select>
               </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="description">Description</Label>
-              <Input id="description" name="description" defaultValue={draft.description ?? ''} />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="trigger-summary">When this email sends (plain language)</Label>
-              <Input
-                id="trigger-summary"
-                name="trigger_summary"
-                defaultValue={draft.trigger_summary}
-                maxLength={200}
-                required
-              />
             </div>
 
             <div className="grid gap-2">
@@ -357,6 +341,22 @@ export default function EmailDraftEditorPage() {
                 <div className="grid gap-2">
                   <Label htmlFor="draft-key">Draft key</Label>
                   <Input id="draft-key" value={draft.draft_key} readOnly className="font-mono text-xs" />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="description">Description</Label>
+                  <Input id="description" name="description" defaultValue={draft.description ?? ''} />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="trigger-summary">When this email sends (plain language)</Label>
+                  <Input
+                    id="trigger-summary"
+                    name="trigger_summary"
+                    defaultValue={draft.trigger_summary}
+                    maxLength={200}
+                    required
+                  />
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
