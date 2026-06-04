@@ -1,47 +1,38 @@
 # AGENTS.md
 
-High-signal guidance for OpenCode sessions in this repo.
+## Repo shape
+- Runtime app lives in `web/` (React Router v7 SSR + Vite + TypeScript + Supabase).
+- Use `web/package.json` scripts for app work; root `package.json` has no scripts.
+- Routing is explicitly declared in `web/app/routes.ts` (not filesystem auto-routing).
+- App shell and auth/onboarding guard wiring start in `web/app/root.tsx`.
+- Path aliases `~/` and `@/` both map to `web/app/*` (`web/tsconfig.json`).
 
-## Repo shape and entrypoints
-- Runtime app is `web/` (React Router v7 SSR + Vite + TS strict + Supabase).
-- Root `package.json` is not the app command source of truth; use `web/package.json` scripts.
-- App shell starts in `web/app/root.tsx`; route table is manually maintained in `web/app/routes.ts`.
-- Path aliases `~/` and `@/` both resolve to `web/app` (`web/tsconfig.json`).
+## Setup and env
+- First-time local setup: `cp web/.env.template web/.env.local` from repo root.
+- Start Supabase from repo root: `supabase start --debug`, then pull keys with `supabase status -o json` into `web/.env.local`.
+- Local app/test URL is `http://localhost:5173`.
+- `ONBOARDING_MODE` resolves to `role` unless explicitly set to `permission` (`web/app/lib/auth.server.ts`).
+- `SUPABASE_SECRET_KEY` is service-role only; never expose it to client code or loader-returned data.
 
-## Setup and environment
-- First-time local setup: copy `web/.env.template` to `web/.env.local`, then run Supabase locally and fill keys from `supabase status -o json`.
-- Local app/test base URL is `http://localhost:5173`.
-- `ONBOARDING_MODE` defaults to role-based behavior (`role` unless explicitly set to `permission` in server env).
-- Keep `SUPABASE_SECRET_KEY` server-only; never expose it in client code or loader data.
+## Commands
+- Install deps: `npm ci` in `web/` (CI uses `npm ci`; `npm install` is fine for local updates).
+- Dev server: `npm run dev` (from `web/`).
+- Typecheck gate: `npm run typecheck` (also regenerates React Router types).
+- Build/start: `npm run build` then `npm run start` (from `web/`).
+- Tests: `npm run test` (Playwright).
+- Focused tests: `npm run test:e2e -- tests/e2e/guardian-signup-enroll.spec.ts --grep "..."`.
+- `npm run test:unit` currently points to `tests/unit` with `--pass-with-no-tests`; this repo currently only has `tests/e2e/`.
 
-## Commands (run from `web/`)
-- Install deps: `npm install`
-- Dev server: `npm run dev`
-- Type gate (required before handoff): `npm run typecheck` (`react-router typegen && tsc`)
-- Build/serve: `npm run build` then `npm run start`
-- Tests: `npm run test` (Playwright over `tests/`)
-- Scoped tests: `npm run test:e2e`, `npm run test:unit`
+## Database and schema workflow
+- Source of truth is declarative SQL in `supabase/schemas/` (see `CODE_STANDARDS.md`).
+- Do not manually edit existing files in `supabase/migrations/`; generate forward migrations instead.
+- Typical flow from repo root: edit schema SQL -> `supabase db diff -f <name>` -> `supabase migration up`.
+- Regenerate DB types after schema changes: `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
+- New tables/features need matching `app_permissions` + `role_permission` seeds and RLS policies in the same change (`CODE_STANDARDS.md`).
 
-## Playwright quirks and focused runs
-- If `PLAYWRIGHT_BASE_URL` is unset, Playwright auto-starts `npm run dev -- --port 5173`.
-- Single e2e file: `npm run test:e2e -- tests/e2e/guardian-signup-enroll.spec.ts`
-- File + title filter: `npm run test:e2e -- tests/e2e/guardian-signup-enroll.spec.ts --grep "guardian signs up"`
-- Title-only filter: `npm run test:e2e -- --grep "guardian signs up, completes pre-program survey, and enrolls"`
-
-## Supabase workflow
-- Start local services from repo root: `supabase start --debug`; inspect keys/status with `supabase status -o json`.
-- Create migrations with CLI (`supabase migration new <name>`); do not hand-create or rename versions in `supabase/migrations/`.
-- Do not edit already-committed migrations; add a new forward-fix migration instead.
-- Typical schema flow: edit `supabase/schemas/*.sql` -> `supabase db diff -f <name>` -> `supabase migration up`.
-- After schema changes, regenerate DB types: `supabase gen types typescript --local > web/app/lib/database.types.ts`.
-
-## Generated files and auth/session gotchas
-- Never manually edit generated router types in `web/.react-router/types/`.
-- Route modules commonly import generated `./+types/*`; rerun `npm run typecheck` after route changes.
-- Server auth helpers (`web/app/lib/supabase/server.ts`) return `headers`; preserve/pass these headers on auth redirects/responses or sessions can break.
-- Email templates under `supabase/templates/` are inline-styled HTML; keep styles inline (no `<style>` blocks).
-
-## Performance diagnostics conventions
-- Keep submit buttons disabled for the full mutation transition (`submitting` + `loading`) on signup, enrollment, family-management, and survey forms to prevent duplicate writes.
-- Client router timing logs are emitted from `web/app/lib/router-instrumentation.ts`; enable in production with `VITE_ENABLE_ROUTER_INSTRUMENTATION=true`.
-- Treat suspicious-signal refresh and enrollment notification dispatch as async side effects; do not block user-visible responses on them.
+## Gotchas that break flows
+- Never edit generated router types in `web/.react-router/types/`.
+- If you add/move a route file, also update `web/app/routes.ts` or it will 404.
+- `createClient()` in `web/app/lib/supabase/server.ts` returns response `headers`; preserve/pass them on redirects and responses to avoid auth session bugs.
+- Playwright auto-starts `npm run dev -- --port 5173` when `PLAYWRIGHT_BASE_URL` is unset (`web/playwright.config.ts`).
+- Email templates configured in `supabase/config.toml` live under `supabase/templates/` and are inline-HTML templates.
