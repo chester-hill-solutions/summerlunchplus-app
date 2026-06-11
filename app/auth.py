@@ -1,12 +1,11 @@
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
 
+_bearer = HTTPBearer()
 
-def get_api_key(authorization: str = Header(..., alias="Authorization")) -> None:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authorization header")
 
-    token = authorization.removeprefix("Bearer ").strip()
-    if token != settings.api_key:
+def get_api_key(credentials: HTTPAuthorizationCredentials = Depends(_bearer)) -> None:
+    if credentials.credentials != settings.api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")

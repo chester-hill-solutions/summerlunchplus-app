@@ -63,6 +63,13 @@ def ok(data):
     return m
 
 
+# ── OpenAPI spec ─────────────────────────────────────────────────────────────
+
+def test_openapi_declares_security_scheme(client):
+    schema = client.get("/openapi.json").json()
+    assert "HTTPBearer" in schema["components"]["securitySchemes"]
+
+
 # ── GET /health ───────────────────────────────────────────────────────────────
 
 def test_health(client):
@@ -84,7 +91,7 @@ def test_healthz_invalid_key(client):
 
 
 def test_healthz_missing_auth(client):
-    assert client.get("/healthz").status_code == 422
+    assert client.get("/healthz").status_code == 401
 
 
 # ── POST /zoom/connect ────────────────────────────────────────────────────────
@@ -98,7 +105,7 @@ def test_zoom_connect_success(client, headers):
 
 
 def test_zoom_connect_missing_auth(client):
-    assert client.post("/zoom/connect").status_code == 422
+    assert client.post("/zoom/connect").status_code == 401
 
 
 # ── GET /meetings/past ────────────────────────────────────────────────────────
@@ -136,7 +143,7 @@ def test_list_past_meetings_invalid_auth(client):
 
 
 def test_list_past_meetings_missing_auth(client):
-    assert client.get("/meetings/past").status_code == 422
+    assert client.get("/meetings/past").status_code == 401
 
 
 # ── GET /meetings/{uuid}/participants ─────────────────────────────────────────
@@ -166,7 +173,7 @@ def test_get_participants_force_refresh(client, headers):
 
 
 def test_get_participants_missing_auth(client):
-    assert client.get("/meetings/abc123/participants").status_code == 422
+    assert client.get("/meetings/abc123/participants").status_code == 401
 
 
 # ── POST /meetings ────────────────────────────────────────────────────────────
@@ -194,7 +201,7 @@ def test_create_meeting_missing_auth(client):
     resp = client.post("/meetings", json={
         "topic": "Test", "start_time": "2026-06-01T14:00:00", "duration": 60,
     })
-    assert resp.status_code == 422
+    assert resp.status_code == 401
 
 
 # ── POST /meetings/{id}/registrants ──────────────────────────────────────────
@@ -216,4 +223,4 @@ def test_register_participants_missing_fields(client, headers):
 
 
 def test_register_participants_missing_auth(client):
-    assert client.post("/meetings/99999/registrants", json=REGISTRANTS).status_code == 422
+    assert client.post("/meetings/99999/registrants", json=REGISTRANTS).status_code == 401
