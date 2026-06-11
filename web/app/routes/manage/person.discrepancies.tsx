@@ -40,7 +40,9 @@ export default function ManagePersonDiscrepanciesPage() {
                 <article key={signal.id} className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-semibold">{title}</p>
-                    <p className={`text-xs uppercase tracking-wide ${severityClassName(signal.severity)}`}>{signal.severity}</p>
+                    <p className={`text-xs uppercase tracking-wide ${severityClassName(signal.severity)}`}>
+                      {signal.severity} · p{signal.priority_score}
+                    </p>
                   </div>
                   <p className="mt-1 text-sm text-foreground">{signal.summary}</p>
                   <p className="mt-1 text-xs text-muted-foreground">Created {formatDateTime(signal.created_at)}</p>
@@ -99,6 +101,66 @@ export default function ManagePersonDiscrepanciesPage() {
                           • Whitelisted:{' '}
                           {typeof details?.whitelist === 'boolean' ? String(details.whitelist) : 'Unknown'}
                         </li>
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {signal.signal_type === 'cross_family_exact_address' ? (
+                    <div className="mt-2 rounded border bg-background p-2 text-xs">
+                      <p className="font-medium">Cross-family address evidence</p>
+                      <ul className="mt-1 space-y-1">
+                        <li>
+                          • Outside family matches:{' '}
+                          {typeof details?.outside_family_match_count === 'number'
+                            ? String(details.outside_family_match_count)
+                            : 'Unknown'}
+                        </li>
+                        {(Array.isArray(details?.outside_family_profiles) ? details?.outside_family_profiles : []).map(
+                          (entry, idx) => {
+                            const row = toRecord(entry as Json)
+                            const profileId = typeof row?.profile_id === 'string' ? row.profile_id : ''
+                            const profile = profileById.get(profileId)
+                            const label = profile ? profileLabel(profile) : (typeof row?.label === 'string' ? row.label : profileId)
+                            const address = [row?.street_address, row?.city, row?.province, row?.postcode]
+                              .map(value => (typeof value === 'string' ? value : ''))
+                              .filter(Boolean)
+                              .join(', ')
+                            return (
+                              <li key={`${signal.id}-cross-${idx}`}>• {label}: {address || '-'}</li>
+                            )
+                          }
+                        )}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {signal.signal_type === 'ip_profile_location_mismatch' ? (
+                    <div className="mt-2 rounded border bg-background p-2 text-xs">
+                      <p className="font-medium">IP/profile location evidence</p>
+                      <ul className="mt-1 space-y-1">
+                        <li>
+                          • Profile province:{' '}
+                          {typeof toRecord(details?.profile_location as Json)?.province === 'string'
+                            ? String(toRecord(details?.profile_location as Json)?.province)
+                            : 'Unknown'}
+                        </li>
+                        <li>
+                          • Mismatch count:{' '}
+                          {typeof details?.mismatch_count === 'number' ? String(details.mismatch_count) : 'Unknown'}
+                        </li>
+                        {(Array.isArray(details?.evidence) ? details?.evidence : []).map((entry, idx) => {
+                          const row = toRecord(entry as Json)
+                          const source = typeof row?.source === 'string' ? row.source : 'event'
+                          const occurredAt = typeof row?.occurred_at_local === 'string' ? row.occurred_at_local : '-'
+                          const ip = typeof row?.ip_address === 'string' ? row.ip_address : 'n/a'
+                          const region = typeof row?.region === 'string' ? row.region : 'unknown-region'
+                          const country = typeof row?.country_code === 'string' ? row.country_code : '--'
+                          return (
+                            <li key={`${signal.id}-ip-${idx}`}>
+                              • {source}: {occurredAt} (IP {ip}, {region}, {country})
+                            </li>
+                          )
+                        })}
                       </ul>
                     </div>
                   ) : null}

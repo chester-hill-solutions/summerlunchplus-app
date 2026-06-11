@@ -21,6 +21,8 @@ export type SuspiciousSignalRow = {
   family_profile_ids: string[]
   signal_type: string
   severity: string
+  priority_score: number
+  priority_reason: string | null
   summary: string
   details: Json
   status: string

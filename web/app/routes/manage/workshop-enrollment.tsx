@@ -101,8 +101,10 @@ export async function loader(args: Route.LoaderArgs) {
   if (profileIds.length) {
     const { data: openSignals, error: openSignalsError } = await adminClient
       .from('suspicious_signal')
-      .select('family_profile_ids, severity, summary')
+      .select('family_profile_ids, severity, summary, priority_score')
       .eq('status', 'open')
+      .order('priority_score', { ascending: false })
+      .order('created_at', { ascending: false })
 
     if (!openSignalsError) {
       openSignalsByProfileId = (openSignals ?? []).reduce(
@@ -134,6 +136,8 @@ export async function loader(args: Route.LoaderArgs) {
       riding_display: '...',
       giftcard_display: '...',
       prior_participation_display: '...',
+      profile_hover_top_discrepancy: 'Loading...',
+      profile_hover_more_discrepancies: 'Loading...',
       profile_hover_name: '',
       profile_hover_email: '',
       profile_hover_parent_email: '',
@@ -254,6 +258,8 @@ export async function loader(args: Route.LoaderArgs) {
           fields: [
             { label: 'Email', field: 'profile_hover_email', fallback: 'N/A' },
             { label: 'Parent Email', field: 'profile_hover_parent_email', fallback: 'N/A' },
+            { label: 'Top Discrepancy', field: 'profile_hover_top_discrepancy', fallback: 'None' },
+            { label: 'More Open', field: 'profile_hover_more_discrepancies', fallback: 'No' },
           ],
         },
       },

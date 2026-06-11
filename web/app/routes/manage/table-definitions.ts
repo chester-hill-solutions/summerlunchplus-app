@@ -33,6 +33,7 @@ export type TableDefinition = {
   select: string
   columns: string[]
   order: string
+  orderAscending?: boolean
   lookupMappings?: LookupMapping[]
   editor?: TableEditorConfig
 }
@@ -609,9 +610,10 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   discrepancies: {
     label: 'Discrepancies',
     table: 'suspicious_signal',
-    select: 'id, subject_profile_id, family_profile_ids, signal_type, severity, summary, details, status, created_at, resolved_at',
-    columns: ['subject_profile_display', 'signal_type', 'severity', 'summary', 'status', 'created_at', 'resolved_at'],
-    order: 'created_at',
+    select: 'id, subject_profile_id, family_profile_ids, signal_type, severity, priority_score, summary, details, status, created_at, resolved_at',
+    columns: ['subject_profile_display', 'signal_type', 'severity', 'priority_score', 'summary', 'status', 'created_at', 'resolved_at'],
+    order: 'priority_score',
+    orderAscending: false,
     lookupMappings: [
       {
         keyColumn: 'subject_profile_id',

@@ -51,6 +51,8 @@ type WorkshopEnrollmentEnrichment = {
   riding_display: string
   giftcard_display: string
   prior_participation_display: string
+  profile_hover_top_discrepancy: string
+  profile_hover_more_discrepancies: string
   profile_hover_name: string
   profile_hover_email: string
   profile_hover_parent_email: string
@@ -484,6 +486,8 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           riding_display: '',
           giftcard_display: 'N/A',
           prior_participation_display: 'N/A',
+          profile_hover_top_discrepancy: 'None',
+          profile_hover_more_discrepancies: 'No additional open signals',
           profile_hover_name: 'N/A',
           profile_hover_email: 'N/A',
           profile_hover_parent_email: 'N/A',

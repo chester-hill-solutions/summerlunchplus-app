@@ -4,6 +4,8 @@ create table if not exists public.suspicious_signal (
   family_profile_ids uuid[] not null default '{}'::uuid[],
   signal_type text not null,
   severity text not null,
+  priority_score integer not null default 0,
+  priority_reason text,
   summary text not null,
   details jsonb not null default '{}'::jsonb,
   status text not null default 'open',
@@ -12,7 +14,15 @@ create table if not exists public.suspicious_signal (
   resolved_at timestamptz,
   resolved_by uuid references auth.users(id) on delete set null,
   resolution_note text,
-  constraint suspicious_signal_signal_type_chk check (signal_type in ('address_mismatch', 'network_distance_anomaly', 'non_whitelisted_riding')),
+  constraint suspicious_signal_signal_type_chk check (
+    signal_type in (
+      'address_mismatch',
+      'network_distance_anomaly',
+      'non_whitelisted_riding',
+      'cross_family_exact_address',
+      'ip_profile_location_mismatch'
+    )
+  ),
   constraint suspicious_signal_severity_chk check (severity in ('low', 'medium', 'high')),
   constraint suspicious_signal_status_chk check (status in ('open', 'resolved'))
 );
@@ -22,6 +32,12 @@ create index if not exists suspicious_signal_subject_status_idx
 
 create index if not exists suspicious_signal_status_idx
   on public.suspicious_signal (status, created_at desc);
+
+create index if not exists suspicious_signal_open_subject_priority_idx
+  on public.suspicious_signal (status, subject_profile_id, priority_score desc, created_at desc);
+
+create index if not exists suspicious_signal_open_priority_idx
+  on public.suspicious_signal (status, priority_score desc, created_at desc);
 
 create index if not exists suspicious_signal_family_gin_idx
   on public.suspicious_signal using gin (family_profile_ids);

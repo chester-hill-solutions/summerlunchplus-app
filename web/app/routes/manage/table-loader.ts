@@ -297,9 +297,10 @@ export function createTableLoader(tableName: string) {
     }
 
     const { supabase } = createClient(request)
+    const orderAscending = definition.orderAscending ?? true
     const { data, error } = await fromQualifiedTable(supabase, definition.table)
       .select(definition.select)
-      .order(definition.order, { ascending: true })
+      .order(definition.order, { ascending: orderAscending })
 
     if (error) {
       throw new Response(error.message, { status: 500 })

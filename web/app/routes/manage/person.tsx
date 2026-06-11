@@ -83,7 +83,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .order('requested_at', { ascending: false }),
     adminClient
       .from('suspicious_signal')
-      .select('id, subject_profile_id, family_profile_ids, signal_type, severity, summary, details, status, created_at, resolved_at, resolution_note')
+      .select('id, subject_profile_id, family_profile_ids, signal_type, severity, priority_score, priority_reason, summary, details, status, created_at, resolved_at, resolution_note')
+      .order('priority_score', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(200),
   ])
