@@ -33,6 +33,17 @@ export type SuspiciousSignalRow = {
 
 export type PersonLoaderData = {
   profile: ProfileRow
+  ipEvidence: Array<{
+    source: 'form_submission' | 'login_event'
+    occurred_at: string
+    ip_address: string
+    country_code: string | null
+    region: string | null
+    city: string | null
+    timezone: string | null
+    latitude: number | null
+    longitude: number | null
+  }>
   familyProfiles: ProfileRow[]
   primaryChildByGuardian: Record<string, string>
   enrollments: Array<{
