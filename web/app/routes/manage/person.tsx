@@ -10,6 +10,18 @@ import type { LoaderFunctionArgs } from 'react-router'
 import type { PersonLoaderData, ProfileRow, SuspiciousSignalRow } from './person.shared'
 import { profileLabel } from './person.shared'
 
+const parsePrimaryIp = (ip: unknown, forwardedFor: string | null | undefined) => {
+  if (typeof ip === 'string' && ip.trim()) return ip.trim()
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    const first = forwardedFor
+      .split(',')
+      .map(part => part.trim())
+      .find(Boolean)
+    if (first) return first
+  }
+  return null
+}
+
 const personTabs = [
   { to: '/manage/person', label: 'Overview' },
   { to: '/manage/person/family', label: 'Family' },
@@ -44,6 +56,85 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!profileRow?.id) {
     throw redirect('/manage/participants', { headers: auth.headers })
   }
+
+  const [latestFormSubmissionResult, latestLoginEventResult] = await Promise.all([
+    adminClient
+      .from('form_submission')
+      .select('submitted_at, ip_address, forwarded_for')
+      .eq('profile_id', profileRow.id)
+      .order('submitted_at', { ascending: false })
+      .limit(1),
+    profileRow.user_id
+      ? adminClient
+          .from('login_event')
+          .select('event_at, ip_address, forwarded_for')
+          .eq('user_id', profileRow.user_id)
+          .order('event_at', { ascending: false })
+          .limit(1)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+  ])
+
+  const ipCandidates = [
+    ...(latestFormSubmissionResult.data ?? []).map(row => ({
+      source: 'form_submission' as const,
+      occurred_at: typeof row.submitted_at === 'string' ? row.submitted_at : '',
+      ip_address: parsePrimaryIp(row.ip_address, typeof row.forwarded_for === 'string' ? row.forwarded_for : null),
+    })),
+    ...((latestLoginEventResult.data ?? []) as Array<Record<string, unknown>>).map(row => ({
+      source: 'login_event' as const,
+      occurred_at: typeof row.event_at === 'string' ? row.event_at : '',
+      ip_address: parsePrimaryIp(row.ip_address, typeof row.forwarded_for === 'string' ? row.forwarded_for : null),
+    })),
+  ].filter(row => row.ip_address && row.occurred_at)
+
+  const uniqueIps = Array.from(new Set(ipCandidates.map(row => row.ip_address as string)))
+  const geoByIp = new Map<
+    string,
+    {
+      country_code: string | null
+      region: string | null
+      city: string | null
+      timezone: string | null
+      latitude: number | null
+      longitude: number | null
+    }
+  >()
+
+  if (uniqueIps.length) {
+    const { data: geoRows } = await (adminClient.from('ip_geolocation_cache' as any) as any)
+      .select('ip, country_code, region, city, timezone, latitude, longitude')
+      .in('ip', uniqueIps)
+
+    for (const row of geoRows ?? []) {
+      if (typeof row.ip !== 'string') continue
+      geoByIp.set(row.ip, {
+        country_code: typeof row.country_code === 'string' ? row.country_code : null,
+        region: typeof row.region === 'string' ? row.region : null,
+        city: typeof row.city === 'string' ? row.city : null,
+        timezone: typeof row.timezone === 'string' ? row.timezone : null,
+        latitude: typeof row.latitude === 'number' ? row.latitude : null,
+        longitude: typeof row.longitude === 'number' ? row.longitude : null,
+      })
+    }
+  }
+
+  const ipEvidence = ipCandidates
+    .map(row => {
+      const ipAddress = row.ip_address as string
+      const geo = geoByIp.get(ipAddress)
+      return {
+        source: row.source,
+        occurred_at: row.occurred_at,
+        ip_address: ipAddress,
+        country_code: geo?.country_code ?? null,
+        region: geo?.region ?? null,
+        city: geo?.city ?? null,
+        timezone: geo?.timezone ?? null,
+        latitude: geo?.latitude ?? null,
+        longitude: geo?.longitude ?? null,
+      }
+    })
+    .sort((left, right) => right.occurred_at.localeCompare(left.occurred_at))
 
   const seen = new Set<string>([profileRow.id])
   const queue: string[] = [profileRow.id]
@@ -201,6 +292,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     profile: profileRow as ProfileRow,
+    ipEvidence,
     familyProfiles,
     primaryChildByGuardian,
     enrollments,

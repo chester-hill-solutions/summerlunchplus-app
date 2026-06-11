@@ -7,6 +7,7 @@ const IN_CLAUSE_BATCH_SIZE = 250
 
 type RidingProfileRow = {
   id: string
+  user_id: string | null
   role: string | null
   firstname: string | null
   surname: string | null
@@ -23,6 +24,7 @@ type GuardianChildEdge = {
 type FormSubmissionRow = {
   id: string
   profile_id: string | null
+  user_id: string | null
   submitted_at: string | null
 }
 
@@ -113,6 +115,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
   }
 
   let profileById = new Map<string, RidingProfileRow>()
+  const profileIdsByUserId = new Map<string, string[]>()
   const guardiansByChildId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
   const childrenByGuardianId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
   const familyProfileIdsByProfileId = new Map<string, string[]>()
@@ -181,7 +184,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
   for (const profileChunk of chunkArray(profileScope, IN_CLAUSE_BATCH_SIZE)) {
     const { data, error } = await adminClient
       .from('profile')
-      .select('id, role, firstname, surname, email, federal_electoral_district_name')
+      .select('id, user_id, role, firstname, surname, email, federal_electoral_district_name')
       .in('id', profileChunk)
 
     if (error) {
@@ -220,6 +223,15 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       .filter(profile => typeof profile.id === 'string' && profile.id)
       .map(profile => [profile.id, profile])
   )
+
+  for (const profile of profileRows) {
+    if (typeof profile.user_id !== 'string' || !profile.user_id) continue
+    const existing = profileIdsByUserId.get(profile.user_id) ?? []
+    if (!existing.includes(profile.id)) {
+      existing.push(profile.id)
+      profileIdsByUserId.set(profile.user_id, existing)
+    }
+  }
 
   const visited = new Set<string>()
   for (const rootProfileId of profileScope) {
@@ -288,23 +300,54 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
     mealKitByProfileId.set(profile.id, mealKitByRidingName.get(ridingName) === true)
   }
 
-  const submissions: FormSubmissionRow[] = []
+  const submissionsById = new Map<string, FormSubmissionRow>()
   for (const profileChunk of chunkArray(profileScope, IN_CLAUSE_BATCH_SIZE)) {
     const { data: submissionRows, error } = await adminClient
       .from('form_submission')
-      .select('id, profile_id, submitted_at')
+      .select('id, profile_id, user_id, submitted_at')
       .in('profile_id', profileChunk)
 
     if (error) {
-      console.error('[workshop enrollment] enrichment failed to load form submissions', {
+      console.error('[workshop enrollment] enrichment failed to load form submissions by profile', {
         chunkSize: profileChunk.length,
         error: error.message,
       })
       continue
     }
 
-    submissions.push(...((submissionRows ?? []) as FormSubmissionRow[]))
+    for (const row of (submissionRows ?? []) as FormSubmissionRow[]) {
+      submissionsById.set(row.id, row)
+    }
   }
+
+  const familyUserIds = Array.from(
+    new Set(
+      profileRows
+        .map(profile => (typeof profile.user_id === 'string' ? profile.user_id : ''))
+        .filter(Boolean)
+    )
+  )
+
+  for (const userChunk of chunkArray(familyUserIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: submissionRows, error } = await adminClient
+      .from('form_submission')
+      .select('id, profile_id, user_id, submitted_at')
+      .in('user_id', userChunk)
+
+    if (error) {
+      console.error('[workshop enrollment] enrichment failed to load form submissions by user', {
+        chunkSize: userChunk.length,
+        error: error.message,
+      })
+      continue
+    }
+
+    for (const row of (submissionRows ?? []) as FormSubmissionRow[]) {
+      submissionsById.set(row.id, row)
+    }
+  }
+
+  const submissions = Array.from(submissionsById.values())
 
   if (submissions.length) {
     const submissionIds = submissions
@@ -338,8 +381,16 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
 
         for (const answer of answerRows) {
           const submission = submissionById.get(answer.submission_id)
-          const profileId = submission?.profile_id
-          if (!profileId) continue
+          const associatedProfileIds = new Set<string>()
+          if (typeof submission?.profile_id === 'string' && submission.profile_id) {
+            associatedProfileIds.add(submission.profile_id)
+          }
+          if (typeof submission?.user_id === 'string' && submission.user_id) {
+            for (const relatedProfileId of profileIdsByUserId.get(submission.user_id) ?? []) {
+              associatedProfileIds.add(relatedProfileId)
+            }
+          }
+          if (!associatedProfileIds.size) continue
 
           const value = typeof answer.value === 'string' ? answer.value.trim() : ''
           if (!value) continue
@@ -347,12 +398,14 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
           const submittedAt = Date.parse(submission?.submitted_at ?? '')
           const submittedAtTime = Number.isNaN(submittedAt) ? 0 : submittedAt
           if (answer.question_code === GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE) {
-            const existing = latestGiftCardByProfileId.get(profileId)
-            if (!existing || submittedAtTime > existing.submittedAt) {
-              latestGiftCardByProfileId.set(profileId, {
-                value,
-                submittedAt: submittedAtTime,
-              })
+            for (const profileId of associatedProfileIds) {
+              const existing = latestGiftCardByProfileId.get(profileId)
+              if (!existing || submittedAtTime > existing.submittedAt) {
+                latestGiftCardByProfileId.set(profileId, {
+                  value,
+                  submittedAt: submittedAtTime,
+                })
+              }
             }
             continue
           }
@@ -360,12 +413,14 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
           if (answer.question_code === PRIOR_PARTICIPATION_QUESTION_CODE) {
             const normalized = normalizePriorParticipation(value)
             if (!normalized) continue
-            const existing = latestPriorParticipationByProfileId.get(profileId)
-            if (!existing || submittedAtTime > existing.submittedAt) {
-              latestPriorParticipationByProfileId.set(profileId, {
-                value: normalized,
-                submittedAt: submittedAtTime,
-              })
+            for (const profileId of associatedProfileIds) {
+              const existing = latestPriorParticipationByProfileId.get(profileId)
+              if (!existing || submittedAtTime > existing.submittedAt) {
+                latestPriorParticipationByProfileId.set(profileId, {
+                  value: normalized,
+                  submittedAt: submittedAtTime,
+                })
+              }
             }
           }
         }
@@ -435,6 +490,14 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       addCandidate(familyProfileId)
     }
 
+    for (const candidateProfileId of [...candidateProfileIds]) {
+      const candidateUserId = profileById.get(candidateProfileId)?.user_id
+      if (typeof candidateUserId !== 'string' || !candidateUserId) continue
+      for (const sameUserProfileId of profileIdsByUserId.get(candidateUserId) ?? []) {
+        addCandidate(sameUserProfileId)
+      }
+    }
+
     addCandidate(profileId || null)
 
     const giftcardDisplay = (() => {
@@ -482,8 +545,8 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       const top = sortedSignals[0] ?? null
       if (!top) {
         return {
-          top: 'None',
-          more: 'No additional open signals',
+          top: '',
+          more: '',
         }
       }
 
@@ -493,7 +556,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
         more:
           sortedSignals.length > 1
             ? `+${sortedSignals.length - 1} more open signal${sortedSignals.length - 1 === 1 ? '' : 's'}`
-            : 'No additional open signals',
+            : '',
       }
     })()
 

@@ -172,8 +172,9 @@ const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardCo
     return {
       label: field.label,
       value: rawValue || field.fallback || '',
+      visible: Boolean(rawValue) || Boolean(field.fallback),
     }
-  })
+  }).filter(field => field.visible)
 
   const hasValue = Boolean(title) || fields.some(field => Boolean(field.value))
   return hasValue ? { title, fields } : null
@@ -486,8 +487,8 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           riding_display: '',
           giftcard_display: 'N/A',
           prior_participation_display: 'N/A',
-          profile_hover_top_discrepancy: 'None',
-          profile_hover_more_discrepancies: 'No additional open signals',
+          profile_hover_top_discrepancy: '',
+          profile_hover_more_discrepancies: '',
           profile_hover_name: 'N/A',
           profile_hover_email: 'N/A',
           profile_hover_parent_email: 'N/A',
