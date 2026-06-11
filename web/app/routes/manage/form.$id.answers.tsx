@@ -23,6 +23,17 @@ type LoaderData = {
   returnTo: string
 }
 
+const ANSWER_BATCH_SIZE = 200
+
+const chunkArray = <T,>(items: T[], size: number): T[][] => {
+  if (size <= 0 || !items.length) return []
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
 const safeReturnTo = (input: string | null) => {
   if (!input) return '/manage/form'
   if (!input.startsWith('/')) return '/manage/form'
@@ -84,12 +95,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const submissionIds = (submissionRows ?? []).map(row => row.id)
-  const { data: answerRowsRaw } = submissionIds.length
-    ? await supabase
-        .from('form_answer')
-        .select('submission_id, question_code, value')
-        .in('submission_id', submissionIds)
-    : { data: [] }
+  const answerRowsRaw: Array<{ submission_id: string; question_code: string; value: unknown }> = []
+  for (const submissionChunk of chunkArray(submissionIds, ANSWER_BATCH_SIZE)) {
+    const { data, error: answerError } = await supabase
+      .from('form_answer')
+      .select('submission_id, question_code, value')
+      .in('submission_id', submissionChunk)
+
+    if (answerError) {
+      throw new Response(answerError.message, { status: 500, headers })
+    }
+
+    answerRowsRaw.push(...(data ?? []))
+  }
 
   const answersBySubmission = (answerRowsRaw ?? []).reduce<Record<string, Record<string, string>>>((acc, row) => {
     if (!acc[row.submission_id]) acc[row.submission_id] = {}
