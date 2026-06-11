@@ -133,6 +133,7 @@ export async function loader(args: Route.LoaderArgs) {
       enrolled_capacity: capacity === null ? `${approved}/-` : `${approved}/${capacity}`,
       riding_display: '...',
       giftcard_display: '...',
+      prior_participation_display: '...',
       profile_hover_name: '',
       profile_hover_email: '',
       profile_hover_parent_email: '',
@@ -205,6 +206,24 @@ export async function loader(args: Route.LoaderArgs) {
     }
   }
 
+  if (!columns.includes('prior_participation_display')) {
+    const giftcardIndex = columns.indexOf('giftcard_display')
+    if (giftcardIndex >= 0) {
+      columns = [
+        ...columns.slice(0, giftcardIndex + 1),
+        'prior_participation_display',
+        ...columns.slice(giftcardIndex + 1),
+      ]
+    } else {
+      const profileIndex = columns.indexOf('profile_display')
+      if (profileIndex >= 0) {
+        columns = [...columns.slice(0, profileIndex + 1), 'prior_participation_display', ...columns.slice(profileIndex + 1)]
+      } else {
+        columns = [...columns, 'prior_participation_display']
+      }
+    }
+  }
+
   if (columns.includes('semester_range')) {
     columns = [...columns.filter(column => column !== 'semester_range'), 'semester_range']
   }
@@ -247,6 +266,9 @@ export async function loader(args: Route.LoaderArgs) {
       giftcard_display: {
         label: 'giftcard',
         maxChars: 6,
+      },
+      prior_participation_display: {
+        label: 'been before?',
       },
     },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
