@@ -145,22 +145,26 @@ export async function loader({ request }: Route.LoaderArgs) {
       .order('requested_at', { ascending: false }),
   ])
 
-  const semesters: SemesterRow[] = (semesterData ?? []).map((s: any) => ({
-    id: String(s.id),
-    name: s.name ? String(s.name) : null,
-    starts_at: String(s.starts_at),
-    ends_at: String(s.ends_at),
-    enrollment_open_at: s.enrollment_open_at ? String(s.enrollment_open_at) : null,
-    enrollment_close_at: s.enrollment_close_at ? String(s.enrollment_close_at) : null,
-    workshops: (s.workshop ?? []).map((w: any) => ({
-      id: String(w.id),
-      description: w.description ? String(w.description) : null,
-      enrollment_open_at: w.enrollment_open_at ? String(w.enrollment_open_at) : null,
-      enrollment_close_at: w.enrollment_close_at ? String(w.enrollment_close_at) : null,
-      capacity: Number(w.capacity ?? 0),
-      wait_list_capacity: Number(w.wait_list_capacity ?? 0),
-    })),
-  }))
+  const semesters: SemesterRow[] = (semesterData ?? [])
+    .map((s: any) => ({
+      id: String(s.id),
+      name: s.name ? String(s.name) : null,
+      starts_at: String(s.starts_at),
+      ends_at: String(s.ends_at),
+      enrollment_open_at: s.enrollment_open_at ? String(s.enrollment_open_at) : null,
+      enrollment_close_at: s.enrollment_close_at ? String(s.enrollment_close_at) : null,
+      workshops: (s.workshop ?? [])
+        .filter((w: any) => typeof w?.id === 'string' && Boolean(w.id))
+        .map((w: any) => ({
+          id: String(w.id),
+          description: w.description ? String(w.description) : null,
+          enrollment_open_at: w.enrollment_open_at ? String(w.enrollment_open_at) : null,
+          enrollment_close_at: w.enrollment_close_at ? String(w.enrollment_close_at) : null,
+          capacity: Number(w.capacity ?? 0),
+          wait_list_capacity: Number(w.wait_list_capacity ?? 0),
+        })),
+    }))
+    .filter(semester => semester.workshops.length > 0)
 
   if (!selectedSemesterId) {
     const nowIso = new Date().toISOString()
