@@ -1,6 +1,6 @@
 import type { Database } from '@/lib/database.types'
 import { requireAuth } from '@/lib/auth.server'
-import { adminClient } from '@/lib/supabase/adminClient'
+import { createClient } from '@/lib/supabase/server'
 import { isRoleAtLeast } from '@/lib/roles'
 
 const statusBucketFor = (status: Database['public']['Enums']['workshop_enrollment_status']) => {
@@ -27,8 +27,18 @@ const ridingNameVariants = (value: string) => {
   return Array.from(variants)
 }
 
+const chunk = <T,>(items: T[], size: number) => {
+  if (!items.length || size <= 0) return [] as T[][]
+  const batches: T[][] = []
+  for (let i = 0; i < items.length; i += size) {
+    batches.push(items.slice(i, i + size))
+  }
+  return batches
+}
+
 export async function loader({ request }: { request: Request }) {
   const auth = await requireAuth(request)
+  const { supabase } = createClient(request)
   if (!isRoleAtLeast(auth.claims.role, 'staff')) {
     return new Response('Unauthorized', { status: 403, headers: auth.headers })
   }
@@ -59,51 +69,93 @@ export async function loader({ request }: { request: Request }) {
     ridingNames.map(riding => [canonicalRiding(riding), riding])
   )
 
-  const lookupRidingNames = Array.from(
-    new Set(
-      ridingNames.flatMap(riding => ridingNameVariants(riding))
-    )
-  )
+  const { data: enrollmentRows, error: enrollmentError } = await supabase
+    .from('workshop_enrollment')
+    .select('profile_id, status')
+    .not('profile_id', 'is', null)
 
-  const { data: profileRows, error: profileError } = await adminClient
-    .from('profile')
-    .select('id, federal_electoral_district_name')
-    .in('federal_electoral_district_name', lookupRidingNames)
-
-  if (profileError) {
-    console.error('[federal-electoral-district] failed to load profile riding map', profileError)
+  if (enrollmentError) {
+    console.error('[federal-electoral-district] failed to load enrollment rows', enrollmentError)
     return Response.json({ byRiding }, { headers: auth.headers })
   }
 
-  const profileIds = (profileRows ?? [])
-    .map(profile => profile.id)
-    .filter((profileId): profileId is string => typeof profileId === 'string' && Boolean(profileId))
+  const profileIds = Array.from(
+    new Set(
+      (enrollmentRows ?? [])
+        .map(enrollment => enrollment.profile_id)
+        .filter((profileId): profileId is string => typeof profileId === 'string' && Boolean(profileId))
+    )
+  )
 
   if (!profileIds.length) {
     return Response.json({ byRiding }, { headers: auth.headers })
   }
 
+  const profileRows: Array<{ id: string; federal_electoral_district_name: string | null }> = []
+  for (const profileChunk of chunk(profileIds, 500)) {
+    const { data, error } = await supabase
+      .from('profile')
+      .select('id, federal_electoral_district_name')
+      .in('id', profileChunk)
+
+    if (error) {
+      console.error('[federal-electoral-district] failed to load profile riding map', error)
+      return Response.json({ byRiding }, { headers: auth.headers })
+    }
+
+    profileRows.push(...((data ?? []) as Array<{ id: string; federal_electoral_district_name: string | null }>))
+  }
+
+  const lookupRidingNames = Array.from(
+    new Set(
+      ridingNames.flatMap(riding => ridingNameVariants(riding)).map(canonicalRiding)
+    )
+  )
+  const lookupRidingNameSet = new Set(lookupRidingNames)
+
+  const matchingProfileIds = new Set(
+    profileRows
+      .filter(row => {
+        if (!row.federal_electoral_district_name) return false
+        return lookupRidingNameSet.has(canonicalRiding(row.federal_electoral_district_name))
+      })
+      .map(row => row.id)
+  )
+
+  if (!matchingProfileIds.size) {
+    return Response.json({ byRiding }, { headers: auth.headers })
+  }
+
+  const scopedEnrollmentRows = (enrollmentRows ?? []).filter(enrollment => {
+    if (typeof enrollment.profile_id !== 'string') return false
+    return matchingProfileIds.has(enrollment.profile_id)
+  })
+
+  const scopedProfileIds = Array.from(
+    new Set(
+      scopedEnrollmentRows
+        .map(enrollment => enrollment.profile_id)
+    .filter((profileId): profileId is string => typeof profileId === 'string' && Boolean(profileId))
+    )
+  )
+  const scopedProfileIdSet = new Set(scopedProfileIds)
+
+  if (!scopedProfileIds.length) {
+    return Response.json({ byRiding }, { headers: auth.headers })
+  }
+
   const requestedRidingByProfileId = new Map(
-    (profileRows ?? [])
-      .filter(row => typeof row.id === 'string' && typeof row.federal_electoral_district_name === 'string')
+    profileRows
+      .filter(row => scopedProfileIdSet.has(row.id) && typeof row.federal_electoral_district_name === 'string')
       .map(row => {
-        const requested = requestedRidingByCanonical.get(canonicalRiding(row.federal_electoral_district_name))
+        const ridingName = row.federal_electoral_district_name ?? ''
+        const requested = requestedRidingByCanonical.get(canonicalRiding(ridingName))
         return [row.id, requested ?? null]
       })
       .filter((entry): entry is [string, string] => Boolean(entry[1]))
   )
 
-  const { data: enrollmentRows, error: enrollmentError } = await adminClient
-    .from('workshop_enrollment')
-    .select('profile_id, status')
-    .in('profile_id', profileIds)
-
-  if (enrollmentError) {
-    console.error('[federal-electoral-district] failed to load enrollment status counts', enrollmentError)
-    return Response.json({ byRiding }, { headers: auth.headers })
-  }
-
-  for (const enrollment of enrollmentRows ?? []) {
+  for (const enrollment of scopedEnrollmentRows) {
     const profileId = typeof enrollment.profile_id === 'string' ? enrollment.profile_id : ''
     if (!profileId) continue
 
