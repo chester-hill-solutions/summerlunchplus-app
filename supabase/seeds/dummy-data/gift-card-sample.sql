@@ -1,72 +1,20 @@
--- Sample gift card uploads and assets tied to last year's attendance.
-with last_year_semester as (
-  insert into public.semester (id, name, description, starts_at, ends_at, enrollment_open_at, enrollment_close_at)
-  values (
-    'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::uuid,
-    'Summer 2025',
-    'Prior-year semester used for gift card sample data.',
-    '2025-06-03T00:00:00Z',
-    '2025-08-30T23:59:59Z',
-    '2025-02-01T00:00:00Z',
-    '2025-05-15T23:59:59Z'
-  )
-  on conflict (id) do update
-    set name = excluded.name,
-        description = excluded.description,
-        starts_at = excluded.starts_at,
-        ends_at = excluded.ends_at,
-        enrollment_open_at = excluded.enrollment_open_at,
-        enrollment_close_at = excluded.enrollment_close_at
-  returning id
-), last_year_workshop as (
-  insert into public.workshop (id, semester_id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity)
-  values (
-    'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid,
-    (select id from last_year_semester),
-    '2025 Summer Workshop - Sample',
-    '2025-02-01T00:00:00Z',
-    '2025-05-15T23:59:59Z',
-    5,
-    2
-  )
-  on conflict (id) do update
-    set semester_id = excluded.semester_id,
-        description = excluded.description,
-        enrollment_open_at = excluded.enrollment_open_at,
-        enrollment_close_at = excluded.enrollment_close_at,
-        capacity = excluded.capacity,
-        wait_list_capacity = excluded.wait_list_capacity
-  returning id
-), last_year_class as (
-  insert into public.class (id, workshop_id, starts_at, ends_at)
-  values (
-    '11111111-ffff-ffff-ffff-111111111111'::uuid,
-    (select id from last_year_workshop),
-    '2025-06-10T16:00:00Z',
-    '2025-06-10T17:30:00Z'
-  )
-  on conflict (id) do update
-    set workshop_id = excluded.workshop_id,
-        starts_at = excluded.starts_at,
-        ends_at = excluded.ends_at
-  returning id
-), enrollments as (
-  insert into public.workshop_enrollment (workshop_id, semester_id, profile_id, status)
-  values
-    ((select id from last_year_workshop), (select id from last_year_semester), '22222222-bbbb-bbbb-bbbb-222222222222'::uuid, 'approved'),
-    ((select id from last_year_workshop), (select id from last_year_semester), '33333333-bbbb-bbbb-bbbb-333333333333'::uuid, 'approved')
-  on conflict (semester_id, profile_id) do update
-    set status = excluded.status
-  returning id
-), attendance as (
-  insert into public.class_attendance (class_id, profile_id, status)
-  values
-    ((select id from last_year_class), '22222222-bbbb-bbbb-bbbb-222222222222'::uuid, 'present'),
-    ((select id from last_year_class), '33333333-bbbb-bbbb-bbbb-333333333333'::uuid, 'present')
-  on conflict (class_id, profile_id) do update
-    set status = excluded.status
-  returning id
-), upload_batch as (
+-- Sample gift card uploads and assets tied to the existing prior semester seed.
+
+insert into public.workshop_enrollment (workshop_id, semester_id, profile_id, status)
+values
+  ('11111111-1111-1111-1111-111111111111'::uuid, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid, '22222222-bbbb-bbbb-bbbb-222222222222'::uuid, 'approved'),
+  ('11111111-1111-1111-1111-111111111111'::uuid, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid, '44444444-dddd-dddd-dddd-444444444444'::uuid, 'approved')
+on conflict (semester_id, profile_id) do update
+  set status = excluded.status;
+
+insert into public.class_attendance (class_id, profile_id, status)
+values
+  ('aaaaaaaa-1111-1111-1111-aaaaaaaa1111'::uuid, '22222222-bbbb-bbbb-bbbb-222222222222'::uuid, 'present'),
+  ('aaaaaaaa-1111-1111-1111-aaaaaaaa1111'::uuid, '44444444-dddd-dddd-dddd-444444444444'::uuid, 'present')
+on conflict (class_id, profile_id) do update
+  set status = excluded.status;
+
+with upload_batch as (
   insert into public.gift_card_upload (
     id, uploaded_by, provider, upload_type, status, file_name, file_size, total_cards, processed_cards
   )
@@ -114,7 +62,7 @@ values
   ),
   (
     (select id from upload_batch),
-    '33333333-bbbb-bbbb-bbbb-333333333333'::uuid,
+    '44444444-dddd-dddd-dddd-444444444444'::uuid,
     40.00,
     'https://example.com/gift-card/bravo',
     'used',

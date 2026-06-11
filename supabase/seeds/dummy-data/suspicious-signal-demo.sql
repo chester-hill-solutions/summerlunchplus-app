@@ -1,5 +1,6 @@
 -- Demo seed data for discrepancy review workflows.
 -- This creates a small family with conflicting addresses and two open suspicious signals.
+-- Reuses the current semester/workshop from class-section-sample.sql.
 
 insert into public.profile (
   id,
@@ -10,7 +11,8 @@ insert into public.profile (
   street_address,
   city,
   province,
-  postcode
+  postcode,
+  federal_electoral_district_name
 )
 values
   (
@@ -19,21 +21,23 @@ values
     'Gina',
     'Guardian',
     'seed.guardian.discrepancy@example.com',
-    '100 Main Street',
-    'Toronto',
+    '110 Laurier Ave W',
+    'Ottawa',
     'ON',
-    'M5V1A1'
+    'K1P 1J1',
+    'Ottawa Centre'
   ),
   (
-    '22222222-2222-4222-8222-222222222222',
+    '22222222-2222-4222-8222-222222222229',
     'student',
     'Sam',
     'Student',
     'seed.student.discrepancy@example.com',
-    '900 Pine Avenue',
-    'Vancouver',
-    'BC',
-    'V5K0A1'
+    '216 Ontario St',
+    'Kingston',
+    'ON',
+    'K7L 2Y4',
+    'Kingston and the Islands'
   )
 on conflict (id) do nothing;
 
@@ -46,51 +50,11 @@ insert into public.person_guardian_child (
 values (
   '33333333-3333-4333-8333-333333333333',
   '11111111-1111-4111-8111-111111111111',
-  '22222222-2222-4222-8222-222222222222',
+  '22222222-2222-4222-8222-222222222229',
   true
 )
 on conflict (guardian_profile_id, child_profile_id)
 do update set primary_child = excluded.primary_child;
-
-insert into public.semester (
-  id,
-  name,
-  description,
-  starts_at,
-  ends_at,
-  enrollment_open_at,
-  enrollment_close_at
-)
-values (
-  '66666666-6666-4666-8666-666666666666',
-  'Seed Semester - Discrepancy Demo',
-  'Semester used for suspicious enrollment seed data.',
-  '2026-06-01T00:00:00Z',
-  '2026-08-31T23:59:59Z',
-  '2026-05-01T00:00:00Z',
-  '2026-07-15T23:59:59Z'
-)
-on conflict (id) do nothing;
-
-insert into public.workshop (
-  id,
-  semester_id,
-  description,
-  enrollment_open_at,
-  enrollment_close_at,
-  capacity,
-  wait_list_capacity
-)
-values (
-  '77777777-7777-4777-8777-777777777777',
-  '66666666-6666-4666-8666-666666666666',
-  'Seed Workshop - Suspicious Enrollment Demo',
-  '2026-05-15T00:00:00Z',
-  '2026-07-01T00:00:00Z',
-  20,
-  10
-)
-on conflict (id) do nothing;
 
 insert into public.workshop_enrollment (
   id,
@@ -102,9 +66,9 @@ insert into public.workshop_enrollment (
 )
 values (
   '88888888-8888-4888-8888-888888888888',
-  '77777777-7777-4777-8777-777777777777',
-  '66666666-6666-4666-8666-666666666666',
-  '22222222-2222-4222-8222-222222222222',
+  'cccccccc-cccc-cccc-cccc-cccccccccccc',
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+  '22222222-2222-4222-8222-222222222229',
   'pending',
   now()
 )
@@ -123,10 +87,10 @@ insert into public.suspicious_signal (
 values
   (
     '44444444-4444-4444-8444-444444444444',
-    '22222222-2222-4222-8222-222222222222',
+    '22222222-2222-4222-8222-222222222229',
     array[
       '11111111-1111-4111-8111-111111111111'::uuid,
-      '22222222-2222-4222-8222-222222222222'::uuid
+      '22222222-2222-4222-8222-222222222229'::uuid
     ],
     'address_mismatch',
     'medium',
@@ -154,7 +118,7 @@ values
         ),
         jsonb_build_object(
           'profile_id',
-          '22222222-2222-4222-8222-222222222222',
+          '22222222-2222-4222-8222-222222222229',
           'role',
           'student',
           'label',
@@ -176,10 +140,10 @@ values
   ),
   (
     '55555555-5555-4555-8555-555555555555',
-    '22222222-2222-4222-8222-222222222222',
+    '22222222-2222-4222-8222-222222222229',
     array[
       '11111111-1111-4111-8111-111111111111'::uuid,
-      '22222222-2222-4222-8222-222222222222'::uuid
+      '22222222-2222-4222-8222-222222222229'::uuid
     ],
     'network_distance_anomaly',
     'high',
@@ -207,7 +171,7 @@ values
         ),
         jsonb_build_object(
           'profile_id',
-          '22222222-2222-4222-8222-222222222222',
+          '22222222-2222-4222-8222-222222222229',
           'submitted_at_local',
           'May 15, 2026, 9:10 AM',
           'ip_address',

@@ -11,6 +11,22 @@ const statusBucketFor = (status: Database['public']['Enums']['workshop_enrollmen
   return null
 }
 
+const canonicalRiding = (value: string) =>
+  value
+    .normalize('NFKC')
+    .trim()
+    .replace(/[—–−]/g, '-')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+
+const ridingNameVariants = (value: string) => {
+  const trimmed = value.trim()
+  const variants = new Set<string>([trimmed])
+  variants.add(trimmed.replace(/[—–−]/g, '-'))
+  variants.add(trimmed.replace(/-/g, '—'))
+  return Array.from(variants)
+}
+
 export async function loader({ request }: { request: Request }) {
   const auth = await requireAuth(request)
   if (!isRoleAtLeast(auth.claims.role, 'staff')) {
@@ -39,10 +55,20 @@ export async function loader({ request }: { request: Request }) {
     {}
   )
 
+  const requestedRidingByCanonical = new Map(
+    ridingNames.map(riding => [canonicalRiding(riding), riding])
+  )
+
+  const lookupRidingNames = Array.from(
+    new Set(
+      ridingNames.flatMap(riding => ridingNameVariants(riding))
+    )
+  )
+
   const { data: profileRows, error: profileError } = await adminClient
     .from('profile')
     .select('id, federal_electoral_district_name')
-    .in('federal_electoral_district_name', ridingNames)
+    .in('federal_electoral_district_name', lookupRidingNames)
 
   if (profileError) {
     console.error('[federal-electoral-district] failed to load profile riding map', profileError)
@@ -57,10 +83,14 @@ export async function loader({ request }: { request: Request }) {
     return Response.json({ byRiding }, { headers: auth.headers })
   }
 
-  const ridingByProfileId = new Map(
+  const requestedRidingByProfileId = new Map(
     (profileRows ?? [])
       .filter(row => typeof row.id === 'string' && typeof row.federal_electoral_district_name === 'string')
-      .map(row => [row.id, row.federal_electoral_district_name])
+      .map(row => {
+        const requested = requestedRidingByCanonical.get(canonicalRiding(row.federal_electoral_district_name))
+        return [row.id, requested ?? null]
+      })
+      .filter((entry): entry is [string, string] => Boolean(entry[1]))
   )
 
   const { data: enrollmentRows, error: enrollmentError } = await adminClient
@@ -77,7 +107,7 @@ export async function loader({ request }: { request: Request }) {
     const profileId = typeof enrollment.profile_id === 'string' ? enrollment.profile_id : ''
     if (!profileId) continue
 
-    const riding = ridingByProfileId.get(profileId)
+    const riding = requestedRidingByProfileId.get(profileId)
     if (!riding) continue
 
     const status = enrollment.status as Database['public']['Enums']['workshop_enrollment_status']
