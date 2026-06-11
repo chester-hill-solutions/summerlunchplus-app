@@ -25,6 +25,8 @@ Swagger UI: http://localhost:8000/docs
 
 ## Development standards
 
+Always default to best practices. When there are tradeoffs (e.g. convenience vs. correctness, speed vs. reliability), choose the best-practice option by default. If a tradeoff is genuinely worth making, explain it explicitly and get confirmation before proceeding — never make it silently.
+
 Correctness over speed. Before marking any task complete:
 
 - Does the implementation match the API contract (status codes, response shapes, error behavior)?
