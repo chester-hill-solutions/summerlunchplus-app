@@ -127,10 +127,10 @@ values
     'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::uuid,
     'Current Summer Semester',
     'Current-year semester for approved, pending, waitlisted, and declined states.',
-    date_trunc('year', now()) + interval '5 months',
-    date_trunc('year', now()) + interval '6 months' - interval '1 second',
-    date_trunc('year', now()) + interval '3 months',
-    date_trunc('year', now()) + interval '5 months' - interval '1 second'
+    now() + interval '14 days',
+    now() + interval '120 days',
+    now() - interval '30 days',
+    now() + interval '45 days'
   )
 on conflict (id) do update
   set name = excluded.name,
@@ -163,8 +163,8 @@ values
     'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid,
     'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::uuid,
     'Current Session A - Enrollment Triage',
-    date_trunc('year', now()) + interval '3 months',
-    date_trunc('year', now()) + interval '5 months' - interval '1 second',
+    now() - interval '30 days',
+    now() + interval '45 days',
     3,
     2
   ),
@@ -172,8 +172,8 @@ values
     'dddddddd-dddd-dddd-dddd-dddddddddddd'::uuid,
     'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::uuid,
     'Current Session B - Remaining Capacity',
-    date_trunc('year', now()) + interval '3 months',
-    date_trunc('year', now()) + interval '5 months' - interval '1 second',
+    now() - interval '30 days',
+    now() + interval '45 days',
     2,
     1
   )
@@ -196,14 +196,14 @@ values
   (
     'bbbbbbbb-1111-1111-1111-bbbbbbbb1111'::uuid,
     'cccccccc-cccc-cccc-cccc-cccccccccccc'::uuid,
-    date_trunc('year', now()) + interval '5 months' + interval '5 days 16 hours',
-    date_trunc('year', now()) + interval '5 months' + interval '5 days 17 hours 30 minutes'
+    now() + interval '20 days',
+    now() + interval '20 days 90 minutes'
   ),
   (
     'bbbbbbbb-2222-2222-2222-bbbbbbbb2222'::uuid,
     'dddddddd-dddd-dddd-dddd-dddddddddddd'::uuid,
-    date_trunc('year', now()) + interval '5 months' + interval '7 days 17 hours',
-    date_trunc('year', now()) + interval '5 months' + interval '7 days 18 hours 30 minutes'
+    now() + interval '22 days',
+    now() + interval '22 days 90 minutes'
   )
 on conflict (id) do update
   set workshop_id = excluded.workshop_id,
