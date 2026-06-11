@@ -15,13 +15,13 @@ A hosted REST API with developer portal, built on the existing Zoom REST API Eva
 - `zoom.py` — Zoom API client (S2S OAuth, all operations)
 - `cache.py` — in-memory TTL cache
 - `main.py` — all API endpoints implemented
-- Full test suite (23 tests, all passing)
+- `transforms.py` — no-op transformation layer for meeting and participant data
+- Full test suite (27 tests, all passing)
 - `CLAUDE.md` — project standards and developer guidance
 
 **Remaining:**
 1. Write `Dockerfile` and deploy to Render
-2. Add no-op transformation layer for participant and meeting data (before summerlunchplus integration)
-3. Close [issue #239](https://github.com/chester-hill-solutions/summerlunchplus-app/issues/239) once transformation layer is in place
+2. Close [issue #239](https://github.com/chester-hill-solutions/summerlunchplus-app/issues/239)
 
 ---
 
@@ -157,7 +157,7 @@ The machine-readable spec is available at `/openapi.json`. All request/response 
 
 ### Participant data transformation — [issue #239](https://github.com/chester-hill-solutions/summerlunchplus-app/issues/239) (resolved)
 
-**Decision:** Return Zoom's raw response for now. A no-op transformation layer will be added before summerlunchplus integration begins, so future normalization can be introduced in one place without touching the route handlers.
+**Decision:** Return Zoom's raw response. A no-op transformation layer (`app/transforms.py`) is in place so future normalization can be introduced in one place without touching the route handlers or cache logic. Issue to be closed on merge to summerlunchplus-app.
 
 ### Zoom session link association — per class (resolved)
 

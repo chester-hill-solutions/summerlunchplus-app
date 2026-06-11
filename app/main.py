@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.auth import get_api_key
 from app.cache import _participants_cache, _past_meetings_cache, get_cached, set_cached
 from app.config import settings
+from app.transforms import transform_meetings, transform_participants
 from app.zoom import ZoomClient
 
 app = FastAPI(title="Zoom API Service")
@@ -62,7 +63,7 @@ def list_past_meetings(
             return cached
     result = _zoom().list_past_meetings(days=days)
     set_cached(_past_meetings_cache, cache_key, result)
-    return result
+    return transform_meetings(result)
 
 
 @app.get("/meetings/{uuid}/participants", dependencies=[Depends(get_api_key)])
@@ -77,7 +78,7 @@ def get_participants(
             return cached
     result = _zoom().get_participants(uuid)
     set_cached(_participants_cache, cache_key, result)
-    return result
+    return transform_participants(result)
 
 
 @app.post("/meetings", dependencies=[Depends(get_api_key)])
