@@ -1,4 +1,28 @@
 -- Profile table storing guardian/student details
+create or replace function public.normalize_address_fingerprint(
+  street_address text,
+  city text,
+  province text,
+  postcode text
+)
+returns text
+language sql
+immutable
+as $$
+  with normalized as (
+    select
+      nullif(regexp_replace(lower(coalesce(street_address, '')), '\\s+', ' ', 'g'), '') as street,
+      nullif(regexp_replace(lower(coalesce(city, '')), '\\s+', ' ', 'g'), '') as city,
+      nullif(regexp_replace(lower(coalesce(province, '')), '\\s+', ' ', 'g'), '') as province,
+      nullif(regexp_replace(lower(coalesce(postcode, '')), '[^a-z0-9]', '', 'g'), '') as postcode
+  )
+  select case
+    when street is null and city is null and province is null and postcode is null then null
+    else concat_ws('|', coalesce(street, ''), coalesce(city, ''), coalesce(province, ''), coalesce(postcode, ''))
+  end
+  from normalized
+$$;
+
 create table public.profile (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) on delete cascade,
@@ -12,6 +36,9 @@ create table public.profile (
   city text,
   province text,
   postcode text,
+  address_fingerprint text generated always as (
+    public.normalize_address_fingerprint(street_address, city, province, postcode)
+  ) stored,
   partner_program text,
   federal_electoral_district_name text references public.federal_electoral_district(name) on delete set null,
   riding_lookup_status text,
@@ -144,3 +171,6 @@ create policy profile_read_auth_admin
 grant all on table public.profile to supabase_auth_admin;
 revoke all on table public.profile from authenticated, anon, public;
 grant select, update, insert on table public.profile to authenticated;
+
+create index if not exists profile_address_fingerprint_idx
+  on public.profile (address_fingerprint);
