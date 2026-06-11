@@ -59,6 +59,17 @@ type WorkshopEnrollmentEnrichmentResponse = {
   byProfileId: Record<string, WorkshopEnrollmentEnrichment>
 }
 
+type FederalElectoralDistrictEnrichment = {
+  accepted: number
+  pending: number
+  waitlisted: number
+  declined: number
+}
+
+type FederalElectoralDistrictEnrichmentResponse = {
+  byRiding: Record<string, FederalElectoralDistrictEnrichment>
+}
+
 type LoaderData = {
   columns: string[]
   rows: Record<string, unknown>[]
@@ -279,10 +290,13 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Record<string, string>>({})
   const [enrichmentByProfileId, setEnrichmentByProfileId] = useState<Record<string, WorkshopEnrollmentEnrichment>>({})
+  const [enrichmentByRiding, setEnrichmentByRiding] = useState<Record<string, FederalElectoralDistrictEnrichment>>({})
   const loadingEnrichmentProfileIdsRef = useRef<Set<string>>(new Set())
+  const loadingEnrichmentRidingNamesRef = useRef<Set<string>>(new Set())
   const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const filterPopoverRef = useRef<HTMLDivElement | null>(null)
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
+  const isFederalElectoralDistrictTable = tableName === 'federal-electoral-district'
 
   useEffect(() => {
     const nextSort = searchParams.get('sort')
@@ -370,16 +384,28 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     })
 
   const rowsWithEnrichment = useMemo(() => {
-    if (!isWorkshopEnrollmentTable) return rows
-
     return rows.map(row => {
-      const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
-      if (!profileId) return row
-      const enrichment = enrichmentByProfileId[profileId]
-      if (!enrichment) return row
-      return { ...row, ...enrichment }
+      let nextRow = row
+
+      if (isWorkshopEnrollmentTable) {
+        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+        const enrichment = profileId ? enrichmentByProfileId[profileId] : null
+        if (enrichment) {
+          nextRow = { ...nextRow, ...enrichment }
+        }
+      }
+
+      if (isFederalElectoralDistrictTable) {
+        const ridingName = typeof row.name === 'string' ? row.name.trim() : ''
+        const enrichment = ridingName ? enrichmentByRiding[ridingName] : null
+        if (enrichment) {
+          nextRow = { ...nextRow, ...enrichment }
+        }
+      }
+
+      return nextRow
     })
-  }, [enrichmentByProfileId, isWorkshopEnrollmentTable, rows])
+  }, [enrichmentByProfileId, enrichmentByRiding, isFederalElectoralDistrictTable, isWorkshopEnrollmentTable, rows])
 
   const derivedRows = useMemo(() => {
     let adjustedRows = rowsWithEnrichment.filter(row => rowMatchesFilters(row, filters))
@@ -486,6 +512,71 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
       abortController.abort()
     }
   }, [enrichmentByProfileId, isWorkshopEnrollmentTable, paginatedRows])
+
+  useEffect(() => {
+    if (!isFederalElectoralDistrictTable) return
+
+    const missingRidingNames = Array.from(
+      new Set(
+        paginatedRows
+          .map(row => (typeof row.name === 'string' ? row.name.trim() : ''))
+          .filter(
+            ridingName =>
+              Boolean(ridingName) &&
+              !enrichmentByRiding[ridingName] &&
+              !loadingEnrichmentRidingNamesRef.current.has(ridingName)
+          )
+      )
+    )
+
+    if (!missingRidingNames.length) return
+
+    const requestRidingNames = missingRidingNames.slice(0, 40)
+    requestRidingNames.forEach(ridingName => loadingEnrichmentRidingNamesRef.current.add(ridingName))
+
+    const abortController = new AbortController()
+    void (async () => {
+      try {
+        const searchParams = new URLSearchParams()
+        requestRidingNames.forEach(ridingName => searchParams.append('riding', ridingName))
+        const response = await fetch(`/manage/federal-electoral-district/enrichment?${searchParams.toString()}`, {
+          signal: abortController.signal,
+        })
+
+        if (!response.ok) return
+        const payload = (await response.json()) as FederalElectoralDistrictEnrichmentResponse
+        const fallbackEnrichment: FederalElectoralDistrictEnrichment = {
+          accepted: 0,
+          pending: 0,
+          waitlisted: 0,
+          declined: 0,
+        }
+
+        const resolvedByRiding = requestRidingNames.reduce<Record<string, FederalElectoralDistrictEnrichment>>(
+          (acc, ridingName) => {
+            acc[ridingName] = payload?.byRiding?.[ridingName] ?? fallbackEnrichment
+            return acc
+          },
+          {}
+        )
+
+        setEnrichmentByRiding(prev => ({
+          ...prev,
+          ...resolvedByRiding,
+        }))
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          console.error('[table display] federal riding enrichment fetch failed', error)
+        }
+      } finally {
+        requestRidingNames.forEach(ridingName => loadingEnrichmentRidingNamesRef.current.delete(ridingName))
+      }
+    })()
+
+    return () => {
+      abortController.abort()
+    }
+  }, [enrichmentByRiding, isFederalElectoralDistrictTable, paginatedRows])
 
   const updateSort = (column: string) => {
     if (sortColumn !== column) {
