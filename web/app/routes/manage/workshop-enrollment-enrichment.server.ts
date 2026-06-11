@@ -1,6 +1,7 @@
 import { adminClient } from '@/lib/supabase/adminClient'
 
 const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
+const PRIOR_PARTICIPATION_QUESTION_CODE = 'onboarding_prior_participation'
 const RELATIONSHIP_BATCH_SIZE = 100
 const IN_CLAUSE_BATCH_SIZE = 250
 
@@ -27,12 +28,14 @@ type FormSubmissionRow = {
 
 type FormAnswerRow = {
   submission_id: string
+  question_code: string
   value: unknown
 }
 
 export type WorkshopEnrollmentEnrichment = {
   riding_display: string
   giftcard_display: string
+  prior_participation_display: string
   profile_hover_name: string
   profile_hover_email: string
   profile_hover_parent_email: string
@@ -43,6 +46,15 @@ const normalizeRiding = (value: unknown) =>
 
 const normalizeText = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : null
+
+const normalizePriorParticipation = (value: unknown) => {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim().toLowerCase()
+  if (!trimmed) return null
+  if (trimmed === 'yes') return 'Yes'
+  if (trimmed === 'no') return 'No'
+  return value.trim()
+}
 
 const fullNameFromProfile = (profile: RidingProfileRow | null | undefined) => {
   const firstname = normalizeText(profile?.firstname)
@@ -94,6 +106,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
   const familyProfileIdsByProfileId = new Map<string, string[]>()
   const mealKitByProfileId = new Map<string, boolean>()
   let giftCardPreferenceByProfileId = new Map<string, string>()
+  let priorParticipationByProfileId = new Map<string, string>()
 
   const seen = new Set<string>(normalizedProfileIds)
   const queue = [...normalizedProfileIds]
@@ -274,12 +287,12 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       for (const submissionChunk of chunkArray(submissionIds, IN_CLAUSE_BATCH_SIZE)) {
         const { data, error } = await adminClient
           .from('form_answer')
-          .select('submission_id, value')
-          .eq('question_code', GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+          .select('submission_id, question_code, value')
+          .in('question_code', [GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE, PRIOR_PARTICIPATION_QUESTION_CODE])
           .in('submission_id', submissionChunk)
 
         if (error) {
-          console.error('[workshop enrollment] enrichment failed to load gift card answers', {
+          console.error('[workshop enrollment] enrichment failed to load enrichment answers', {
             chunkSize: submissionChunk.length,
             error: error.message,
           })
@@ -292,6 +305,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       if (answerRows.length) {
         const submissionById = new Map(submissions.map(submission => [submission.id, submission]))
         const latestGiftCardByProfileId = new Map<string, { value: string; submittedAt: number }>()
+        const latestPriorParticipationByProfileId = new Map<string, { value: string; submittedAt: number }>()
 
         for (const answer of answerRows) {
           const submission = submissionById.get(answer.submission_id)
@@ -303,18 +317,35 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
 
           const submittedAt = Date.parse(submission?.submitted_at ?? '')
           const submittedAtTime = Number.isNaN(submittedAt) ? 0 : submittedAt
-          const existing = latestGiftCardByProfileId.get(profileId)
+          if (answer.question_code === GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE) {
+            const existing = latestGiftCardByProfileId.get(profileId)
+            if (!existing || submittedAtTime > existing.submittedAt) {
+              latestGiftCardByProfileId.set(profileId, {
+                value,
+                submittedAt: submittedAtTime,
+              })
+            }
+            continue
+          }
 
-          if (!existing || submittedAtTime > existing.submittedAt) {
-            latestGiftCardByProfileId.set(profileId, {
-              value,
-              submittedAt: submittedAtTime,
-            })
+          if (answer.question_code === PRIOR_PARTICIPATION_QUESTION_CODE) {
+            const normalized = normalizePriorParticipation(value)
+            if (!normalized) continue
+            const existing = latestPriorParticipationByProfileId.get(profileId)
+            if (!existing || submittedAtTime > existing.submittedAt) {
+              latestPriorParticipationByProfileId.set(profileId, {
+                value: normalized,
+                submittedAt: submittedAtTime,
+              })
+            }
           }
         }
 
         giftCardPreferenceByProfileId = new Map(
           Array.from(latestGiftCardByProfileId.entries()).map(([profileId, entry]) => [profileId, entry.value])
+        )
+        priorParticipationByProfileId = new Map(
+          Array.from(latestPriorParticipationByProfileId.entries()).map(([profileId, entry]) => [profileId, entry.value])
         )
       }
     }
@@ -392,9 +423,20 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       return 'N/A'
     })()
 
+    const priorParticipationDisplay = (() => {
+      for (const candidateProfileId of candidateProfileIds) {
+        const value = priorParticipationByProfileId.get(candidateProfileId)
+        if (value) {
+          return value
+        }
+      }
+      return 'N/A'
+    })()
+
     byProfileId[profileId] = {
       riding_display: ridingDisplay,
       giftcard_display: giftcardDisplay,
+      prior_participation_display: priorParticipationDisplay,
       profile_hover_name: profileHoverName,
       profile_hover_email: profileHoverEmail,
       profile_hover_parent_email: profileHoverParentEmail,
