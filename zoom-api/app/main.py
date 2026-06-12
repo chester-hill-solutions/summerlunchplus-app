@@ -26,7 +26,7 @@ class CreateMeetingRequest(BaseModel):
         "Bare datetimes with no offset are interpreted as UTC by Zoom.",
         examples=["2026-06-15T10:00:00Z"],
     )
-    duration: int    # minutes
+    duration: int = Field(description="Meeting duration in minutes.", examples=[60])
 
 
 class Registrant(BaseModel):
