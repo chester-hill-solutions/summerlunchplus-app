@@ -1,5 +1,5 @@
 from fastapi import Depends, FastAPI, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.auth import get_api_key
 from app.cache import _participants_cache, _past_meetings_cache, get_cached, set_cached
@@ -20,7 +20,12 @@ def _zoom() -> ZoomClient:
 
 class CreateMeetingRequest(BaseModel):
     topic: str
-    start_time: str  # ISO 8601, e.g. "2026-06-15T10:00:00"
+    start_time: str = Field(
+        description="Meeting start time in ISO 8601 format. Include a timezone offset or 'Z' for UTC — "
+        "e.g. '2026-06-15T10:00:00Z' (for UTC) or '2026-06-15T10:00:00-04:00' (for EDT). "
+        "Bare datetimes with no offset are interpreted as UTC by Zoom.",
+        examples=["2026-06-15T10:00:00Z"],
+    )
     duration: int    # minutes
 
 
