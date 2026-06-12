@@ -1,5 +1,7 @@
 from unittest.mock import Mock, patch
 
+import httpx
+
 
 # ── Mock helpers ──────────────────────────────────────────────────────────────
 
@@ -60,6 +62,16 @@ def ok(data):
     m = Mock()
     m.json.return_value = data
     m.raise_for_status.return_value = None
+    return m
+
+
+def zoom_error(status_code: int):
+    response = Mock()
+    response.status_code = status_code
+    m = Mock()
+    m.raise_for_status.side_effect = httpx.HTTPStatusError(
+        f"{status_code} Error", request=Mock(), response=response
+    )
     return m
 
 
@@ -174,6 +186,14 @@ def test_get_participants_force_refresh(client, headers):
 
 def test_get_participants_missing_auth(client):
     assert client.get("/meetings/abc123/participants").status_code == 401
+
+
+def test_get_participants_meeting_in_progress(client, headers):
+    with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
+         patch("app.zoom.httpx.get", return_value=zoom_error(400)):
+        resp = client.get("/meetings/abc123/participants", headers=headers)
+    assert resp.status_code == 409
+    assert "in progress" in resp.json()["detail"].lower()
 
 
 # ── POST /meetings ────────────────────────────────────────────────────────────

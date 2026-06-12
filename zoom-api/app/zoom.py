@@ -6,6 +6,10 @@ ZOOM_OAUTH_URL = "https://zoom.us/oauth/token"
 ZOOM_API_BASE = "https://api.zoom.us/v2"
 
 
+class MeetingInProgressError(Exception):
+    pass
+
+
 class ZoomClient:
     def __init__(self, account_id: str, client_id: str, client_secret: str):
         self.account_id = account_id
@@ -75,5 +79,13 @@ class ZoomClient:
             params={"page_size": 300},
             headers=self._headers(),
         )
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                raise MeetingInProgressError(
+                    "Meeting report not available. The meeting may still be in progress, "
+                    "or the report may not yet have been generated."
+                ) from e
+            raise
         return r.json()

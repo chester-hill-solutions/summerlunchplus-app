@@ -1,11 +1,11 @@
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.auth import get_api_key
 from app.cache import _participants_cache, _past_meetings_cache, get_cached, set_cached
 from app.config import settings
 from app.transforms import transform_meetings, transform_participants
-from app.zoom import ZoomClient
+from app.zoom import MeetingInProgressError, ZoomClient
 
 app = FastAPI(title="Zoom API Service")
 
@@ -95,14 +95,17 @@ def get_participants(
     The `uuid` must be double-URL-encoded if it contains special characters (handled automatically by this service).
     Results are cached in memory; use `force_refresh=true` to bypass the cache.
     Response shape mirrors the Zoom Reports API: a `participants` array with name, user_email, join_time, and leave_time per attendee.
-    Note: this endpoint returns a 500 error if the meeting is still in progress — reports are only available after a meeting ends.
+    Returns 409 if the meeting is still in progress or the report has not yet been generated.
     """
     cache_key = f"participants:{uuid}"
     if not force_refresh:
         cached = get_cached(_participants_cache, cache_key)
         if cached is not None:
             return cached
-    result = _zoom().get_participants(uuid)
+    try:
+        result = _zoom().get_participants(uuid)
+    except MeetingInProgressError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     set_cached(_participants_cache, cache_key, result)
     return transform_participants(result)
 
