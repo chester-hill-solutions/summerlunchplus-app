@@ -345,5 +345,4 @@ values
   (60001, 'Yukon'),
   (61001, 'Northwest Territories'),
   (62001, 'Nunavut')
-on conflict (code) do update
-  set name = excluded.name;
+on conflict (code) do nothing;

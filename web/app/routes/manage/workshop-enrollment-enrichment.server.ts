@@ -47,6 +47,7 @@ type OpenDiscrepancyRow = {
 
 export type WorkshopEnrollmentEnrichment = {
   riding_display: string
+  geo_locations_display: string
   giftcard_display: string
   prior_participation_display: string
   profile_hover_top_discrepancy: string
@@ -74,6 +75,17 @@ const parsePrimaryIp = (ipAddress: unknown, forwardedFor: unknown) => {
       .map(part => part.trim())
       .find(Boolean) ?? null
   )
+}
+
+const formatGeoLabel = (geo: Awaited<ReturnType<typeof resolveIpGeolocation>> | null) => {
+  const countryCode = geo?.countryCode ?? null
+  const flag = flagEmojiForCountryCode(countryCode)
+  const geoParts = [geo?.city, geo?.region, countryCode].filter(Boolean)
+  return geoParts.length
+    ? `${flag ? `${flag} ` : ''}${geoParts.join(', ')}`
+    : countryCode
+      ? `${flag ? `${flag} ` : ''}${countryCode}`
+      : 'Unknown location'
 }
 
 const normalizeRiding = (value: unknown) =>
@@ -649,25 +661,34 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
         const latest = latestIpByProfileId.get(candidateProfileId)
         if (!latest) continue
         const geo = geoByIp.get(latest.ip) ?? null
-        const countryCode = geo?.countryCode ?? null
-        const flag = flagEmojiForCountryCode(countryCode)
-        const geoParts = [geo?.city, geo?.region, countryCode].filter(Boolean)
-        const geoLabel = geoParts.length
-          ? `${flag ? `${flag} ` : ''}${geoParts.join(', ')}`
-          : countryCode
-            ? `${flag ? `${flag} ` : ''}${countryCode}`
-            : 'Unknown location'
         return {
           ip: latest.ip,
-          geo: geoLabel,
+          geo: formatGeoLabel(geo),
         }
       }
 
       return { ip: '', geo: '' }
     })()
 
+    const geoLocationsDisplay = (() => {
+      const uniqueLabels: string[] = []
+      for (const candidateProfileId of candidateProfileIds) {
+        const latest = latestIpByProfileId.get(candidateProfileId)
+        if (!latest) continue
+        const label = formatGeoLabel(geoByIp.get(latest.ip) ?? null)
+        if (!uniqueLabels.includes(label)) {
+          uniqueLabels.push(label)
+        }
+      }
+
+      if (!uniqueLabels.length) return 'N/A'
+      if (uniqueLabels.length <= 2) return uniqueLabels.join(' | ')
+      return `${uniqueLabels.slice(0, 2).join(' | ')} +${uniqueLabels.length - 2} more`
+    })()
+
     byProfileId[profileId] = {
       riding_display: ridingDisplay,
+      geo_locations_display: geoLocationsDisplay,
       giftcard_display: giftcardDisplay,
       prior_participation_display: priorParticipationDisplay,
       profile_hover_top_discrepancy: discrepancyInfo.top,

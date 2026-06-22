@@ -12,3 +12,6 @@ _**
 /build/
 /web/test-results/
 /web/playwright-report/
+
+# Local production snapshot seed dumps (PII/sensitive)
+/supabase/seeds/prod-data/*.sql

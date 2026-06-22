@@ -7,9 +7,7 @@ with profile_form as (
     true,
     array['guardian','student','unassigned']::app_role[]
   )
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 ), guardian_details_form as (
   insert into public.form (name, is_required, auto_assign)
@@ -18,9 +16,7 @@ with profile_form as (
     true,
     array['student','unassigned']::app_role[]
   )
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 ), child_form as (
   insert into public.form (name, is_required, auto_assign)
@@ -29,9 +25,7 @@ with profile_form as (
     true,
     array['guardian','student','unassigned']::app_role[]
   )
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 ), address_form as (
   insert into public.form (name, is_required, auto_assign)
@@ -40,9 +34,7 @@ with profile_form as (
     true,
     array['guardian','student','unassigned']::app_role[]
   )
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 ), child_email_form as (
   insert into public.form (name, is_required, auto_assign)
@@ -51,9 +43,7 @@ with profile_form as (
     true,
     array['guardian','student','unassigned']::app_role[]
   )
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 ), additional_guardian_form as (
   insert into public.form (name, is_required, auto_assign)
@@ -62,9 +52,7 @@ with profile_form as (
     false,
     array['guardian','student','unassigned']::app_role[]
   )
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 ), household_counts_form as (
   insert into public.form (name, is_required, auto_assign)
@@ -73,9 +61,7 @@ with profile_form as (
     true,
     array['guardian','student','unassigned']::app_role[]
   )
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 ), partner_form as (
   insert into public.form (name, is_required, auto_assign)
@@ -84,9 +70,7 @@ with profile_form as (
     true,
     array['guardian','unassigned']::app_role[]
   )
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 ), guardian_form as (
   insert into public.form (name, is_required, auto_assign)
@@ -95,9 +79,7 @@ with profile_form as (
     true,
     array['guardian','unassigned']::app_role[]
   )
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 )
 insert into public.form_question (question_code, prompt, "type", options)
@@ -197,10 +179,7 @@ union all
 select 'guardian_consent_questionnaire', 'I agree to participate in the pre- and post-program questionnaires.', 'checkbox'::form_question_type, '[]'::jsonb
 union all
 select 'guardian_consent_interview', 'May summerlunch+ contact you for an interview after the program has finished?', 'single_choice'::form_question_type, '["Yes","No"]'::jsonb
-on conflict (question_code) do update
-  set prompt = excluded.prompt,
-      "type" = excluded."type",
-      options = excluded.options;
+on conflict (question_code) do nothing;
 
 with profile_form as (
   select id from public.form where name = 'Profile Information'
@@ -292,10 +271,7 @@ union all
 select id, 'guardian_consent_questionnaire', 10, '{}'::jsonb, null::jsonb from guardian_form
 union all
 select id, 'guardian_consent_interview', 11, '{}'::jsonb, null::jsonb from guardian_form
-on conflict (form_id, question_code) do update
-  set position = excluded.position,
-      metadata = excluded.metadata,
-      visibility_condition = excluded.visibility_condition;
+on conflict (form_id, question_code) do nothing;
 
 insert into public.sign_up_flow (form_id, slug, step_order, roles)
 select id, 'profile_information', 1, array['guardian','student']::app_role[]
@@ -325,10 +301,7 @@ union all
 select id, 'guardian_consent', 9, array['guardian']::app_role[]
 from public.form
 where name = 'Guardian Consent'
-on conflict (form_id) do update
-  set slug = excluded.slug,
-      step_order = excluded.step_order,
-      roles = excluded.roles;
+on conflict (form_id) do nothing;
 
 update public.sign_up_flow sf
 set step_order = 8
