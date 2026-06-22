@@ -33,6 +33,10 @@ type RidingCounts = {
   declined: number
 }
 
+const PROFILE_IN_BATCH_SIZE = 80
+const FAMILY_EDGE_IN_BATCH_SIZE = 40
+const RELATED_PROFILE_IN_BATCH_SIZE = 80
+
 const chunk = <T,>(items: T[], size: number) => {
   if (!items.length || size <= 0) return [] as T[][]
   const batches: T[][] = []
@@ -129,13 +133,17 @@ export async function loader(args: Route.LoaderArgs) {
   )
 
   const profileRows: ProfileRidingRow[] = []
-  for (const profileChunk of chunk(profileIds, 500)) {
+  for (const profileChunk of chunk(profileIds, PROFILE_IN_BATCH_SIZE)) {
     const { data, error } = await supabase
       .from('profile')
       .select('id, role, federal_electoral_district_name')
       .in('id', profileChunk)
 
     if (error) {
+      console.error('[federal-electoral-district] failed loading profile ridings for enrolled profiles', {
+        chunkSize: profileChunk.length,
+        error: error.message,
+      })
       throw new Response(error.message, { status: 500 })
     }
 
@@ -153,7 +161,7 @@ export async function loader(args: Route.LoaderArgs) {
   const guardiansByChild = new Map<string, Array<{ profileId: string; primary: boolean }>>()
   const familyEdgeKeys = new Set<string>()
 
-  for (const profileChunk of chunk(profileIds, 200)) {
+  for (const profileChunk of chunk(profileIds, FAMILY_EDGE_IN_BATCH_SIZE)) {
     const [{ data: guardianEdges, error: guardianEdgesError }, { data: childEdges, error: childEdgesError }] =
       await Promise.all([
         supabase
@@ -166,8 +174,20 @@ export async function loader(args: Route.LoaderArgs) {
           .in('child_profile_id', profileChunk),
       ])
 
-    if (guardianEdgesError) throw new Response(guardianEdgesError.message, { status: 500 })
-    if (childEdgesError) throw new Response(childEdgesError.message, { status: 500 })
+    if (guardianEdgesError) {
+      console.error('[federal-electoral-district] failed loading guardian edges', {
+        chunkSize: profileChunk.length,
+        error: guardianEdgesError.message,
+      })
+      throw new Response(guardianEdgesError.message, { status: 500 })
+    }
+    if (childEdgesError) {
+      console.error('[federal-electoral-district] failed loading child edges', {
+        chunkSize: profileChunk.length,
+        error: childEdgesError.message,
+      })
+      throw new Response(childEdgesError.message, { status: 500 })
+    }
 
     for (const edge of [...(guardianEdges ?? []), ...(childEdges ?? [])] as FamilyEdgeRow[]) {
       const edgeKey = `${edge.guardian_profile_id}:${edge.child_profile_id}`
@@ -184,13 +204,17 @@ export async function loader(args: Route.LoaderArgs) {
     )
   )
 
-  for (const relatedChunk of chunk(relatedProfileIds, 500)) {
+  for (const relatedChunk of chunk(relatedProfileIds, RELATED_PROFILE_IN_BATCH_SIZE)) {
     const { data: relatedProfiles, error: relatedProfilesError } = await supabase
       .from('profile')
       .select('id, federal_electoral_district_name')
       .in('id', relatedChunk)
 
     if (relatedProfilesError) {
+      console.error('[federal-electoral-district] failed loading related profile ridings', {
+        chunkSize: relatedChunk.length,
+        error: relatedProfilesError.message,
+      })
       throw new Response(relatedProfilesError.message, { status: 500 })
     }
 
