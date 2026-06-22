@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { LogOut, User as UserIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -12,8 +12,11 @@ type NavbarProps = {
 }
 
 export function Navbar({ user, role }: NavbarProps) {
+  const location = useLocation()
+  const isManagePage = location.pathname === '/manage' || location.pathname.startsWith('/manage/')
+
   return (
-    <header className="h-16 border-b bg-background/80 backdrop-blur">
+    <header className={cn('h-16 border-b bg-background/80 backdrop-blur', isManagePage ? 'sticky top-0 z-50' : '')}>
       <div className="flex h-full w-full items-center justify-between px-6">
         <Link
           to="/"
