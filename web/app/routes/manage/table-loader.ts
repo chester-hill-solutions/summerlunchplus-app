@@ -327,6 +327,24 @@ export function createTableLoader(tableName: string) {
           .select(selectColumns)
           .in(keyColumn, Array.from(ids))
         if (lookupError) {
+          console.error('[table-loader] lookup mapping failed', {
+            tableName,
+            sourceTable: definition.table,
+            lookupTable: mapping.table,
+            keyColumn,
+            resultColumn: mapping.resultColumn,
+            format: mapping.format ?? null,
+            idsCount: ids.size,
+            error: lookupError.message,
+          })
+
+          if (mapping.format === 'profile_display') {
+            for (const row of rows) {
+              const idValue = row[keyCol]
+              row[mapping.resultColumn] = typeof idValue === 'string' && idValue ? `ID ${idValue}` : ''
+            }
+          }
+
           continue
         }
         const valueById = new Map<string, string>()
