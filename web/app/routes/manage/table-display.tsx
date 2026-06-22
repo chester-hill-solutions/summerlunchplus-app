@@ -66,6 +66,7 @@ type WorkshopEnrollmentEnrichmentResponse = {
 }
 
 type FederalElectoralDistrictEnrichment = {
+  total: number
   accepted: number
   pending: number
   waitlisted: number
@@ -772,6 +773,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
         if (!response.ok) return
         const payload = (await response.json()) as FederalElectoralDistrictEnrichmentResponse
         const fallbackEnrichment: FederalElectoralDistrictEnrichment = {
+          total: 0,
           accepted: 0,
           pending: 0,
           waitlisted: 0,

@@ -86,9 +86,9 @@ export async function loader({ request }: { request: Request }) {
     return Response.json({ byRiding: {} }, { headers: auth.headers })
   }
 
-  const byRiding = ridingNames.reduce<Record<string, { accepted: number; pending: number; waitlisted: number; declined: number }>>(
+  const byRiding = ridingNames.reduce<Record<string, { total: number; accepted: number; pending: number; waitlisted: number; declined: number }>>(
     (acc, riding) => {
-      acc[riding] = { accepted: 0, pending: 0, waitlisted: 0, declined: 0 }
+      acc[riding] = { total: 0, accepted: 0, pending: 0, waitlisted: 0, declined: 0 }
       return acc
     },
     {}
@@ -219,6 +219,7 @@ export async function loader({ request }: { request: Request }) {
     const bucket = statusBucketFor(status)
     if (!bucket) continue
 
+    byRiding[requestedRiding].total += 1
     byRiding[requestedRiding][bucket] += 1
   }
 
