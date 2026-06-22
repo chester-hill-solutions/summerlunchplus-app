@@ -92,6 +92,7 @@ export const manageSections: ManageNavSection[] = [
       { to: '/manage/semester-form-requirement', label: 'Semester surveys', description: 'Map one pre/post survey form per semester.' },
       { to: '/manage/role-permission', label: 'Role permissions', description: 'Permissions assigned to each role.' },
       { to: '/manage/request-metadata', label: 'Request metadata', description: 'Validate proxy headers and extracted request metadata.' },
+      { to: '/manage/geoip-backfill', label: 'GeoIP backfill', description: 'Admin-triggered geolocation cache backfill for recent IP records.' },
       { to: '/manage/user-roles', label: 'User roles', description: 'The role each user currently holds.' },
       { to: '/manage/sign-up-terms-consent', label: 'Terms consent', description: 'Accepted terms snapshots captured at signup.' },
       { to: '/manage/sign-up-terms', label: 'Sign-up terms', description: 'Active terms copy shown during account creation.' },

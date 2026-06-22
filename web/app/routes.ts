@@ -74,6 +74,7 @@ export default [
     route("invites", "routes/manage/invites.tsx"),
     route("discrepancies", "routes/manage/discrepancies.tsx"),
     route("request-metadata", "routes/manage/request-metadata.tsx"),
+    route("geoip-backfill", "routes/manage/geoip-backfill.tsx"),
     route("federal-electoral-district/enrichment", "routes/manage/federal-electoral-district.enrichment.ts"),
     route("federal-electoral-district", "routes/manage/federal-electoral-district.tsx"),
     route("semester", "routes/manage/semester.tsx"),
