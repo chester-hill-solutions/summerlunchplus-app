@@ -178,6 +178,163 @@ export type GeoipBackfillRunResult = GeoipBackfillPreview & {
   resolved: number
   unresolved: number
   attemptedIpsSample: string[]
+  unresolvedIpsSample: Array<{ ip: string; reason: string }>
+  failureReasonCounts: Record<string, number>
+}
+
+type BackfillFailureReason =
+  | 'invalid_ip'
+  | 'private_or_reserved_ip'
+  | 'provider_disabled'
+  | 'network_error'
+  | 'provider_non_200'
+  | 'provider_error_payload'
+  | 'provider_empty_result'
+  | 'cache_upsert_failed'
+
+type BackfillLookupResult =
+  | { ok: true }
+  | {
+      ok: false
+      reason: BackfillFailureReason
+    }
+
+const isPrivateOrReservedIp = (ip: string) => {
+  if (ip.includes(':')) {
+    const normalized = ip.toLowerCase()
+    if (normalized === '::1') return true
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true
+    if (
+      normalized.startsWith('fe8') ||
+      normalized.startsWith('fe9') ||
+      normalized.startsWith('fea') ||
+      normalized.startsWith('feb')
+    ) {
+      return true
+    }
+    return false
+  }
+
+  const octets = ip.split('.').map(part => Number.parseInt(part, 10))
+  if (octets.length !== 4 || octets.some(value => !Number.isFinite(value))) return true
+  const [a, b] = octets
+  if (a === 10) return true
+  if (a === 127) return true
+  if (a === 192 && b === 168) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 169 && b === 254) return true
+  if (a === 100 && b >= 64 && b <= 127) return true
+  if (a === 0) return true
+  return false
+}
+
+const lookupFromProviderDetailed = async (
+  ip: string
+): Promise<{ location: ProviderLocation | null; reason: BackfillFailureReason | null }> => {
+  const provider = parseText(process.env.GEOIP_PROVIDER)?.toLowerCase() ?? 'none'
+  if (provider === 'none') {
+    return { location: null, reason: 'provider_disabled' }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), GEOIP_TIMEOUT_MS)
+
+  const requestUrl =
+    provider === 'ipapi'
+      ? `https://ipapi.co/${encodeURIComponent(ip)}/json/`
+      : (() => {
+          const token = parseText(process.env.IPINFO_TOKEN)
+          return token
+            ? `https://ipinfo.io/${encodeURIComponent(ip)}/json?token=${encodeURIComponent(token)}`
+            : `https://ipinfo.io/${encodeURIComponent(ip)}/json`
+        })()
+
+  try {
+    const response = await fetch(requestUrl, { signal: controller.signal })
+    if (!response.ok) {
+      return { location: null, reason: 'provider_non_200' }
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>
+    if (parseText(payload.error) || parseText(payload.reason) || parseText(payload.status) === 'error') {
+      return { location: null, reason: 'provider_error_payload' }
+    }
+
+    if (provider === 'ipapi') {
+      const location: ProviderLocation = {
+        countryCode: parseText(payload.country_code),
+        region: parseText(payload.region_code) ?? parseText(payload.region),
+        city: parseText(payload.city),
+        latitude: parseNumber(payload.latitude),
+        longitude: parseNumber(payload.longitude),
+        timezone: parseText(payload.timezone),
+        source: 'ipapi',
+        confidence: 'medium',
+        raw: payload as Json,
+      }
+      if (!location.countryCode && !location.region && !location.city && !location.timezone) {
+        return { location: null, reason: 'provider_empty_result' }
+      }
+      return { location, reason: null }
+    }
+
+    const loc = parseText(payload.loc)
+    const [latitudeRaw, longitudeRaw] = loc ? loc.split(',') : []
+    const location: ProviderLocation = {
+      countryCode: parseText(payload.country),
+      region: parseText(payload.region),
+      city: parseText(payload.city),
+      latitude: parseNumber(latitudeRaw),
+      longitude: parseNumber(longitudeRaw),
+      timezone: parseText(payload.timezone),
+      source: 'ipinfo',
+      confidence: 'medium',
+      raw: payload as Json,
+    }
+    if (!location.countryCode && !location.region && !location.city && !location.timezone) {
+      return { location: null, reason: 'provider_empty_result' }
+    }
+    return { location, reason: null }
+  } catch (error) {
+    if ((error as Error).name !== 'AbortError') {
+      console.error('[geoip] provider lookup failed', {
+        provider,
+        ip,
+        error,
+      })
+    }
+    return { location: null, reason: 'network_error' }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+const resolveIpGeolocationForBackfill = async (ip: string): Promise<BackfillLookupResult> => {
+  const normalizedIp = normalizeIp(ip)
+  if (!normalizedIp) {
+    return { ok: false, reason: 'invalid_ip' }
+  }
+
+  if (isPrivateOrReservedIp(normalizedIp)) {
+    return { ok: false, reason: 'private_or_reserved_ip' }
+  }
+
+  const detailed = await lookupFromProviderDetailed(normalizedIp)
+  if (!detailed.location) {
+    return { ok: false, reason: detailed.reason ?? 'provider_empty_result' }
+  }
+
+  const nextCacheRow = providerLocationToCache(normalizedIp, detailed.location)
+  const { error } = await (adminClient.from('ip_geolocation_cache' as any) as any).upsert(nextCacheRow)
+  if (error) {
+    console.error('[geoip] backfill cache upsert failed', {
+      ip: normalizedIp,
+      message: error.message,
+    })
+    return { ok: false, reason: 'cache_upsert_failed' }
+  }
+
+  return { ok: true }
 }
 
 export const runGeoipBackfill = async (options: {
@@ -208,18 +365,27 @@ export const runGeoipBackfill = async (options: {
       resolved: 0,
       unresolved: 0,
       attemptedIpsSample: [],
+      unresolvedIpsSample: [],
+      failureReasonCounts: {},
     }
   }
 
   let resolved = 0
   let unresolved = 0
+  const failureReasonCounts: Record<string, number> = {}
+  const unresolvedIpsSample: Array<{ ip: string; reason: string }> = []
   for (const chunk of chunkArray(attemptIps, 8)) {
-    const results = await Promise.allSettled(chunk.map(ip => resolveIpGeolocation(ip)))
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value) {
+    const results = await Promise.all(chunk.map(ip => resolveIpGeolocationForBackfill(ip)))
+    for (const [index, result] of results.entries()) {
+      const attemptedIp = chunk[index]
+      if (result.ok) {
         resolved += 1
       } else {
         unresolved += 1
+        failureReasonCounts[result.reason] = (failureReasonCounts[result.reason] ?? 0) + 1
+        if (unresolvedIpsSample.length < 25) {
+          unresolvedIpsSample.push({ ip: attemptedIp, reason: result.reason })
+        }
       }
     }
   }
@@ -241,6 +407,8 @@ export const runGeoipBackfill = async (options: {
     resolved,
     unresolved,
     attemptedIpsSample: attemptIps.slice(0, 25),
+    unresolvedIpsSample,
+    failureReasonCounts,
   }
 }
 
