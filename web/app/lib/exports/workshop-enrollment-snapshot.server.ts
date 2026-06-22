@@ -1,4 +1,4 @@
-import { loadWorkshopEnrollmentData } from '@/routes/manage/workshop-enrollment'
+import { loadWorkshopEnrollmentData } from '@/lib/exports/workshop-enrollment-query.server'
 
 import { applyFiltersAndSort, getCellValue, parseFiltersFromSearchParams } from './table-filtering.server'
 import { EXPORT_MAX_ROWS } from './types'
