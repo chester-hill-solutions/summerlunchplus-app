@@ -112,11 +112,27 @@ export default function GeoipBackfillPage() {
             <p><span className="font-medium">Missing after run:</span> {actionData.result.missingIpCount}</p>
             <p><span className="font-medium">Provider enabled:</span> {actionData.result.providerEnabled ? 'Yes' : 'No'}</p>
           </div>
+          {Object.keys(actionData.result.failureReasonCounts).length ? (
+            <div className="pt-2">
+              <p className="text-xs font-medium text-muted-foreground">Unresolved reason counts</p>
+              <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 text-xs">
+                {JSON.stringify(actionData.result.failureReasonCounts, null, 2)}
+              </pre>
+            </div>
+          ) : null}
           {actionData.result.attemptedIpsSample.length ? (
             <div className="pt-2">
               <p className="text-xs font-medium text-muted-foreground">Attempted IPs sample</p>
               <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 text-xs">
                 {JSON.stringify(actionData.result.attemptedIpsSample, null, 2)}
+              </pre>
+            </div>
+          ) : null}
+          {actionData.result.unresolvedIpsSample.length ? (
+            <div className="pt-2">
+              <p className="text-xs font-medium text-muted-foreground">Unresolved IPs sample</p>
+              <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 text-xs">
+                {JSON.stringify(actionData.result.unresolvedIpsSample, null, 2)}
               </pre>
             </div>
           ) : null}
