@@ -3,9 +3,7 @@
 with form_row as (
   insert into public.form (name, is_required, auto_assign)
   values ('Onboarding Survey', true, array['unassigned']::app_role[])
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 )
 insert into public.form_question (question_code, prompt, "type", options)
@@ -14,10 +12,7 @@ union all
 select 'onboarding_prior_participation', 'Have you been apart of summerlunch+ before?', 'single_choice'::form_question_type, '["yes","no"]'::jsonb
 union all
 select 'onboarding_partner_program', 'Partner-Program', 'text'::form_question_type, '[]'::jsonb
-on conflict (question_code) do update
-  set prompt = excluded.prompt,
-      "type" = excluded."type",
-      options = excluded.options;
+on conflict (question_code) do nothing;
 
 with form_row as (
   select id from public.form where name = 'Onboarding Survey'
@@ -28,8 +23,7 @@ union all
 select id, 'onboarding_prior_participation', 2 from form_row
 union all
 select id, 'onboarding_partner_program', 3 from form_row
-on conflict (form_id, question_code) do update
-  set position = excluded.position;
+on conflict (form_id, question_code) do nothing;
 
 insert into public.form_assignment (form_id, user_id, assigned_by)
 select fr.id, ur.user_id, null

@@ -20,8 +20,8 @@ with selected_forms as (
     (
       select id
       from public.form
-      where name = 'Pre-Semester Survey - bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
-      order by id desc
+      where name like 'Pre-Semester Survey - %'
+      order by name asc
       limit 1
     ) as pre_survey_form_id
 ), submission_rows as (

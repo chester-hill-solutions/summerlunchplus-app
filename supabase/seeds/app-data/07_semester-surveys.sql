@@ -7,9 +7,7 @@ with semester_forms as (
     false,
     '{}'::app_role[]
   from public.semester s
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 )
 select count(*) from semester_forms;
@@ -21,9 +19,7 @@ with semester_forms as (
     false,
     '{}'::app_role[]
   from public.semester s
-  on conflict (name) do update
-    set is_required = excluded.is_required,
-        auto_assign = excluded.auto_assign
+  on conflict (name) do nothing
   returning id
 )
 select count(*) from semester_forms;
@@ -110,10 +106,7 @@ select * from (
     ('post_feedback_recipes_future', 'Are there any recipes or foods your family would like to learn to make in the future?', 'text'::form_question_type, '[]'::jsonb),
     ('post_feedback_other_comments', 'Do you have any other comments or feedback for the summerlunch+ program or team members?', 'text'::form_question_type, '[]'::jsonb)
 ) as seeded(question_code, prompt, "type", options)
-on conflict (question_code) do update
-  set prompt = excluded.prompt,
-      "type" = excluded."type",
-      options = excluded.options;
+on conflict (question_code) do nothing;
 
 with pre_forms as (
   select id from public.form where name like 'Pre-Semester Survey - %'
@@ -151,10 +144,7 @@ insert into public.form_question_map (
 select f.id, q.question_code, q.position, q.metadata, null::jsonb
 from pre_forms f
 cross join pre_questions q
-on conflict (form_id, question_code) do update
-  set position = excluded.position,
-      metadata = excluded.metadata,
-      visibility_condition = excluded.visibility_condition;
+on conflict (form_id, question_code) do nothing;
 
 with kind_labels as (
   select
@@ -218,9 +208,7 @@ insert into public.semester_form_requirement (semester_id, form_id, kind, is_req
 select s.id, f.id, (select pre_kind from kind_labels)::public.semester_survey_kind, true, true
 from public.semester s
 join public.form f on f.name = format('Pre-Semester Survey - %s', s.id)
-on conflict (semester_id, form_id, kind) do update
-  set is_required = excluded.is_required,
-      is_active = excluded.is_active;
+on conflict (semester_id, form_id, kind) do nothing;
 
 with kind_labels as (
   select
@@ -238,9 +226,7 @@ insert into public.semester_form_requirement (semester_id, form_id, kind, is_req
 select s.id, f.id, (select post_kind from kind_labels)::public.semester_survey_kind, true, true
 from public.semester s
 join public.form f on f.name = format('Post-Semester Survey - %s', s.id)
-on conflict (semester_id, form_id, kind) do update
-  set is_required = excluded.is_required,
-      is_active = excluded.is_active;
+on conflict (semester_id, form_id, kind) do nothing;
 
 with post_forms as (
   select id from public.form where name like 'Post-Semester Survey - %'
@@ -292,7 +278,4 @@ insert into public.form_question_map (
 select f.id, q.question_code, q.position, q.metadata, null::jsonb
 from post_forms f
 cross join post_questions q
-on conflict (form_id, question_code) do update
-  set position = excluded.position,
-      metadata = excluded.metadata,
-      visibility_condition = excluded.visibility_condition;
+on conflict (form_id, question_code) do nothing;
