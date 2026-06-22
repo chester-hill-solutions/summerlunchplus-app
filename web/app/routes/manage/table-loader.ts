@@ -7,6 +7,17 @@ type ForeignKeyOption = {
   label: string
 }
 
+const IN_CLAUSE_BATCH_SIZE = 150
+
+const chunkArray = <T,>(items: T[], size: number) => {
+  if (size <= 0 || !items.length) return [] as T[][]
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
 const fromQualifiedTable = (supabase: ReturnType<typeof createClient>['supabase'], qualifiedTable: string) => {
   const [schema, table, ...rest] = qualifiedTable.split('.')
   if (schema && table && rest.length === 0) {
@@ -323,10 +334,23 @@ export function createTableLoader(tableName: string) {
         const selectColumns = mapping.select
           ? mapping.select
           : [keyColumn, ...(mapping.valueColumns ?? (mapping.valueColumn ? [mapping.valueColumn] : []))].join(', ')
-        const { data: lookupRowsRaw, error: lookupError } = await fromQualifiedTable(supabase, mapping.table)
-          .select(selectColumns)
-          .in(keyColumn, Array.from(ids))
-        if (lookupError) {
+        const lookupRows: Record<string, unknown>[] = []
+        let lookupErrorMessage: string | null = null
+
+        for (const idChunk of chunkArray(Array.from(ids), IN_CLAUSE_BATCH_SIZE)) {
+          const { data: lookupRowsRaw, error: lookupError } = await fromQualifiedTable(supabase, mapping.table)
+            .select(selectColumns)
+            .in(keyColumn, idChunk)
+
+          if (lookupError) {
+            lookupErrorMessage = lookupError.message
+            break
+          }
+
+          lookupRows.push(...((lookupRowsRaw ?? []) as unknown as Record<string, unknown>[]))
+        }
+
+        if (lookupErrorMessage) {
           console.error('[table-loader] lookup mapping failed', {
             tableName,
             sourceTable: definition.table,
@@ -335,7 +359,7 @@ export function createTableLoader(tableName: string) {
             resultColumn: mapping.resultColumn,
             format: mapping.format ?? null,
             idsCount: ids.size,
-            error: lookupError.message,
+            error: lookupErrorMessage,
           })
 
           if (mapping.format === 'profile_display') {
@@ -349,7 +373,6 @@ export function createTableLoader(tableName: string) {
         }
         const valueById = new Map<string, string>()
         const valueObjectById = new Map<string, Record<string, unknown>>()
-        const lookupRows = (lookupRowsRaw ?? []) as unknown as Record<string, unknown>[]
         for (const lookup of lookupRows) {
           const idValue = lookup[keyColumn] as string | undefined
           if (typeof idValue !== 'string') continue

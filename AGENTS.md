@@ -41,4 +41,7 @@
 - Signup details route is `/auth/sign-up-details` (hyphenated); `/auth/signup-details` does not exist.
 - `createClient()` in `web/app/lib/supabase/server.ts` returns `headers`; preserve/pass them on redirects/responses or auth cookies break.
 - Keep onboarding completion logic consistent between guard checks and signup-details loader; mismatches can cause redirect loops between `/auth/sign-up-details` and `/home`.
+- In manage table definitions/loaders, avoid lookup mappings against `auth.users`; use `public.profile` keyed by `user_id` for user email/name display fields to avoid environment-specific `auth` schema failures.
+- For large lookup mappings that use `.in(...)`, batch ID lists; large single-shot `IN` lookups can fail in production and render blank display fields.
+- `auth.users.raw_user_meta_data.role` can differ from effective auth; use `requireAuth(...).claims.role` / JWT claims (from `custom_access_token_hook`) when debugging permissions.
 - Email templates are configured in `supabase/config.toml` and rendered from `supabase/templates/*.html`.
