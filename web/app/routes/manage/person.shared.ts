@@ -33,10 +33,43 @@ export type SuspiciousSignalRow = {
 
 export type PersonLoaderData = {
   profile: ProfileRow
+  activityEvents: Array<{
+    source: 'form_submission' | 'login_event'
+    event_id: string
+    occurred_at: string
+    form_id: string | null
+    login_method: string | null
+    login_success: boolean | null
+    login_email: string | null
+    forwarded_for: string | null
+    ip_candidate: string | null
+    ip_address: string | null
+    geo_status:
+      | 'geo_available'
+      | 'no_ip_captured'
+      | 'invalid_ip_value'
+      | 'ip_present_not_cached'
+      | 'cached_no_geo'
+    geo_reason: string
+    country_code: string | null
+    region: string | null
+    city: string | null
+    timezone: string | null
+    latitude: number | null
+    longitude: number | null
+  }>
   ipEvidence: Array<{
     source: 'form_submission' | 'login_event'
     occurred_at: string
-    ip_address: string
+    ip_candidate: string | null
+    ip_address: string | null
+    geo_status:
+      | 'geo_available'
+      | 'no_ip_captured'
+      | 'invalid_ip_value'
+      | 'ip_present_not_cached'
+      | 'cached_no_geo'
+    geo_reason: string
     country_code: string | null
     region: string | null
     city: string | null
