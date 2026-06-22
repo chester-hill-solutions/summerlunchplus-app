@@ -680,7 +680,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     table: 'federal_electoral_district',
     select: 'code, name, whitelist, meal_kit, updated_at',
     columns: ['code', 'name', 'whitelist', 'meal_kit', 'updated_at'],
-    order: 'code',
+    order: 'name',
     editor: {
       primaryKey: ['name'],
       allowInsert: true,
