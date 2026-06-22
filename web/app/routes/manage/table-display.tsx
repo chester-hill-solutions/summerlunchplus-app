@@ -56,6 +56,8 @@ type WorkshopEnrollmentEnrichment = {
   profile_hover_name: string
   profile_hover_email: string
   profile_hover_parent_email: string
+  profile_hover_latest_ip: string
+  profile_hover_latest_ip_geo: string
 }
 
 type WorkshopEnrollmentEnrichmentResponse = {
@@ -492,6 +494,8 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           profile_hover_name: 'N/A',
           profile_hover_email: 'N/A',
           profile_hover_parent_email: 'N/A',
+          profile_hover_latest_ip: 'N/A',
+          profile_hover_latest_ip_geo: 'N/A',
         }
 
         const resolvedByProfileId = requestProfileIds.reduce<Record<string, WorkshopEnrollmentEnrichment>>(

@@ -1,4 +1,5 @@
 import { adminClient } from '@/lib/supabase/adminClient'
+import { resolveIpGeolocation } from '@/lib/geoip.server'
 
 const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
 const PRIOR_PARTICIPATION_QUESTION_CODE = 'onboarding_prior_participation'
@@ -53,6 +54,26 @@ export type WorkshopEnrollmentEnrichment = {
   profile_hover_name: string
   profile_hover_email: string
   profile_hover_parent_email: string
+  profile_hover_latest_ip: string
+  profile_hover_latest_ip_geo: string
+}
+
+const flagEmojiForCountryCode = (countryCode: string | null) => {
+  if (!countryCode) return ''
+  const normalized = countryCode.trim().toUpperCase()
+  if (!/^[A-Z]{2}$/.test(normalized)) return ''
+  return String.fromCodePoint(...Array.from(normalized).map(char => 127397 + char.charCodeAt(0)))
+}
+
+const parsePrimaryIp = (ipAddress: unknown, forwardedFor: unknown) => {
+  if (typeof ipAddress === 'string' && ipAddress.trim()) return ipAddress.trim()
+  if (typeof forwardedFor !== 'string' || !forwardedFor.trim()) return null
+  return (
+    forwardedFor
+      .split(',')
+      .map(part => part.trim())
+      .find(Boolean) ?? null
+  )
 }
 
 const normalizeRiding = (value: unknown) =>
@@ -202,6 +223,22 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
     return byProfileId
   }
 
+  const latestSubmissionByProfileId = new Map<string, { occurredAt: string; ip: string }>()
+  for (const profileChunk of chunkArray(profileScope, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: submissions } = await (adminClient.from('form_submission' as any) as any)
+      .select('profile_id, submitted_at, ip_address, forwarded_for')
+      .in('profile_id', profileChunk)
+      .order('submitted_at', { ascending: false })
+
+    for (const submission of submissions ?? []) {
+      const profileId = typeof submission.profile_id === 'string' ? submission.profile_id : ''
+      const occurredAt = typeof submission.submitted_at === 'string' ? submission.submitted_at : ''
+      const ip = parsePrimaryIp(submission.ip_address, submission.forwarded_for)
+      if (!profileId || !occurredAt || !ip || latestSubmissionByProfileId.has(profileId)) continue
+      latestSubmissionByProfileId.set(profileId, { occurredAt, ip })
+    }
+  }
+
   const { data: discrepancyRowsRaw } = await (adminClient.from('suspicious_signal') as any)
     .select('id, family_profile_ids, signal_type, severity, summary, priority_score, created_at')
     .eq('status', 'open')
@@ -232,6 +269,53 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       profileIdsByUserId.set(profile.user_id, existing)
     }
   }
+
+  const userIds = Array.from(profileIdsByUserId.keys())
+  const latestLoginByUserId = new Map<string, { occurredAt: string; ip: string }>()
+  for (const userChunk of chunkArray(userIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: loginEvents } = await (adminClient.from('login_event' as any) as any)
+      .select('user_id, event_at, ip_address, forwarded_for')
+      .in('user_id', userChunk)
+      .order('event_at', { ascending: false })
+
+    for (const event of loginEvents ?? []) {
+      const userId = typeof event.user_id === 'string' ? event.user_id : ''
+      const occurredAt = typeof event.event_at === 'string' ? event.event_at : ''
+      const ip = parsePrimaryIp(event.ip_address, event.forwarded_for)
+      if (!userId || !occurredAt || !ip || latestLoginByUserId.has(userId)) continue
+      latestLoginByUserId.set(userId, { occurredAt, ip })
+    }
+  }
+
+  const latestIpByProfileId = new Map<string, { occurredAt: string; ip: string }>()
+  for (const profileId of profileScope) {
+    const profile = profileById.get(profileId)
+    const submissionCandidate = latestSubmissionByProfileId.get(profileId) ?? null
+    const loginCandidate =
+      profile?.user_id && latestLoginByUserId.get(profile.user_id)
+        ? latestLoginByUserId.get(profile.user_id)!
+        : null
+
+    if (submissionCandidate && loginCandidate) {
+      latestIpByProfileId.set(
+        profileId,
+        submissionCandidate.occurredAt >= loginCandidate.occurredAt ? submissionCandidate : loginCandidate
+      )
+    } else if (submissionCandidate) {
+      latestIpByProfileId.set(profileId, submissionCandidate)
+    } else if (loginCandidate) {
+      latestIpByProfileId.set(profileId, loginCandidate)
+    }
+  }
+
+  const uniqueLatestIps = Array.from(new Set(Array.from(latestIpByProfileId.values()).map(entry => entry.ip)))
+  const geoByIp = new Map<string, Awaited<ReturnType<typeof resolveIpGeolocation>>>()
+  await Promise.all(
+    uniqueLatestIps.map(async ip => {
+      const geo = await resolveIpGeolocation(ip)
+      geoByIp.set(ip, geo)
+    })
+  )
 
   const visited = new Set<string>()
   for (const rootProfileId of profileScope) {
@@ -560,6 +644,28 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       }
     })()
 
+    const latestIpInfo = (() => {
+      for (const candidateProfileId of candidateProfileIds) {
+        const latest = latestIpByProfileId.get(candidateProfileId)
+        if (!latest) continue
+        const geo = geoByIp.get(latest.ip) ?? null
+        const countryCode = geo?.countryCode ?? null
+        const flag = flagEmojiForCountryCode(countryCode)
+        const geoParts = [geo?.city, geo?.region, countryCode].filter(Boolean)
+        const geoLabel = geoParts.length
+          ? `${flag ? `${flag} ` : ''}${geoParts.join(', ')}`
+          : countryCode
+            ? `${flag ? `${flag} ` : ''}${countryCode}`
+            : 'Unknown location'
+        return {
+          ip: latest.ip,
+          geo: geoLabel,
+        }
+      }
+
+      return { ip: '', geo: '' }
+    })()
+
     byProfileId[profileId] = {
       riding_display: ridingDisplay,
       giftcard_display: giftcardDisplay,
@@ -569,6 +675,8 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       profile_hover_name: profileHoverName,
       profile_hover_email: profileHoverEmail,
       profile_hover_parent_email: profileHoverParentEmail,
+      profile_hover_latest_ip: latestIpInfo.ip,
+      profile_hover_latest_ip_geo: latestIpInfo.geo,
     }
   }
 
