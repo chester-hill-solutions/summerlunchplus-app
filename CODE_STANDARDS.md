@@ -27,7 +27,13 @@ SCHEMA & MIGRATIONS
 - On initial signup, pass the `role` field in `signUp(options.data)` so that the `on_auth_user_created_set_role` trigger
   reads `raw_user_meta_data->>'role'` and populates `public.user_roles` accordingly.
 - On initial signup, insert the user’s app role into `public.user_roles` (user_id, role, assigned_by) to ensure RLS and permission mappings apply correctly.
+- Treat `public.user_roles.role` as the source of truth for authorization. `auth.users.raw_user_meta_data.role` can drift and is not authoritative for app access checks.
+- When debugging access, verify JWT `claims.user_role`/`claims.permissions` (from `custom_access_token_hook`) rather than only `auth.users.raw_user_meta_data`.
 - Use `SUPABASE_SECRET_KEY` for service-role admin operations in server-only code (e.g. `inviteUserByEmail`).
+
+- MANAGE TABLE LOOKUPS
+- Do not use `auth.users` as a generic lookup table in manage loaders; PostgREST schema exposure may block `auth` in some environments. Prefer `public.profile` lookups keyed by `user_id` for user email/name display columns.
+- For `.in(...)` lookups over large ID sets in loaders, batch IDs to avoid gateway/fetch failures on production-sized datasets.
 
 - UI
 - Prefer `supabase/ui` components and existing ShadCN primitives before introducing new UI primitives.

@@ -54,7 +54,9 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     lookupMappings: [
       {
         keyColumn: 'user_id',
-        table: 'auth.users',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        select: 'user_id, email',
         valueColumn: 'email',
         resultColumn: 'user_email',
       },
@@ -180,7 +182,14 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         valueColumn: 'description',
         resultColumn: 'workshop_description',
       },
-      { keyColumn: 'decided_by', table: 'auth.users', valueColumn: 'email', resultColumn: 'decided_by_email' },
+      {
+        keyColumn: 'decided_by',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        select: 'user_id, email',
+        valueColumn: 'email',
+        resultColumn: 'decided_by_email',
+      },
     ],
     editor: {
       primaryKey: ['id'],
@@ -214,7 +223,14 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         select: 'id, firstname, surname, email',
         format: 'profile_display',
       },
-      { keyColumn: 'recorded_by', table: 'auth.users', valueColumn: 'email', resultColumn: 'recorded_by_email' },
+      {
+        keyColumn: 'recorded_by',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        select: 'user_id, email',
+        valueColumn: 'email',
+        resultColumn: 'recorded_by_email',
+      },
     ],
   },
   form: {
@@ -522,8 +538,22 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     columns: ['inviter_user_email', 'invitee_user_email', 'invitee_email', 'role', 'status', 'created_at'],
     order: 'created_at',
     lookupMappings: [
-      { keyColumn: 'inviter_user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'inviter_user_email' },
-      { keyColumn: 'invitee_user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'invitee_user_email' },
+      {
+        keyColumn: 'inviter_user_id',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        select: 'user_id, email',
+        valueColumn: 'email',
+        resultColumn: 'inviter_user_email',
+      },
+      {
+        keyColumn: 'invitee_user_id',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        select: 'user_id, email',
+        valueColumn: 'email',
+        resultColumn: 'invitee_user_email',
+      },
     ],
   },
   'login-event': {
@@ -547,7 +577,14 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     ],
     order: 'event_at',
     lookupMappings: [
-      { keyColumn: 'user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'user_email' },
+      {
+        keyColumn: 'user_id',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        select: 'user_id, email',
+        valueColumn: 'email',
+        resultColumn: 'user_email',
+      },
     ],
   },
   'email-message': {
@@ -577,8 +614,22 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     ],
     order: 'created_at',
     lookupMappings: [
-      { keyColumn: 'triggered_by_user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'triggered_by_email' },
-      { keyColumn: 'recipient_user_id', table: 'auth.users', valueColumn: 'email', resultColumn: 'recipient_user_email' },
+      {
+        keyColumn: 'triggered_by_user_id',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        select: 'user_id, email',
+        valueColumn: 'email',
+        resultColumn: 'triggered_by_email',
+      },
+      {
+        keyColumn: 'recipient_user_id',
+        table: 'profile',
+        keyColumnInTable: 'user_id',
+        select: 'user_id, email',
+        valueColumn: 'email',
+        resultColumn: 'recipient_user_email',
+      },
       {
         keyColumn: 'profile_id',
         table: 'profile',
