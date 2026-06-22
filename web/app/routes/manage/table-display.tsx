@@ -49,6 +49,7 @@ type HoverCardConfig = {
 
 type WorkshopEnrollmentEnrichment = {
   riding_display: string
+  geo_locations_display: string
   giftcard_display: string
   prior_participation_display: string
   profile_hover_top_discrepancy: string
@@ -700,6 +701,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
         const payload = (await response.json()) as WorkshopEnrollmentEnrichmentResponse
         const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
           riding_display: '',
+          geo_locations_display: 'N/A',
           giftcard_display: 'N/A',
           prior_participation_display: 'N/A',
           profile_hover_top_discrepancy: '',

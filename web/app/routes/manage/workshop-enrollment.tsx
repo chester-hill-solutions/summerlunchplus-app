@@ -134,6 +134,7 @@ export async function loader(args: Route.LoaderArgs) {
       ...row,
       enrolled_capacity: capacity === null ? `${approved}/-` : `${approved}/${capacity}`,
       riding_display: '...',
+      geo_locations_display: '...',
       giftcard_display: '...',
       prior_participation_display: '...',
       profile_hover_top_discrepancy: '',
@@ -199,15 +200,34 @@ export async function loader(args: Route.LoaderArgs) {
   }
 
   if (!columns.includes('giftcard_display')) {
+    const geoLocationsIndex = columns.indexOf('geo_locations_display')
+    if (geoLocationsIndex >= 0) {
+      columns = [...columns.slice(0, geoLocationsIndex + 1), 'giftcard_display', ...columns.slice(geoLocationsIndex + 1)]
+    } else {
+      const ridingIndex = columns.indexOf('riding_display')
+      if (ridingIndex >= 0) {
+        columns = [...columns.slice(0, ridingIndex + 1), 'giftcard_display', ...columns.slice(ridingIndex + 1)]
+      } else {
+        const profileIndex = columns.indexOf('profile_display')
+        if (profileIndex >= 0) {
+          columns = [...columns.slice(0, profileIndex + 1), 'giftcard_display', ...columns.slice(profileIndex + 1)]
+        } else {
+          columns = [...columns, 'giftcard_display']
+        }
+      }
+    }
+  }
+
+  if (!columns.includes('geo_locations_display')) {
     const ridingIndex = columns.indexOf('riding_display')
     if (ridingIndex >= 0) {
-      columns = [...columns.slice(0, ridingIndex + 1), 'giftcard_display', ...columns.slice(ridingIndex + 1)]
+      columns = [...columns.slice(0, ridingIndex + 1), 'geo_locations_display', ...columns.slice(ridingIndex + 1)]
     } else {
       const profileIndex = columns.indexOf('profile_display')
       if (profileIndex >= 0) {
-        columns = [...columns.slice(0, profileIndex + 1), 'giftcard_display', ...columns.slice(profileIndex + 1)]
+        columns = [...columns.slice(0, profileIndex + 1), 'geo_locations_display', ...columns.slice(profileIndex + 1)]
       } else {
-        columns = [...columns, 'giftcard_display']
+        columns = [...columns, 'geo_locations_display']
       }
     }
   }
@@ -272,6 +292,9 @@ export async function loader(args: Route.LoaderArgs) {
       },
       riding_display: {
         label: 'riding',
+      },
+      geo_locations_display: {
+        label: 'geo locations',
       },
       giftcard_display: {
         label: 'giftcard',
