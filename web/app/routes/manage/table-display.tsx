@@ -100,6 +100,17 @@ const FILTER_EMPTY_TOKEN = '__none__'
 const FILTER_POPOVER_WIDTH = 256
 const FILTER_POPOVER_MARGIN = 8
 const FILTER_POPOVER_ESTIMATED_HEIGHT = 340
+const DEFAULT_COLUMN_WIDTH = 180
+const DEFAULT_NUMERIC_COLUMN_WIDTH = 120
+const ACTIONS_COLUMN_WIDTH = 120
+const MIN_COLUMN_WIDTH = 90
+const MAX_COLUMN_WIDTH = 720
+const MAX_COLUMN_WIDTH_VW_RATIO = 0.45
+const TARGET_TABLE_WIDTH_VW_RATIO = 0.96
+const ESTIMATED_CHAR_WIDTH_PX = 8
+const CELL_HORIZONTAL_PADDING_PX = 32
+const HEADER_CONTROL_ALLOWANCE_PX = 30
+const MAX_ROWS_FOR_WIDTH_ESTIMATION = 1500
 const hasOwn = (obj: object, key: string) => Object.prototype.hasOwnProperty.call(obj, key)
 
 const isTimestampColumn = (column: string) => column.endsWith('_at') || timestampColumns.has(column)
@@ -190,7 +201,7 @@ const getDirectionIndicator = (stage: 0 | 1 | 2) => {
 
 const FORM_SELECT_CLASS_NAME = 'h-9 rounded border border-input bg-background px-2 pr-8'
 const TABLE_SELECT_CLASS_NAME =
-  'h-8 min-w-32 w-full rounded border border-input bg-background px-2 pr-8 text-xs'
+  'block h-8 w-full min-w-0 max-w-full rounded border border-input bg-background px-2 pr-8 text-xs'
 
 const normalizeFilterValues = (values: string[]) =>
   Array.from(new Set(values.filter(value => value !== undefined)))
@@ -264,6 +275,148 @@ type TableDisplayProps = {
   data?: LoaderData
 }
 
+type ResizeState = {
+  column: string
+  startX: number
+  startWidth: number
+}
+
+const columnWidthStorageKey = (tableName: string) => `manage-table-column-widths:${tableName || 'unknown'}`
+
+const clampColumnWidth = (value: number) => Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(value)))
+
+const estimateHeaderMinWidth = (label: string, numeric: boolean) => {
+  const headerEstimate = label.length * ESTIMATED_CHAR_WIDTH_PX + CELL_HORIZONTAL_PADDING_PX + HEADER_CONTROL_ALLOWANCE_PX
+  return Math.max(numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : MIN_COLUMN_WIDTH, Math.round(headerEstimate))
+}
+
+const estimateContentWidth = ({
+  column,
+  label,
+  rows,
+  tableName,
+  numeric,
+}: {
+  column: string
+  label: string
+  rows: Record<string, unknown>[]
+  tableName: string
+  numeric: boolean
+}) => {
+  let maxLength = Math.max(1, label.length)
+  const rowsToMeasure = rows.slice(0, MAX_ROWS_FOR_WIDTH_ESTIMATION)
+  for (const row of rowsToMeasure) {
+    const cellValueLength = getCellValue(column, row, tableName).length
+    if (cellValueLength > maxLength) {
+      maxLength = cellValueLength
+    }
+  }
+
+  const estimatedWidth = maxLength * ESTIMATED_CHAR_WIDTH_PX + CELL_HORIZONTAL_PADDING_PX + HEADER_CONTROL_ALLOWANCE_PX
+  return Math.max(estimatedWidth, numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : MIN_COLUMN_WIDTH)
+}
+
+const fitWidthsToViewport = ({
+  columns,
+  widths,
+  minWidths,
+  viewportWidth,
+}: {
+  columns: string[]
+  widths: Record<string, number>
+  minWidths: Record<string, number>
+  viewportWidth: number
+}) => {
+  const minimumTotal = columns.reduce((sum, column) => sum + (minWidths[column] ?? MIN_COLUMN_WIDTH), 0)
+  const targetTotal = Math.max(minimumTotal, Math.floor(viewportWidth * TARGET_TABLE_WIDTH_VW_RATIO))
+  let totalWidth = columns.reduce((sum, column) => sum + (widths[column] ?? (minWidths[column] ?? MIN_COLUMN_WIDTH)), 0)
+  if (totalWidth <= targetTotal) return widths
+
+  let remainingOverflow = totalWidth - targetTotal
+  let madeProgress = true
+  while (remainingOverflow > 0 && madeProgress) {
+    madeProgress = false
+    const shrinkableColumns = columns.filter(column => {
+      const minWidth = minWidths[column] ?? MIN_COLUMN_WIDTH
+      return (widths[column] ?? minWidth) > minWidth
+    })
+    if (!shrinkableColumns.length) break
+
+    const shrinkPerColumn = Math.max(1, Math.ceil(remainingOverflow / shrinkableColumns.length))
+    for (const column of shrinkableColumns) {
+      if (remainingOverflow <= 0) break
+      const minWidth = minWidths[column] ?? MIN_COLUMN_WIDTH
+      const currentWidth = widths[column] ?? minWidth
+      const shrinkAmount = Math.min(currentWidth - minWidth, shrinkPerColumn)
+      if (shrinkAmount <= 0) continue
+      widths[column] = currentWidth - shrinkAmount
+      remainingOverflow -= shrinkAmount
+      madeProgress = true
+    }
+  }
+
+  totalWidth = columns.reduce((sum, column) => sum + (widths[column] ?? (minWidths[column] ?? MIN_COLUMN_WIDTH)), 0)
+  if (totalWidth <= targetTotal) return widths
+
+  for (const column of [...columns].sort(
+    (a, b) =>
+      (widths[b] ?? (minWidths[b] ?? MIN_COLUMN_WIDTH)) - (widths[a] ?? (minWidths[a] ?? MIN_COLUMN_WIDTH))
+  )) {
+    if (totalWidth <= targetTotal) break
+    const minWidth = minWidths[column] ?? MIN_COLUMN_WIDTH
+    const currentWidth = widths[column] ?? minWidth
+    const reducible = currentWidth - minWidth
+    if (reducible <= 0) continue
+    const reduction = Math.min(reducible, totalWidth - targetTotal)
+    widths[column] = currentWidth - reduction
+    totalWidth -= reduction
+  }
+
+  return widths
+}
+
+const buildAutoColumnWidths = ({
+  columns,
+  rows,
+  tableName,
+  columnMeta,
+  viewportWidth,
+}: {
+  columns: string[]
+  rows: Record<string, unknown>[]
+  tableName: string
+  columnMeta: LoaderData['columnMeta']
+  viewportWidth: number
+}) => {
+  const perColumnViewportCap = Math.max(MIN_COLUMN_WIDTH, Math.floor(viewportWidth * MAX_COLUMN_WIDTH_VW_RATIO))
+  const minWidths = columns.reduce<Record<string, number>>((acc, column) => {
+    const label = (columnMeta?.[column]?.label ?? column).replace(/_/g, ' ')
+    const numeric = Boolean(columnMeta?.[column]?.numeric)
+    acc[column] = estimateHeaderMinWidth(label, numeric)
+    return acc
+  }, {})
+
+  const widths = columns.reduce<Record<string, number>>((acc, column) => {
+    const label = (columnMeta?.[column]?.label ?? column).replace(/_/g, ' ')
+    const minWidth = minWidths[column] ?? MIN_COLUMN_WIDTH
+    const estimated = estimateContentWidth({
+      column,
+      label,
+      rows,
+      tableName,
+      numeric: Boolean(columnMeta?.[column]?.numeric),
+    })
+    const cappedWidth = Math.min(clampColumnWidth(estimated), Math.max(perColumnViewportCap, minWidth))
+    acc[column] = Math.max(minWidth, cappedWidth)
+    return acc
+  }, {})
+
+  return {
+    widths: fitWidthsToViewport({ columns, widths, minWidths, viewportWidth }),
+    minWidths,
+  }
+}
+
 export default function TableDisplay({ headerActions, data }: TableDisplayProps = {}) {
   const routeData = useLoaderData() as LoaderData | undefined
   const source = data ?? routeData
@@ -297,6 +450,9 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   const [editValues, setEditValues] = useState<Record<string, string>>({})
   const [enrichmentByProfileId, setEnrichmentByProfileId] = useState<Record<string, WorkshopEnrollmentEnrichment>>({})
   const [enrichmentByRiding, setEnrichmentByRiding] = useState<Record<string, FederalElectoralDistrictEnrichment>>({})
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
+  const [columnMinWidths, setColumnMinWidths] = useState<Record<string, number>>({})
+  const [resizeState, setResizeState] = useState<ResizeState | null>(null)
   const loadingEnrichmentProfileIdsRef = useRef<Set<string>>(new Set())
   const loadingEnrichmentRidingNamesRef = useRef<Set<string>>(new Set())
   const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -342,6 +498,63 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     setEditingRowKey(null)
     setEditValues({})
   }, [editorFetcher.data])
+
+  useEffect(() => {
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440
+    const { widths: nextWidths, minWidths } = buildAutoColumnWidths({
+      columns,
+      rows,
+      tableName,
+      columnMeta,
+      viewportWidth,
+    })
+
+    if (typeof window !== 'undefined') {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(columnWidthStorageKey(tableName)) ?? '{}')
+        if (parsed && typeof parsed === 'object') {
+          for (const column of columns) {
+            const value = (parsed as Record<string, unknown>)[column]
+            if (typeof value === 'number' && Number.isFinite(value)) {
+              const minWidth = minWidths[column] ?? MIN_COLUMN_WIDTH
+              nextWidths[column] = Math.max(minWidth, clampColumnWidth(value))
+            }
+          }
+        }
+      } catch {
+        window.localStorage.removeItem(columnWidthStorageKey(tableName))
+      }
+    }
+
+    setColumnMinWidths(minWidths)
+    setColumnWidths(nextWidths)
+  }, [columns, columnMeta, rows, tableName])
+
+  useEffect(() => {
+    if (!tableName || !Object.keys(columnWidths).length || typeof window === 'undefined') return
+    window.localStorage.setItem(columnWidthStorageKey(tableName), JSON.stringify(columnWidths))
+  }, [columnWidths, tableName])
+
+  useEffect(() => {
+    if (!resizeState) return
+
+    const onMouseMove = (event: MouseEvent) => {
+      const deltaX = event.clientX - resizeState.startX
+      const minWidth = columnMinWidths[resizeState.column] ?? MIN_COLUMN_WIDTH
+      const nextWidth = Math.max(minWidth, clampColumnWidth(resizeState.startWidth + deltaX))
+      setColumnWidths(prev => ({ ...prev, [resizeState.column]: nextWidth }))
+    }
+
+    const onMouseUp = () => setResizeState(null)
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [columnMinWidths, resizeState])
 
   const syncSearch = (
     nextFilters: Record<string, string[]>,
@@ -666,6 +879,19 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     return filterOptionsByColumn[column] ?? []
   }
 
+  const isClassAttendance = tableName === 'class-attendance'
+  const isWorkshopEnrollment = isWorkshopEnrollmentTable
+  const canInlineInsert = Boolean(editorConfig?.allowInsert)
+  const canInlineUpdate = Boolean(editorConfig?.allowUpdate)
+
+  const tableWidth = useMemo(() => {
+    const totalColumnWidth = columns.reduce(
+      (sum, column) => sum + (columnWidths[column] ?? (columnMeta[column]?.numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH)),
+      0
+    )
+    return totalColumnWidth + (canInlineUpdate ? ACTIONS_COLUMN_WIDTH : 0)
+  }, [canInlineUpdate, columnMeta, columnWidths, columns])
+
   const updateFilterPopoverPosition = () => {
     if (!openFilterColumn) {
       setFilterPopoverPosition(null)
@@ -726,11 +952,6 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
       document.removeEventListener('mousedown', onMouseDown)
     }
   }, [openFilterColumn])
-
-  const isClassAttendance = tableName === 'class-attendance'
-  const isWorkshopEnrollment = isWorkshopEnrollmentTable
-  const canInlineInsert = Boolean(editorConfig?.allowInsert)
-  const canInlineUpdate = Boolean(editorConfig?.allowUpdate)
 
   const updateAttendanceStatus = (row: Record<string, unknown>, value: string) => {
     if (!isClassAttendance || !canEditStatus) return
@@ -1047,7 +1268,13 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
       </div>
 
       <div className="min-w-0 border-y">
-        <table className="min-w-full w-max table-auto text-sm">
+        <table className="w-max table-fixed text-sm" style={{ width: `${tableWidth}px`, minWidth: `${tableWidth}px` }}>
+          <colgroup>
+            {columns.map(column => (
+              <col key={`col-${column}`} style={{ width: `${columnWidths[column] ?? (columnMeta[column]?.numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH)}px` }} />
+            ))}
+            {canInlineUpdate ? <col key="col-actions" style={{ width: `${ACTIONS_COLUMN_WIDTH}px` }} /> : null}
+          </colgroup>
           <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground">
             <tr>
               {columns.map(column => {
@@ -1055,13 +1282,13 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                 return (
                   <th
                     key={`head-${column}`}
-                    className={isNumericColumn(column) ? 'w-24 px-4 py-2 text-left' : 'px-4 py-2 text-left'}
+                    className={isNumericColumn(column) ? 'relative w-24 px-4 py-2 text-left' : 'relative px-4 py-2 text-left'}
                   >
-                    <div className="relative flex items-center gap-2">
+                    <div className="relative flex items-center gap-1">
                       <button
                         type="button"
                         onClick={() => updateSort(column)}
-                        className="flex min-w-0 items-center gap-1 font-semibold hover:underline hover:underline-offset-4"
+                        className="flex min-w-0 flex-1 items-center justify-start gap-1 font-semibold hover:underline hover:underline-offset-4"
                       >
                         <span className="truncate">{(columnMeta[column]?.label ?? column).replace(/_/g, ' ')}</span>
                         {getDirectionIndicator(sortColumn === column ? sortStage : 0)}
@@ -1076,13 +1303,29 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                             event.stopPropagation()
                             setOpenFilterColumn(prev => (prev === column ? null : column))
                           }}
-                          className={`ml-auto rounded p-1 hover:bg-muted ${hasActiveFilter ? 'text-foreground' : 'text-muted-foreground'}`}
+                          className={`shrink-0 rounded p-1 hover:bg-muted ${hasActiveFilter ? 'text-foreground' : 'text-muted-foreground'}`}
                           aria-label={`Filter ${column}`}
                         >
                           <Filter className={`size-3.5 ${hasActiveFilter ? 'fill-current' : ''}`} />
                         </button>
                       )}
                     </div>
+                    <button
+                      type="button"
+                      aria-label={`Resize ${column}`}
+                      className="absolute right-0 top-0 h-full w-2 cursor-col-resize opacity-0 transition-opacity hover:bg-border/80 hover:opacity-100 focus:opacity-100"
+                      onMouseDown={event => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        setResizeState({
+                          column,
+                          startX: event.clientX,
+                          startWidth:
+                            columnWidths[column] ??
+                            (columnMeta[column]?.numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH),
+                        })
+                      }}
+                    />
                   </th>
                 )
               })}
@@ -1111,7 +1354,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                       if (isClassAttendance && column === 'status' && canEditStatus) {
                         const statusValue = typeof row.status === 'string' ? row.status : ''
                         return (
-                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={statusValue || '(empty)'}>
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="overflow-hidden px-4 py-2 font-mono" title={statusValue || '(empty)'}>
                             <select
                               value={statusValue}
                               onChange={event => updateAttendanceStatus(row, event.target.value)}
@@ -1137,7 +1380,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                               : ''
 
                         return (
-                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={cameraValue || '(empty)'}>
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="overflow-hidden px-4 py-2 font-mono" title={cameraValue || '(empty)'}>
                             <select
                               value={cameraValue}
                               onChange={event => updateAttendanceCameraOn(row, event.target.value)}
@@ -1154,7 +1397,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                       if (isWorkshopEnrollment && column === 'status' && canEditStatus) {
                         const statusValue = typeof row.status === 'string' ? row.status : ''
                         return (
-                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={statusValue || '(empty)'}>
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="overflow-hidden px-4 py-2 font-mono" title={statusValue || '(empty)'}>
                             <select
                               value={statusValue}
                               onChange={event => updateWorkshopEnrollmentStatus(row, event.target.value)}
