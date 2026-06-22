@@ -1,6 +1,8 @@
 import { requireAuth } from '@/lib/auth.server'
 import { localDateTimeToUtcIso, parseOffsetMinutes } from '@/lib/datetime'
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
+import { Button } from '@/components/ui/button'
+import { Form, useLocation } from 'react-router'
 import { resolveFamilyContactsByProfileId } from '@/lib/family.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { Constants, type Database } from '@/lib/database.types'
@@ -11,6 +13,7 @@ import { TABLE_DEFINITIONS } from './table-definitions'
 import type { Route } from './+types/workshop-enrollment'
 import TableDisplay from './table-display'
 import { createTableLoader } from './table-loader'
+import { EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV } from '@/lib/exports/types'
 
 const baseLoader = createTableLoader('class-enrollment')
 
@@ -55,9 +58,9 @@ const parseEnrollmentField = (
   return { value, valid: true }
 }
 
-export async function loader(args: Route.LoaderArgs) {
-  const auth = await requireAuth(args.request)
-  const base = await baseLoader(args)
+export async function loadWorkshopEnrollmentData(request: Request) {
+  const auth = await requireAuth(request)
+  const base = await baseLoader({ request } as Route.LoaderArgs)
   const canManageEnrollments = isRoleAtLeast(auth.claims.role, 'admin')
 
   const rows = (base.rows ?? []) as Array<Record<string, unknown>>
@@ -310,6 +313,10 @@ export async function loader(args: Route.LoaderArgs) {
   }
 }
 
+export async function loader(args: Route.LoaderArgs) {
+  return loadWorkshopEnrollmentData(args.request)
+}
+
 export async function action({ request }: Route.ActionArgs) {
   const auth = await requireAuth(request)
 
@@ -468,5 +475,19 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function WorkshopEnrollmentPage() {
-  return <TableDisplay />
+  const location = useLocation()
+  const sourcePath = `/manage/workshop-enrollment${location.search}`
+
+  return (
+    <TableDisplay
+      headerActions={
+        <Form method="post" action="/manage/exports" className="flex items-center gap-2">
+          <input type="hidden" name="intent" value="create-export" />
+          <input type="hidden" name="export_type" value={EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV} />
+          <input type="hidden" name="source_path" value={sourcePath} />
+          <Button type="submit" variant="outline" size="sm">Export CSV</Button>
+        </Form>
+      }
+    />
+  )
 }

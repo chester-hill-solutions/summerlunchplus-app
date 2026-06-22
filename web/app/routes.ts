@@ -32,6 +32,8 @@ export default [
   route("protected", "routes/protected.tsx"),
   route("auth/confirm", "routes/auth/confirm.tsx"),
   route("auth/error", "routes/auth/error.tsx"),
+  route("internal/export-jobs/run", "routes/internal/export-jobs.run.ts"),
+  route("internal/export-jobs/cleanup", "routes/internal/export-jobs.cleanup.ts"),
   route("manage", "routes/manage/team.tsx", [
     index("routes/manage/index.tsx"),
     route("participants", "routes/manage/participants.tsx"),
@@ -74,6 +76,8 @@ export default [
     route("invites", "routes/manage/invites.tsx"),
     route("discrepancies", "routes/manage/discrepancies.tsx"),
     route("request-metadata", "routes/manage/request-metadata.tsx"),
+    route("exports", "routes/manage/exports.tsx"),
+    route("exports/:jobId/download", "routes/manage/exports.$jobId.download.ts"),
     route("geoip-backfill", "routes/manage/geoip-backfill.tsx"),
     route("federal-electoral-district/enrichment", "routes/manage/federal-electoral-district.enrichment.ts"),
     route("federal-electoral-district", "routes/manage/federal-electoral-district.tsx"),
