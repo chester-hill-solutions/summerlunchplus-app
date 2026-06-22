@@ -7,6 +7,7 @@ const geoStatusLabel: Record<PersonLoaderData['ipEvidence'][number]['geo_status'
   geo_available: 'Geo available',
   no_ip_captured: 'No IP captured',
   invalid_ip_value: 'Invalid IP value',
+  geo_provider_disabled: 'Geo provider disabled',
   ip_present_not_cached: 'IP present, lookup not cached',
   cached_no_geo: 'Lookup cached, no geo result',
 }

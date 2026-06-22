@@ -3,6 +3,7 @@ import { isIP } from 'node:net'
 import { Link, NavLink, Outlet, redirect, useLoaderData, useLocation } from 'react-router'
 
 import { requireAuth } from '@/lib/auth.server'
+import { resolveIpGeolocation } from '@/lib/geoip.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { Button } from '@/components/ui/button'
@@ -34,6 +35,7 @@ const normalizeIp = (ipCandidate: string | null) => {
 const geoStatusReasonFor = (input: {
   ipCandidate: string | null
   normalizedIp: string | null
+  geoProviderEnabled: boolean
   geo:
     | {
         country_code: string | null
@@ -60,9 +62,16 @@ const geoStatusReasonFor = (input: {
   }
 
   if (!input.geo) {
+    if (!input.geoProviderEnabled) {
+      return {
+        status: 'geo_provider_disabled' as const,
+        reason: 'IP captured, but GEOIP_PROVIDER is disabled (set GEOIP_PROVIDER=ipapi or ipinfo).',
+      }
+    }
+
     return {
       status: 'ip_present_not_cached' as const,
-      reason: 'IP captured, but no cached geolocation entry yet (lookup likely not triggered).',
+      reason: 'IP captured, but no cached geolocation entry is available yet (lookup may have failed or timed out).',
     }
   }
 
@@ -185,6 +194,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   >()
 
+  const geoProvider = (process.env.GEOIP_PROVIDER ?? 'none').trim().toLowerCase()
+  const geoProviderEnabled = geoProvider === 'ipapi' || geoProvider === 'ipinfo'
+
   if (uniqueIps.length) {
     const { data: geoRows } = await (adminClient.from('ip_geolocation_cache' as any) as any)
       .select('ip, country_code, region, city, timezone, latitude, longitude')
@@ -203,6 +215,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
+  if (geoProviderEnabled && uniqueIps.length) {
+    const missingIps = uniqueIps.filter(ip => !geoByIp.has(ip)).slice(0, 20)
+    await Promise.all(
+      missingIps.map(async ip => {
+        const location = await resolveIpGeolocation(ip)
+        if (!location) return
+        geoByIp.set(ip, {
+          country_code: location.countryCode,
+          region: location.region,
+          city: location.city,
+          timezone: location.timezone,
+          latitude: location.latitude,
+          longitude: location.longitude,
+        })
+      })
+    )
+  }
+
   const activityEvents = activityCandidates
     .map(row => {
       const normalizedIp = normalizeIp(row.ip_candidate)
@@ -210,6 +240,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const { status, reason } = geoStatusReasonFor({
         ipCandidate: row.ip_candidate,
         normalizedIp,
+        geoProviderEnabled,
         geo,
       })
 

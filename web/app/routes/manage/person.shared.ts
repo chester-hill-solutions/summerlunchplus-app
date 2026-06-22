@@ -48,6 +48,7 @@ export type PersonLoaderData = {
       | 'geo_available'
       | 'no_ip_captured'
       | 'invalid_ip_value'
+      | 'geo_provider_disabled'
       | 'ip_present_not_cached'
       | 'cached_no_geo'
     geo_reason: string
@@ -67,6 +68,7 @@ export type PersonLoaderData = {
       | 'geo_available'
       | 'no_ip_captured'
       | 'invalid_ip_value'
+      | 'geo_provider_disabled'
       | 'ip_present_not_cached'
       | 'cached_no_geo'
     geo_reason: string
