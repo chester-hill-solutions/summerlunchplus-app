@@ -11,6 +11,9 @@ export type SignUpDetailsStatus = {
   waitingOnGuardians?: boolean
 }
 
+const isSignUpDetailsRole = (role: string | null | undefined): role is 'guardian' | 'student' =>
+  role === 'guardian' || role === 'student'
+
 type Condition = {
   all?: Condition[]
   any?: Condition[]
@@ -97,7 +100,7 @@ export const getProfileSignUpCompletion = async (
     .filter(Boolean)
 
   if (!relevantForms.length) {
-    return false
+    return true
   }
 
   const formsComplete = relevantForms.every(formId => submittedFormIds.has(formId))
@@ -170,10 +173,15 @@ export async function getSignUpDetailsStatus(
   if (!role || role === 'unassigned') {
     return { isComplete: false, profileId: profile.id, role, waitingOnGuardians: false }
   }
+
+  if (!isSignUpDetailsRole(role)) {
+    return { isComplete: true, profileId: profile.id, role, waitingOnGuardians: false }
+  }
+
   const formsComplete = await getProfileSignUpCompletionWithContext(
     supabase,
     profile.id,
-    role as Database['public']['Enums']['app_role']
+    role
   )
 
   if (role === 'student') {
