@@ -15,6 +15,10 @@ type ProfileRidingRow = {
   federal_electoral_district_name: string | null
 }
 
+const PROFILE_IN_BATCH_SIZE = 80
+const FAMILY_EDGE_IN_BATCH_SIZE = 40
+const RELATED_PROFILE_IN_BATCH_SIZE = 80
+
 const statusBucketFor = (status: Database['public']['Enums']['workshop_enrollment_status']) => {
   if (status === 'approved') return 'accepted'
   if (status === 'pending') return 'pending'
@@ -121,7 +125,7 @@ export async function loader({ request }: { request: Request }) {
   }
 
   const profileRows: ProfileRidingRow[] = []
-  for (const profileChunk of chunk(profileIds, 500)) {
+  for (const profileChunk of chunk(profileIds, PROFILE_IN_BATCH_SIZE)) {
     const { data, error } = await supabase
       .from('profile')
       .select('id, role, federal_electoral_district_name')
@@ -144,29 +148,52 @@ export async function loader({ request }: { request: Request }) {
 
   const childrenByGuardian = new Map<string, Array<{ profileId: string; primary: boolean }>>()
   const guardiansByChild = new Map<string, Array<{ profileId: string; primary: boolean }>>()
-  const relatedProfileIds = new Set<string>()
+  const familyEdgeKeys = new Set<string>()
 
-  for (const profileChunk of chunk(profileIds, 200)) {
-    const { data: edges, error: edgesError } = await supabase
-      .from('person_guardian_child')
-      .select('guardian_profile_id, child_profile_id, primary_child')
-      .or(`guardian_profile_id.in.(${profileChunk.join(',')}),child_profile_id.in.(${profileChunk.join(',')})`)
+  for (const profileChunk of chunk(profileIds, FAMILY_EDGE_IN_BATCH_SIZE)) {
+    const [{ data: guardianEdges, error: guardianEdgesError }, { data: childEdges, error: childEdgesError }] =
+      await Promise.all([
+        supabase
+          .from('person_guardian_child')
+          .select('guardian_profile_id, child_profile_id, primary_child')
+          .in('guardian_profile_id', profileChunk),
+        supabase
+          .from('person_guardian_child')
+          .select('guardian_profile_id, child_profile_id, primary_child')
+          .in('child_profile_id', profileChunk),
+      ])
 
-    if (edgesError) {
-      console.error('[federal-electoral-district] failed to load family edges', edgesError)
+    if (guardianEdgesError) {
+      console.error('[federal-electoral-district] failed to load guardian family edges', {
+        chunkSize: profileChunk.length,
+        error: guardianEdgesError.message,
+      })
+      return Response.json({ byRiding }, { headers: auth.headers })
+    }
+    if (childEdgesError) {
+      console.error('[federal-electoral-district] failed to load child family edges', {
+        chunkSize: profileChunk.length,
+        error: childEdgesError.message,
+      })
       return Response.json({ byRiding }, { headers: auth.headers })
     }
 
-    for (const edge of (edges ?? []) as FamilyEdgeRow[]) {
+    for (const edge of [...(guardianEdges ?? []), ...(childEdges ?? [])] as FamilyEdgeRow[]) {
+      const edgeKey = `${edge.guardian_profile_id}:${edge.child_profile_id}`
+      if (familyEdgeKeys.has(edgeKey)) continue
+      familyEdgeKeys.add(edgeKey)
       pushFamilyLink(childrenByGuardian, edge.guardian_profile_id, edge.child_profile_id, edge.primary_child)
       pushFamilyLink(guardiansByChild, edge.child_profile_id, edge.guardian_profile_id, edge.primary_child)
-      relatedProfileIds.add(edge.guardian_profile_id)
-      relatedProfileIds.add(edge.child_profile_id)
     }
   }
 
-  const missingRelatedProfileIds = Array.from(relatedProfileIds).filter(profileId => !profileById.has(profileId))
-  for (const relatedChunk of chunk(missingRelatedProfileIds, 500)) {
+  const missingRelatedProfileIds = Array.from(
+    new Set(
+      Array.from(familyEdgeKeys).flatMap(edgeKey => edgeKey.split(':')).filter(profileId => !profileById.has(profileId))
+    )
+  )
+
+  for (const relatedChunk of chunk(missingRelatedProfileIds, RELATED_PROFILE_IN_BATCH_SIZE)) {
     const { data: relatedProfiles, error: relatedProfilesError } = await supabase
       .from('profile')
       .select('id, federal_electoral_district_name')
