@@ -28,9 +28,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   )
 
   return {
+    authDebug: {
+      userId: auth.user.id,
+      email: auth.user.email ?? null,
+      userMetadataRole:
+        typeof auth.user.user_metadata?.role === 'string' ? auth.user.user_metadata.role : null,
+      claims: auth.claims,
+    },
     metadata,
     headers,
-    note: 'Use this page in Railway staging to verify which proxy/network headers arrive at the app.',
+    note: 'Use this page in production/staging to verify incoming headers and server-side auth claims.',
   }
 }
 
@@ -43,6 +50,11 @@ export default function RequestMetadataPage() {
         <h1 className="text-2xl font-semibold">Request metadata diagnostics</h1>
         <p className="text-sm text-muted-foreground">{data.note}</p>
       </div>
+
+      <section className="rounded-lg border bg-card p-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Server auth snapshot</h2>
+        <pre className="mt-2 overflow-x-auto rounded bg-muted p-3 text-xs">{JSON.stringify(data.authDebug, null, 2)}</pre>
+      </section>
 
       <section className="rounded-lg border bg-card p-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Extracted metadata</h2>
