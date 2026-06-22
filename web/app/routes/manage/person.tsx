@@ -1,3 +1,5 @@
+import { isIP } from 'node:net'
+
 import { Link, NavLink, Outlet, redirect, useLoaderData, useLocation } from 'react-router'
 
 import { requireAuth } from '@/lib/auth.server'
@@ -10,16 +12,80 @@ import type { LoaderFunctionArgs } from 'react-router'
 import type { PersonLoaderData, ProfileRow, SuspiciousSignalRow } from './person.shared'
 import { profileLabel } from './person.shared'
 
-const parsePrimaryIp = (ip: unknown, forwardedFor: string | null | undefined) => {
+const primaryForwardedToken = (forwardedFor: string | null | undefined) => {
+  if (typeof forwardedFor !== 'string' || !forwardedFor.trim()) return null
+  return forwardedFor
+    .split(',')
+    .map(part => part.trim())
+    .find(Boolean) ?? null
+}
+
+const resolveIpCandidate = (ip: unknown, forwardedFor: string | null | undefined) => {
   if (typeof ip === 'string' && ip.trim()) return ip.trim()
-  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
-    const first = forwardedFor
-      .split(',')
-      .map(part => part.trim())
-      .find(Boolean)
-    if (first) return first
+  return primaryForwardedToken(forwardedFor)
+}
+
+const normalizeIp = (ipCandidate: string | null) => {
+  if (!ipCandidate) return null
+  if (ipCandidate.length > 64) return null
+  return isIP(ipCandidate) ? ipCandidate : null
+}
+
+const geoStatusReasonFor = (input: {
+  ipCandidate: string | null
+  normalizedIp: string | null
+  geo:
+    | {
+        country_code: string | null
+        region: string | null
+        city: string | null
+        timezone: string | null
+        latitude: number | null
+        longitude: number | null
+      }
+    | null
+}) => {
+  if (!input.ipCandidate) {
+    return {
+      status: 'no_ip_captured' as const,
+      reason: 'No IP was captured for this event.',
+    }
   }
-  return null
+
+  if (!input.normalizedIp) {
+    return {
+      status: 'invalid_ip_value' as const,
+      reason: 'An IP-like value exists but is not a valid IP address.',
+    }
+  }
+
+  if (!input.geo) {
+    return {
+      status: 'ip_present_not_cached' as const,
+      reason: 'IP captured, but no cached geolocation entry yet (lookup likely not triggered).',
+    }
+  }
+
+  const hasGeoValue = Boolean(
+    input.geo.country_code ||
+      input.geo.region ||
+      input.geo.city ||
+      input.geo.timezone ||
+      input.geo.latitude !== null ||
+      input.geo.longitude !== null
+  )
+
+  if (!hasGeoValue) {
+    return {
+      status: 'cached_no_geo' as const,
+      reason: 'Lookup was attempted and cached, but no location details were returned.',
+    }
+  }
+
+  return {
+    status: 'geo_available' as const,
+    reason: 'Geolocation is available from cache.',
+  }
 }
 
 const personTabs = [
@@ -27,6 +93,7 @@ const personTabs = [
   { to: '/manage/person/family', label: 'Family' },
   { to: '/manage/person/enrollments', label: 'Enrollments' },
   { to: '/manage/person/form-submissions', label: 'Form submissions' },
+  { to: '/manage/person/activity', label: 'Activity and IP logs' },
   { to: '/manage/person/attendance', label: 'Attendance' },
   { to: '/manage/person/discrepancies', label: 'Discrepancies' },
 ]
@@ -60,34 +127,52 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const [latestFormSubmissionResult, latestLoginEventResult] = await Promise.all([
     adminClient
       .from('form_submission')
-      .select('submitted_at, ip_address, forwarded_for')
+      .select('id, form_id, submitted_at, ip_address, forwarded_for')
       .eq('profile_id', profileRow.id)
       .order('submitted_at', { ascending: false })
-      .limit(1),
+      .limit(25),
     profileRow.user_id
       ? adminClient
           .from('login_event')
-          .select('event_at, ip_address, forwarded_for')
+          .select('id, event_at, email, login_method, success, ip_address, forwarded_for')
           .eq('user_id', profileRow.user_id)
           .order('event_at', { ascending: false })
-          .limit(1)
+          .limit(25)
       : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
   ])
 
-  const ipCandidates = [
+  const activityCandidates = [
     ...(latestFormSubmissionResult.data ?? []).map(row => ({
       source: 'form_submission' as const,
+      event_id: typeof row.id === 'string' ? row.id : '',
       occurred_at: typeof row.submitted_at === 'string' ? row.submitted_at : '',
-      ip_address: parsePrimaryIp(row.ip_address, typeof row.forwarded_for === 'string' ? row.forwarded_for : null),
+      form_id: typeof row.form_id === 'string' ? row.form_id : null,
+      login_method: null,
+      login_success: null,
+      login_email: null,
+      forwarded_for: typeof row.forwarded_for === 'string' ? row.forwarded_for : null,
+      ip_candidate: resolveIpCandidate(row.ip_address, typeof row.forwarded_for === 'string' ? row.forwarded_for : null),
     })),
     ...((latestLoginEventResult.data ?? []) as Array<Record<string, unknown>>).map(row => ({
       source: 'login_event' as const,
+      event_id: typeof row.id === 'string' ? row.id : '',
       occurred_at: typeof row.event_at === 'string' ? row.event_at : '',
-      ip_address: parsePrimaryIp(row.ip_address, typeof row.forwarded_for === 'string' ? row.forwarded_for : null),
+      form_id: null,
+      login_method: typeof row.login_method === 'string' ? row.login_method : null,
+      login_success: typeof row.success === 'boolean' ? row.success : null,
+      login_email: typeof row.email === 'string' ? row.email : null,
+      forwarded_for: typeof row.forwarded_for === 'string' ? row.forwarded_for : null,
+      ip_candidate: resolveIpCandidate(row.ip_address, typeof row.forwarded_for === 'string' ? row.forwarded_for : null),
     })),
-  ].filter(row => row.ip_address && row.occurred_at)
+  ].filter(row => row.occurred_at)
 
-  const uniqueIps = Array.from(new Set(ipCandidates.map(row => row.ip_address as string)))
+  const uniqueIps = Array.from(
+    new Set(
+      activityCandidates
+        .map(row => normalizeIp(row.ip_candidate))
+        .filter((ipAddress): ipAddress is string => Boolean(ipAddress))
+    )
+  )
   const geoByIp = new Map<
     string,
     {
@@ -118,14 +203,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  const ipEvidence = ipCandidates
+  const activityEvents = activityCandidates
     .map(row => {
-      const ipAddress = row.ip_address as string
-      const geo = geoByIp.get(ipAddress)
+      const normalizedIp = normalizeIp(row.ip_candidate)
+      const geo = normalizedIp ? geoByIp.get(normalizedIp) ?? null : null
+      const { status, reason } = geoStatusReasonFor({
+        ipCandidate: row.ip_candidate,
+        normalizedIp,
+        geo,
+      })
+
       return {
         source: row.source,
+        event_id: row.event_id,
         occurred_at: row.occurred_at,
-        ip_address: ipAddress,
+        form_id: row.form_id,
+        login_method: row.login_method,
+        login_success: row.login_success,
+        login_email: row.login_email,
+        forwarded_for: row.forwarded_for,
+        ip_candidate: row.ip_candidate,
+        ip_address: normalizedIp,
+        geo_status: status,
+        geo_reason: reason,
         country_code: geo?.country_code ?? null,
         region: geo?.region ?? null,
         city: geo?.city ?? null,
@@ -135,6 +235,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     })
     .sort((left, right) => right.occurred_at.localeCompare(left.occurred_at))
+
+  const ipEvidence = activityEvents.slice(0, 8)
 
   const seen = new Set<string>([profileRow.id])
   const queue: string[] = [profileRow.id]
@@ -292,6 +394,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     profile: profileRow as ProfileRow,
+    activityEvents,
     ipEvidence,
     familyProfiles,
     primaryChildByGuardian,
