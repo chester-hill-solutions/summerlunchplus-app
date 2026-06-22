@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useOutletContext } from 'react-router'
+import { Link, useLocation, useOutletContext } from 'react-router'
 
 import type { Json } from '@/lib/database.types'
 
@@ -20,6 +20,8 @@ const severityClassName = (severity: string) => {
 export default function ManagePersonDiscrepanciesPage() {
   const { suspiciousSignals, familyProfiles } = useOutletContext<PersonLoaderData>()
   const profileById = useMemo(() => new Map(familyProfiles.map(profile => [profile.id, profile])), [familyProfiles])
+  const location = useLocation()
+  const returnTo = `${location.pathname}${location.search}`
 
   const openSignals = suspiciousSignals.filter(signal => signal.status === 'open')
   const closedSignals = suspiciousSignals.filter(signal => signal.status !== 'open')
@@ -61,7 +63,21 @@ export default function ManagePersonDiscrepanciesPage() {
                             .filter(Boolean)
                             .join(', ')
                           return (
-                            <li key={`${signal.id}-${idx}`}>• {label}: {address || '-'}</li>
+                            <li key={`${signal.id}-${idx}`}>
+                              • {profileId ? (
+                                <Link
+                                  to={{
+                                    pathname: '/manage/person',
+                                    search: new URLSearchParams({ profileId, returnTo }).toString(),
+                                  }}
+                                  className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                                >
+                                  {label}
+                                </Link>
+                              ) : (
+                                label
+                              )}: {address || '-'}
+                            </li>
                           )
                         })}
                       </ul>
@@ -126,7 +142,21 @@ export default function ManagePersonDiscrepanciesPage() {
                               .filter(Boolean)
                               .join(', ')
                             return (
-                              <li key={`${signal.id}-cross-${idx}`}>• {label}: {address || '-'}</li>
+                              <li key={`${signal.id}-cross-${idx}`}>
+                                • {profileId ? (
+                                  <Link
+                                    to={{
+                                      pathname: '/manage/person',
+                                      search: new URLSearchParams({ profileId, returnTo }).toString(),
+                                    }}
+                                    className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                                  >
+                                    {label}
+                                  </Link>
+                                ) : (
+                                  label
+                                )}: {address || '-'}
+                              </li>
                             )
                           }
                         )}

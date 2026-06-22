@@ -141,6 +141,8 @@ export async function loader(args: Route.LoaderArgs) {
       profile_hover_name: '',
       profile_hover_email: '',
       profile_hover_parent_email: '',
+      profile_hover_latest_ip: '',
+      profile_hover_latest_ip_geo: '',
     }
 
     if (!profileSignals.length) {
@@ -258,6 +260,8 @@ export async function loader(args: Route.LoaderArgs) {
           fields: [
             { label: 'Email', field: 'profile_hover_email', fallback: 'N/A' },
             { label: 'Parent Email', field: 'profile_hover_parent_email', fallback: 'N/A' },
+            { label: 'Latest IP', field: 'profile_hover_latest_ip', fallback: 'N/A' },
+            { label: 'Latest IP Geo', field: 'profile_hover_latest_ip_geo', fallback: 'N/A' },
             { label: 'Top Discrepancy', field: 'profile_hover_top_discrepancy' },
             { label: 'More Open', field: 'profile_hover_more_discrepancies' },
           ],
