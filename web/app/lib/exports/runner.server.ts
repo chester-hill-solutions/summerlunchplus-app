@@ -36,6 +36,28 @@ const normalizeWorkshopExportColumns = (columns: string[]) => {
 const buildStoragePath = ({ requestedBy, jobId }: { requestedBy: string; jobId: string }) =>
   `exports/${requestedBy}/${jobId}.csv`
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const listExportJobRowsWithRetry = async ({
+  jobId,
+  attempts = 5,
+  delayMs = 250,
+}: {
+  jobId: string
+  attempts?: number
+  delayMs?: number
+}) => {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const rows = await listExportJobRows({ jobId })
+    if (rows.length > 0 || attempt === attempts) {
+      return rows
+    }
+    await sleep(delayMs)
+  }
+
+  return []
+}
+
 export const processNextExportJob = async () => {
   const job = await claimNextExportJob()
   if (!job) {
@@ -66,7 +88,7 @@ const processClaimedExportJob = async (job: {
       throw new Error(`Unsupported export type: ${job.export_type}`)
     }
 
-    const rows = await listExportJobRows({ jobId: job.id })
+    const rows = await listExportJobRowsWithRetry({ jobId: job.id })
     const requestedColumns = Array.isArray(job.column_order) ? job.column_order : []
     const columns =
       job.export_type === EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV
