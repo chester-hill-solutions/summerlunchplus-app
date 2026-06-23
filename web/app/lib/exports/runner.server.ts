@@ -13,6 +13,25 @@ import {
 import { materializeWorkshopEnrollmentExportRows } from './workshop-enrollment-export-row.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 
+const WORKSHOP_PROFILE_SPLIT_COLUMNS = [
+  'student_firstname',
+  'student_lastname',
+  'student_email',
+  'guardian_firstname',
+  'guardian_lastname',
+  'guardian_email',
+] as const
+
+const normalizeWorkshopExportColumns = (columns: string[]) => {
+  if (!columns.includes('profile_display')) {
+    return columns
+  }
+
+  return columns.flatMap(column =>
+    column === 'profile_display' ? [...WORKSHOP_PROFILE_SPLIT_COLUMNS] : [column]
+  )
+}
+
 const buildStoragePath = ({ requestedBy, jobId }: { requestedBy: string; jobId: string }) =>
   `exports/${requestedBy}/${jobId}.csv`
 
@@ -28,7 +47,11 @@ export const processNextExportJob = async () => {
     }
 
     const rows = await listExportJobRows({ jobId: job.id })
-    const columns = Array.isArray(job.column_order) ? job.column_order : []
+    const requestedColumns = Array.isArray(job.column_order) ? job.column_order : []
+    const columns =
+      job.export_type === EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV
+        ? normalizeWorkshopExportColumns(requestedColumns)
+        : requestedColumns
     const csvRows =
       job.export_type === EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV
         ? await materializeWorkshopEnrollmentExportRows({
