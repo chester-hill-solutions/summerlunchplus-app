@@ -1,5 +1,6 @@
 import { buildCsv } from './csv.server'
 import {
+  claimExportJobById,
   claimNextExportJob,
   completeExportJob,
   failExportJob,
@@ -40,6 +41,25 @@ export const processNextExportJob = async () => {
   if (!job) {
     return { processed: false as const }
   }
+
+  return processClaimedExportJob(job)
+}
+
+export const processExportJobById = async ({ jobId }: { jobId: string }) => {
+  const job = await claimExportJobById({ jobId })
+  if (!job) {
+    return { processed: false as const }
+  }
+
+  return processClaimedExportJob(job)
+}
+
+const processClaimedExportJob = async (job: {
+  id: string
+  export_type: string
+  column_order: string[] | null
+  requested_by: string
+}) => {
 
   try {
     if (job.export_type !== EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV) {

@@ -4,7 +4,7 @@ import { Form, redirect, useActionData, useLoaderData, useNavigation, useRevalid
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import { triggerExportRunner } from '@/lib/exports/dispatch.server'
-import { processNextExportJob } from '@/lib/exports/runner.server'
+import { processExportJobById } from '@/lib/exports/runner.server'
 import {
   createExportJob,
   getExportJobById,
@@ -33,7 +33,7 @@ const triggerExportRunnerWithFallback = async ({ request, jobId }: { request: Re
     return { warning: undefined as string | undefined }
   }
 
-  const fallbackResult = await processNextExportJob()
+  const fallbackResult = await processExportJobById({ jobId })
   if (fallbackResult.processed && fallbackResult.jobId === jobId) {
     console.warn('[exports] immediate trigger failed, local fallback processed queued job', {
       jobId,
