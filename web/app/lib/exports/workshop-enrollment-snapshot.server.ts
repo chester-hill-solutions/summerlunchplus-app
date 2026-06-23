@@ -91,7 +91,7 @@ export const buildWorkshopEnrollmentSnapshot = async ({
   }
 
   const exportColumns = baseColumns.flatMap(column =>
-    column === 'profile_display' ? [...PROFILE_SPLIT_COLUMNS] : [column]
+    column === 'profile_display' ? ['profile_display', ...PROFILE_SPLIT_COLUMNS] : [column]
   )
 
   const snapshotRows = filteredRows.map(row => ({ ...row }))
