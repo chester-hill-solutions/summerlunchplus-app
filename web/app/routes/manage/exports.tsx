@@ -4,6 +4,7 @@ import { Form, redirect, useActionData, useLoaderData, useNavigation, useRevalid
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import { triggerExportRunner } from '@/lib/exports/dispatch.server'
+import { processNextExportJob } from '@/lib/exports/runner.server'
 import {
   createExportJob,
   getExportJobById,
@@ -25,6 +26,37 @@ type ActionData = {
 }
 
 const isActiveStatus = (status: string) => status === 'queued' || status === 'running'
+
+const triggerExportRunnerWithFallback = async ({ request, jobId }: { request: Request; jobId: string }) => {
+  const triggerResult = await triggerExportRunner({ request })
+  if (triggerResult.ok) {
+    return { warning: undefined as string | undefined }
+  }
+
+  const fallbackResult = await processNextExportJob()
+  if (fallbackResult.processed && fallbackResult.jobId === jobId) {
+    console.warn('[exports] immediate trigger failed, local fallback processed queued job', {
+      jobId,
+      triggerResult,
+    })
+    return {
+      warning:
+        'Immediate trigger endpoint returned an error, but this job was processed locally as a fallback.',
+    }
+  }
+
+  const warning =
+    triggerResult.reason === 'missing-secret'
+      ? 'Export queued, but immediate processing is disabled because EXPORT_RUNNER_SECRET is not configured. Configure the secret and scheduler, or run /internal/export-jobs/run manually.'
+      : `Export queued, but immediate processing trigger failed${typeof triggerResult.status === 'number' ? ` (HTTP ${triggerResult.status})` : ''}${triggerResult.body ? `: ${triggerResult.body}` : ''}. The scheduler can still pick this up.`
+
+  console.error('[exports] immediate process trigger failed', {
+    jobId,
+    triggerResult,
+    fallbackResult,
+  })
+  return { warning }
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
@@ -86,17 +118,11 @@ export async function action({ request }: Route.ActionArgs) {
       rows: snapshot.rows,
     })
 
-    const triggerResult = await triggerExportRunner({ request })
-    if (!triggerResult.ok) {
-      const warning =
-        triggerResult.reason === 'missing-secret'
-          ? 'Export queued, but immediate processing is disabled because EXPORT_RUNNER_SECRET is not configured. Configure the secret and scheduler, or run /internal/export-jobs/run manually.'
-          : `Export queued, but immediate processing trigger failed${typeof triggerResult.status === 'number' ? ` (HTTP ${triggerResult.status})` : ''}. The scheduler can still pick this up.`
-
-      console.error('[exports] immediate process trigger failed', { jobId: job.id, triggerResult })
+    const triggerOutcome = await triggerExportRunnerWithFallback({ request, jobId: job.id })
+    if (triggerOutcome.warning) {
       return {
         success: `Export queued (${snapshot.rows.length} rows).`,
-        warning,
+        warning: triggerOutcome.warning,
       } satisfies ActionData
     }
 
@@ -112,14 +138,9 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     await setExportJobStatus({ supabase, jobId, status: 'queued' })
-    const triggerResult = await triggerExportRunner({ request })
-    if (!triggerResult.ok) {
-      const warning =
-        triggerResult.reason === 'missing-secret'
-          ? 'Export re-queued, but immediate processing is disabled because EXPORT_RUNNER_SECRET is not configured.'
-          : `Export re-queued, but immediate processing trigger failed${typeof triggerResult.status === 'number' ? ` (HTTP ${triggerResult.status})` : ''}.`
-      console.error('[exports] retry trigger failed', { jobId, triggerResult })
-      return { success: 'Export re-queued.', warning } satisfies ActionData
+    const triggerOutcome = await triggerExportRunnerWithFallback({ request, jobId })
+    if (triggerOutcome.warning) {
+      return { success: 'Export re-queued.', warning: triggerOutcome.warning } satisfies ActionData
     }
     return { success: 'Export re-queued.' } satisfies ActionData
   }
