@@ -21,6 +21,7 @@ import type { Route } from './+types/exports'
 type ActionData = {
   error?: string
   success?: string
+  warning?: string
 }
 
 const isActiveStatus = (status: string) => status === 'queued' || status === 'running'
@@ -85,9 +86,19 @@ export async function action({ request }: Route.ActionArgs) {
       rows: snapshot.rows,
     })
 
-    void triggerExportRunner({ request }).catch(error => {
-      console.error('[exports] immediate process trigger failed', { jobId: job.id, error })
-    })
+    const triggerResult = await triggerExportRunner({ request })
+    if (!triggerResult.ok) {
+      const warning =
+        triggerResult.reason === 'missing-secret'
+          ? 'Export queued, but immediate processing is disabled because EXPORT_RUNNER_SECRET is not configured. Configure the secret and scheduler, or run /internal/export-jobs/run manually.'
+          : `Export queued, but immediate processing trigger failed${typeof triggerResult.status === 'number' ? ` (HTTP ${triggerResult.status})` : ''}. The scheduler can still pick this up.`
+
+      console.error('[exports] immediate process trigger failed', { jobId: job.id, triggerResult })
+      return {
+        success: `Export queued (${snapshot.rows.length} rows).`,
+        warning,
+      } satisfies ActionData
+    }
 
     return { success: `Export queued (${snapshot.rows.length} rows).` } satisfies ActionData
   }
@@ -101,9 +112,15 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     await setExportJobStatus({ supabase, jobId, status: 'queued' })
-    void triggerExportRunner({ request }).catch(error => {
-      console.error('[exports] retry trigger failed', { jobId, error })
-    })
+    const triggerResult = await triggerExportRunner({ request })
+    if (!triggerResult.ok) {
+      const warning =
+        triggerResult.reason === 'missing-secret'
+          ? 'Export re-queued, but immediate processing is disabled because EXPORT_RUNNER_SECRET is not configured.'
+          : `Export re-queued, but immediate processing trigger failed${typeof triggerResult.status === 'number' ? ` (HTTP ${triggerResult.status})` : ''}.`
+      console.error('[exports] retry trigger failed', { jobId, triggerResult })
+      return { success: 'Export re-queued.', warning } satisfies ActionData
+    }
     return { success: 'Export re-queued.' } satisfies ActionData
   }
 
@@ -157,6 +174,11 @@ export default function ManageExportsPage() {
       {actionData?.success ? (
         <p className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
           {actionData.success}
+        </p>
+      ) : null}
+      {actionData?.warning ? (
+        <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {actionData.warning}
         </p>
       ) : null}
 
