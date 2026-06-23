@@ -10,6 +10,7 @@ import {
   EXPORT_STORAGE_BUCKET,
   EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV,
 } from './types'
+import { materializeWorkshopEnrollmentExportRows } from './workshop-enrollment-export-row.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 
 const buildStoragePath = ({ requestedBy, jobId }: { requestedBy: string; jobId: string }) =>
@@ -27,8 +28,14 @@ export const processNextExportJob = async () => {
     }
 
     const rows = await listExportJobRows({ jobId: job.id })
-    const csvRows = rows.map(row => row.row_data)
     const columns = Array.isArray(job.column_order) ? job.column_order : []
+    const csvRows =
+      job.export_type === EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV
+        ? await materializeWorkshopEnrollmentExportRows({
+            rows: rows.map(row => row.row_data),
+            columns,
+          })
+        : rows.map(row => row.row_data)
     const csv = buildCsv({ columns, rows: csvRows })
     const bytes = new TextEncoder().encode(csv)
     const storagePath = buildStoragePath({ requestedBy: job.requested_by, jobId: job.id })
