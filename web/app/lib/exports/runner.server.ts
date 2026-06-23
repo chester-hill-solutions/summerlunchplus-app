@@ -28,7 +28,7 @@ const normalizeWorkshopExportColumns = (columns: string[]) => {
   }
 
   return columns.flatMap(column =>
-    column === 'profile_display' ? [...WORKSHOP_PROFILE_SPLIT_COLUMNS] : [column]
+    column === 'profile_display' ? ['profile_display', ...WORKSHOP_PROFILE_SPLIT_COLUMNS] : [column]
   )
 }
 

@@ -143,7 +143,7 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       return statusDiff
     }
 
-    const timeDiff = toTime(left.requested_at) - toTime(right.requested_at)
+    const timeDiff = toTime(right.requested_at) - toTime(left.requested_at)
     if (timeDiff !== 0) {
       return timeDiff
     }
