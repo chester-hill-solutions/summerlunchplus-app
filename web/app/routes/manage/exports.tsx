@@ -39,10 +39,7 @@ const triggerExportRunnerWithFallback = async ({ request, jobId }: { request: Re
       jobId,
       triggerResult,
     })
-    return {
-      warning:
-        'Immediate trigger endpoint returned an error, but this job was processed locally as a fallback.',
-    }
+    return { warning: undefined as string | undefined }
   }
 
   const warning =
