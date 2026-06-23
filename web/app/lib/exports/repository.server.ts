@@ -136,6 +136,26 @@ export const claimNextExportJob = async () => {
   return data[0] as ExportJobRecord
 }
 
+export const claimExportJobById = async ({ jobId }: { jobId: string }) => {
+  const { data, error } = await (adminClient.from('export_job' as any) as any)
+    .update({
+      status: 'running',
+      started_at: new Date().toISOString(),
+      error_message: null,
+    })
+    .eq('id', jobId)
+    .eq('status', 'queued')
+    .select('*')
+    .single()
+
+  if (error) {
+    if (error.code === 'PGRST116') return null
+    throw new Error(error.message)
+  }
+
+  return (data ?? null) as ExportJobRecord | null
+}
+
 export const listExportJobRows = async ({ jobId }: { jobId: string }) => {
   const { data, error } = await (adminClient.from('export_job_row' as any) as any)
     .select('row_index, row_data')
