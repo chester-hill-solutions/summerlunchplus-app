@@ -1369,6 +1369,8 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                               <option value="unknown">unknown</option>
                               <option value="present">present</option>
                               <option value="absent">absent</option>
+                              <option value="uploaded">uploaded</option>
+                              <option value="accepted">accepted</option>
                             </select>
                           </td>
                         )

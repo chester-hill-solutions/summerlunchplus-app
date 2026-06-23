@@ -11,7 +11,9 @@ create type public.workshop_enrollment_status as enum (
 create type public.class_attendance_status as enum (
   'unknown',
   'present',
-  'absent'
+  'absent',
+  'uploaded',
+  'accepted'
 );
 
 create table public.semester (
