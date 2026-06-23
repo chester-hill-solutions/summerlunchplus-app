@@ -14,6 +14,7 @@ export type InternalTriggerResult = {
   attempted: boolean
   ok: boolean
   status?: number
+  body?: string
   reason?: 'missing-secret' | 'network-error'
 }
 
@@ -35,6 +36,7 @@ export const triggerExportRunner = async ({ request }: { request: Request }) => 
       attempted: true,
       ok: response.ok,
       status: response.status,
+      body: response.ok ? undefined : (await response.text()).slice(0, 500),
     } satisfies InternalTriggerResult
   } catch {
     return { attempted: true, ok: false, reason: 'network-error' } satisfies InternalTriggerResult
@@ -59,6 +61,7 @@ export const triggerExportCleanup = async ({ request }: { request: Request }) =>
       attempted: true,
       ok: response.ok,
       status: response.status,
+      body: response.ok ? undefined : (await response.text()).slice(0, 500),
     } satisfies InternalTriggerResult
   } catch {
     return { attempted: true, ok: false, reason: 'network-error' } satisfies InternalTriggerResult
