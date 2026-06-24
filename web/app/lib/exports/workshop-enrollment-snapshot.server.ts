@@ -31,6 +31,7 @@ const fallbackWorkshopEnrollmentEnrichment = {
   profile_hover_top_discrepancy: '',
   profile_hover_more_discrepancies: '',
   profile_hover_name: 'N/A',
+  profile_hover_parent_name: 'N/A',
   profile_hover_email: 'N/A',
   profile_hover_parent_email: 'N/A',
   profile_hover_parent_phone: 'N/A',

@@ -54,6 +54,7 @@ export type WorkshopEnrollmentEnrichment = {
   profile_hover_top_discrepancy: string
   profile_hover_more_discrepancies: string
   profile_hover_name: string
+  profile_hover_parent_name: string
   profile_hover_email: string
   profile_hover_parent_email: string
   profile_hover_latest_ip: string
@@ -702,6 +703,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       profile_hover_top_discrepancy: discrepancyInfo.top,
       profile_hover_more_discrepancies: discrepancyInfo.more,
       profile_hover_name: familyContextByProfileId[profileId]?.profile_hover_name ?? profileHoverName,
+      profile_hover_parent_name: familyContextByProfileId[profileId]?.profile_hover_parent_name ?? 'N/A',
       profile_hover_email: familyContextByProfileId[profileId]?.profile_hover_email ?? profileHoverEmail,
       profile_hover_parent_email:
         familyContextByProfileId[profileId]?.profile_hover_parent_email ?? profileHoverParentEmail,

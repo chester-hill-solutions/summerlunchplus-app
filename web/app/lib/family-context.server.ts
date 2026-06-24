@@ -56,6 +56,7 @@ type AddressDraft = {
 
 export type FamilyContextEnrichment = {
   profile_hover_name: string
+  profile_hover_parent_name: string
   profile_hover_email: string
   profile_hover_parent_email: string
   profile_hover_parent_phone: string
@@ -432,6 +433,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
     const studentProfile = inferredStudentProfileId ? profileById.get(inferredStudentProfileId) ?? null : null
 
     const profileHoverName = fullNameFromProfile(enrollmentProfile) ?? 'N/A'
+    const profileHoverParentName = fullNameFromProfile(parentProfile) ?? 'N/A'
     const profileHoverEmail = normalizeText(enrollmentProfile?.email) ?? 'N/A'
     const profileHoverParentEmail = normalizeText(parentProfile?.email) ?? 'N/A'
     const profileHoverParentPhone = normalizeText(parentProfile?.phone) ?? 'N/A'
@@ -470,6 +472,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
 
     byProfileId[profileId] = {
       profile_hover_name: profileHoverName,
+      profile_hover_parent_name: profileHoverParentName,
       profile_hover_email: profileHoverEmail,
       profile_hover_parent_email: profileHoverParentEmail,
       profile_hover_parent_phone: profileHoverParentPhone,

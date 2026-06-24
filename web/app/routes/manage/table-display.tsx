@@ -48,6 +48,8 @@ type HoverCardConfig = {
   columns?: {
     leftTitle?: string
     rightTitle?: string
+    rightTitleField?: string
+    rightTitleFallback?: string
     left: HoverCardField[]
     right: HoverCardField[]
   }
@@ -61,6 +63,7 @@ type WorkshopEnrollmentEnrichment = {
   profile_hover_top_discrepancy: string
   profile_hover_more_discrepancies: string
   profile_hover_name: string
+  profile_hover_parent_name: string
   profile_hover_email: string
   profile_hover_parent_email: string
   profile_hover_parent_phone: string
@@ -80,6 +83,7 @@ type FamilyContextEnrichmentResponse = {
     Pick<
       WorkshopEnrollmentEnrichment,
       | 'profile_hover_name'
+      | 'profile_hover_parent_name'
       | 'profile_hover_email'
       | 'profile_hover_parent_email'
       | 'profile_hover_parent_phone'
@@ -226,7 +230,13 @@ const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardCo
   const columnLayout = config.columns
     ? {
         leftTitle: config.columns.leftTitle,
-        rightTitle: config.columns.rightTitle,
+        rightTitle:
+          (config.columns.rightTitleField
+            ? normalizeHoverCardValue(row[config.columns.rightTitleField])
+            : '') ||
+          config.columns.rightTitle ||
+          config.columns.rightTitleFallback ||
+          '',
         left: config.columns.left.map(normalizeField).filter(field => field.visible),
         right: config.columns.right.map(normalizeField).filter(field => field.visible),
       }
@@ -779,6 +789,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           profile_hover_top_discrepancy: '',
           profile_hover_more_discrepancies: '',
           profile_hover_name: 'N/A',
+          profile_hover_parent_name: 'N/A',
           profile_hover_email: 'N/A',
           profile_hover_parent_email: 'N/A',
           profile_hover_parent_phone: 'N/A',
@@ -1613,9 +1624,16 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                           {hoverCardData ? (
                             <div className="group/hovercard relative inline-block max-w-full">
                               {content}
-                              <div className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-72 rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:visible group-hover/hovercard:opacity-100">
-                                {hoverCardData.title ? (
-                                  <p className="mb-1 truncate font-semibold text-foreground">{hoverCardData.title}</p>
+                              <div className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:visible group-hover/hovercard:opacity-100">
+                                {hoverCardData.title || hoverCardData.columns?.rightTitle ? (
+                                  <div className="mb-1 grid grid-cols-2 gap-3">
+                                    <p className="truncate font-semibold text-foreground">{hoverCardData.title || 'N/A'}</p>
+                                    {hoverCardData.columns?.rightTitle ? (
+                                      <p className="truncate text-right font-semibold text-foreground">
+                                        {hoverCardData.columns.rightTitle}
+                                      </p>
+                                    ) : null}
+                                  </div>
                                 ) : null}
                                 {hoverCardData.columns ? (
                                   <div className="grid grid-cols-2 gap-3">

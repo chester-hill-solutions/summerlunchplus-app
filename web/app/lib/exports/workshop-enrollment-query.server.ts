@@ -107,6 +107,7 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       profile_hover_top_discrepancy: '',
       profile_hover_more_discrepancies: '',
       profile_hover_name: '',
+      profile_hover_parent_name: '',
       profile_hover_email: '',
       profile_hover_parent_email: '',
       profile_hover_parent_phone: '',
@@ -249,7 +250,8 @@ export async function loadWorkshopEnrollmentData(request: Request) {
           titleFallback: 'N/A',
           columns: {
             leftTitle: 'Student',
-            rightTitle: 'Parent',
+            rightTitleField: 'profile_hover_parent_name',
+            rightTitleFallback: 'Parent',
             left: [
               { label: 'Email', field: 'profile_hover_email', fallback: 'N/A' },
               { label: 'Geo', field: 'profile_hover_student_geo', fallback: 'N/A' },
