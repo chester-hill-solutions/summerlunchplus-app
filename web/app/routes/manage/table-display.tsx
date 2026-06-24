@@ -155,9 +155,9 @@ const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
   'riding_display',
   'geo_locations_display',
   'giftcard_display',
+  'prior_participation_display',
 ])
 const FAMILY_CONTEXT_COLUMNS = new Set([
-  'prior_participation_display',
   'profile_hover_top_discrepancy',
   'profile_hover_more_discrepancies',
   'profile_hover_name',
@@ -175,6 +175,18 @@ const WORKSHOP_FILTER_ENRICHMENT_COLUMNS = new Set([
   ...Array.from(WORKSHOP_ENRICHMENT_COLUMNS),
   ...Array.from(FAMILY_CONTEXT_COLUMNS),
 ])
+
+const hasHydratedFamilyContext = (enrichment?: WorkshopEnrollmentEnrichment) =>
+  Boolean(
+    enrichment?.profile_hover_name ||
+      enrichment?.profile_hover_parent_name ||
+      enrichment?.profile_hover_email ||
+      enrichment?.profile_hover_parent_email ||
+      enrichment?.profile_hover_student_geo ||
+      enrichment?.profile_hover_parent_geo ||
+      enrichment?.profile_hover_top_discrepancy ||
+      enrichment?.profile_hover_more_discrepancies
+  )
 const DEFAULT_COLUMN_WIDTH = 180
 const DEFAULT_NUMERIC_COLUMN_WIDTH = 120
 const ACTIONS_COLUMN_WIDTH = 120
@@ -1058,6 +1070,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     () => Object.keys(filters).some(column => WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column)),
     [filters]
   )
+  const hasActiveFamilyContextFilters = useMemo(
+    () => Object.keys(filters).some(column => FAMILY_CONTEXT_COLUMNS.has(column)),
+    [filters]
+  )
   const baseFiltersForEnrichmentFetch = useMemo(() => {
     const next: Record<string, string[]> = {}
     for (const [column, values] of Object.entries(filters)) {
@@ -1083,7 +1099,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
     const shouldLoadWorkshopValues = columns.some(column => WORKSHOP_ENRICHMENT_COLUMNS.has(column))
     const shouldLoadFamilyContext =
-      columns.includes('profile_display') || columns.some(column => FAMILY_CONTEXT_COLUMNS.has(column))
+      hasActiveFamilyContextFilters || Boolean(openFilterColumn && FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))
 
     if (!shouldLoadWorkshopValues && !shouldLoadFamilyContext) return
 
@@ -1187,8 +1203,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     baseFiltersForEnrichmentFetch,
     columns,
     enrichmentByProfileId,
+    hasActiveFamilyContextFilters,
     hasActiveEnrichmentBackedFilters,
     isWorkshopEnrollmentTable,
+    openFilterColumn,
     paginatedRows,
     rows,
   ])
@@ -1316,6 +1334,64 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       setPageSize(nextPageSize)
     }
     syncSearch(filters, sortColumn, sortStage, boundedPage, nextPageSize)
+  }
+
+  const requestFamilyContextForProfile = (profileId: string) => {
+    if (!isWorkshopEnrollmentTable || !profileId) return
+    const existing = enrichmentByProfileId[profileId]
+    if (hasHydratedFamilyContext(existing) || loadingEnrichmentProfileIdsRef.current.has(profileId)) return
+
+    loadingEnrichmentProfileIdsRef.current.add(profileId)
+    void (async () => {
+      try {
+        const query = new URLSearchParams()
+        query.append('profileId', profileId)
+        const response = await fetch(`/manage/family-context/enrichment?${query.toString()}`)
+        if (!response.ok) return
+        const payload = (await response.json()) as FamilyContextEnrichmentResponse
+        const resolved = payload?.byProfileId?.[profileId] ?? {
+          prior_participation_display: 'N/A',
+          profile_hover_top_discrepancy: '',
+          profile_hover_more_discrepancies: '',
+          profile_hover_name: 'N/A',
+          profile_hover_parent_name: 'N/A',
+          profile_hover_email: 'N/A',
+          profile_hover_student_phone: '',
+          profile_hover_parent_email: 'N/A',
+          profile_hover_parent_phone: 'N/A',
+          profile_hover_student_geo: 'N/A',
+          profile_hover_parent_geo: 'N/A',
+          profile_hover_student_submitted_address: 'N/A',
+          profile_hover_parent_address: 'N/A',
+        }
+
+        setEnrichmentByProfileId(prev => ({
+          ...prev,
+          [profileId]: {
+            riding_display: prev[profileId]?.riding_display ?? '',
+            geo_locations_display: prev[profileId]?.geo_locations_display ?? 'N/A',
+            giftcard_display: prev[profileId]?.giftcard_display ?? 'N/A',
+            prior_participation_display: prev[profileId]?.prior_participation_display ?? resolved.prior_participation_display,
+            profile_hover_top_discrepancy: resolved.profile_hover_top_discrepancy,
+            profile_hover_more_discrepancies: resolved.profile_hover_more_discrepancies,
+            profile_hover_name: resolved.profile_hover_name,
+            profile_hover_parent_name: resolved.profile_hover_parent_name,
+            profile_hover_email: resolved.profile_hover_email,
+            profile_hover_student_phone: resolved.profile_hover_student_phone,
+            profile_hover_parent_email: resolved.profile_hover_parent_email,
+            profile_hover_parent_phone: resolved.profile_hover_parent_phone,
+            profile_hover_student_geo: resolved.profile_hover_student_geo,
+            profile_hover_parent_geo: resolved.profile_hover_parent_geo,
+            profile_hover_student_submitted_address: resolved.profile_hover_student_submitted_address,
+            profile_hover_parent_address: resolved.profile_hover_parent_address,
+          },
+        }))
+      } catch (error) {
+        console.error('[table display] family-context hover fetch failed', error)
+      } finally {
+        loadingEnrichmentProfileIdsRef.current.delete(profileId)
+      }
+    })()
   }
 
   const effectiveSelectedValuesForColumn = (column: string, allOptionsForColumn: string[]) => {
@@ -2024,6 +2100,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           onClick={() => {
                             if (!filterable) return
                             appendFilter(column, cellValue)
+                          }}
+                          onMouseEnter={() => {
+                            if (!isWorkshopEnrollment || column !== 'profile_display') return
+                            const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+                            if (!profileId) return
+                            requestFamilyContextForProfile(profileId)
                           }}
                         >
                           {hoverCardData ? (
