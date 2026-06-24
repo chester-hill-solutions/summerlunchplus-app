@@ -1628,7 +1628,11 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                           {hoverCardData ? (
                             <div className="group/hovercard relative inline-block max-w-full">
                               {content}
-                              <div className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:pointer-events-auto group-hover/hovercard:visible group-hover/hovercard:opacity-100 group-focus-within/hovercard:pointer-events-auto group-focus-within/hovercard:visible group-focus-within/hovercard:opacity-100 select-text">
+                              <div
+                                className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:pointer-events-auto group-hover/hovercard:visible group-hover/hovercard:opacity-100 group-focus-within/hovercard:pointer-events-auto group-focus-within/hovercard:visible group-focus-within/hovercard:opacity-100 select-text"
+                                onClick={event => event.stopPropagation()}
+                                onMouseDown={event => event.stopPropagation()}
+                              >
                                 {hoverCardData.title || hoverCardData.columns?.rightTitle ? (
                                   <div className="mb-1 grid grid-cols-2 gap-3">
                                     <p className="truncate font-semibold text-foreground">{hoverCardData.title || 'N/A'}</p>
