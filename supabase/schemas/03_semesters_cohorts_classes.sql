@@ -11,9 +11,13 @@ create type public.workshop_enrollment_status as enum (
 create type public.class_attendance_status as enum (
   'unknown',
   'present',
-  'absent',
+  'absent'
+);
+
+create type public.class_attendance_photo_status as enum (
   'uploaded',
-  'accepted'
+  'accepted',
+  'rejected'
 );
 
 create table public.semester (
@@ -68,6 +72,7 @@ create table public.class_attendance (
   class_id uuid not null references public.class (id) on update cascade on delete cascade,
   profile_id uuid not null references public.profile (id) on update cascade on delete cascade,
   status public.class_attendance_status,
+  photo_status public.class_attendance_photo_status,
   camera_on boolean,
   recorded_by uuid references auth.users (id) on update cascade on delete set null,
   notes text,
@@ -422,6 +427,7 @@ create policy workshop_enrollment_read_auth_admin
 -- Grants
 grant usage on type public.workshop_enrollment_status to authenticated, supabase_auth_admin;
 grant usage on type public.class_attendance_status to authenticated, supabase_auth_admin;
+grant usage on type public.class_attendance_photo_status to authenticated, supabase_auth_admin;
 
 grant all on table public.semester to supabase_auth_admin;
 

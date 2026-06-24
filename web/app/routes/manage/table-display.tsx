@@ -416,6 +416,7 @@ const personLinkForCell = (
 
 type TableDisplayProps = {
   headerActions?: ReactNode
+  paginationActions?: ReactNode
   data?: LoaderData
 }
 
@@ -573,7 +574,7 @@ const buildAutoColumnWidths = ({
   }
 }
 
-export default function TableDisplay({ headerActions, data }: TableDisplayProps = {}) {
+export default function TableDisplay({ headerActions, paginationActions, data }: TableDisplayProps = {}) {
   const routeData = useLoaderData() as LoaderData | undefined
   const source = data ?? routeData
   const {
@@ -936,7 +937,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
             ])
 
             const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
-              riding_display: '',
+              riding_display: 'Not looked up',
               geo_locations_display: 'N/A',
               giftcard_display: 'N/A',
               prior_participation_display: 'N/A',
@@ -1109,7 +1110,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
             : Promise.resolve({ byProfileId: {} } as FamilyContextEnrichmentResponse),
         ])
         const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
-          riding_display: '',
+          riding_display: 'Not looked up',
           geo_locations_display: 'N/A',
           giftcard_display: 'N/A',
           prior_participation_display: 'N/A',
@@ -1665,6 +1666,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           Page {effectivePage} of {totalPages}
         </p>
         <div className="flex items-center gap-2 text-xs">
+          {paginationActions ? <div className="mr-1">{paginationActions}</div> : null}
           <label className="text-muted-foreground" htmlFor="page-size">
             Rows per page
           </label>
