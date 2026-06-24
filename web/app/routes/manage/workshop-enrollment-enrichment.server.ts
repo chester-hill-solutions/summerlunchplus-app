@@ -39,35 +39,11 @@ type FormAnswerRow = {
   value: unknown
 }
 
-type OpenDiscrepancyRow = {
-  id: string
-  family_profile_ids: string[] | null
-  signal_type: string
-  severity: string
-  summary: string
-  priority_score: number | null
-  created_at: string
-}
-
 export type WorkshopEnrollmentEnrichment = {
   riding_display: string
   geo_locations_display: string
   giftcard_display: string
   prior_participation_display: string
-  profile_hover_top_discrepancy: string
-  profile_hover_more_discrepancies: string
-  profile_hover_name: string
-  profile_hover_parent_name: string
-  profile_hover_email: string
-  profile_hover_student_phone: string
-  profile_hover_parent_email: string
-  profile_hover_latest_ip: string
-  profile_hover_latest_ip_geo: string
-  profile_hover_parent_phone: string
-  profile_hover_student_geo: string
-  profile_hover_parent_geo: string
-  profile_hover_student_submitted_address: string
-  profile_hover_parent_address: string
 }
 
 const flagEmojiForCountryCode = (countryCode: string | null) => {
@@ -112,13 +88,6 @@ const normalizePriorParticipation = (value: unknown) => {
   if (trimmed === 'yes') return 'Yes'
   if (trimmed === 'no') return 'No'
   return value.trim()
-}
-
-const fullNameFromProfile = (profile: RidingProfileRow | null | undefined) => {
-  const firstname = normalizeText(profile?.firstname)
-  const surname = normalizeText(profile?.surname)
-  const fullName = [firstname, surname].filter(Boolean).join(' ').trim()
-  return fullName || null
 }
 
 const chunkArray = <T,>(items: T[], size: number): T[][] => {
@@ -168,7 +137,6 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
   const mealKitByProfileId = new Map<string, boolean>()
   let giftCardPreferenceByProfileId = new Map<string, string>()
   let priorParticipationByProfileId = new Map<string, string>()
-  const discrepancyRowsByProfileId = new Map<string, OpenDiscrepancyRow[]>()
 
   const seen = new Set<string>(normalizedProfileIds)
   const queue = [...normalizedProfileIds]
@@ -261,22 +229,6 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       const ip = parsePrimaryIp(submission.ip_address, submission.forwarded_for)
       if (!profileId || !occurredAt || !ip || latestSubmissionByProfileId.has(profileId)) continue
       latestSubmissionByProfileId.set(profileId, { occurredAt, ip })
-    }
-  }
-
-  const { data: discrepancyRowsRaw } = await (adminClient.from('suspicious_signal') as any)
-    .select('id, family_profile_ids, signal_type, severity, summary, priority_score, created_at')
-    .eq('status', 'open')
-    .overlaps('family_profile_ids', normalizedProfileIds)
-    .order('priority_score', { ascending: false })
-    .order('created_at', { ascending: false })
-
-  for (const signal of (discrepancyRowsRaw ?? []) as OpenDiscrepancyRow[]) {
-    for (const familyProfileId of signal.family_profile_ids ?? []) {
-      if (!normalizedProfileIds.includes(familyProfileId)) continue
-      const existing = discrepancyRowsByProfileId.get(familyProfileId) ?? []
-      existing.push(signal)
-      discrepancyRowsByProfileId.set(familyProfileId, existing)
     }
   }
 
@@ -580,12 +532,6 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
     const ridingDisplay =
       studentRiding ?? parentRiding ?? normalizeRiding(enrollmentProfile?.federal_electoral_district_name) ?? ''
 
-    const profileHoverName = fullNameFromProfile(enrollmentProfile) ?? 'N/A'
-    const profileHoverEmail = normalizeText(enrollmentProfile?.email) ?? 'N/A'
-    const profileHoverParentEmail = inferredParentProfileId
-      ? normalizeText(profileById.get(inferredParentProfileId)?.email) ?? 'N/A'
-      : 'N/A'
-
     const candidateProfileIds: string[] = []
     const addCandidate = (candidateId: string | null) => {
       if (!candidateId || candidateProfileIds.includes(candidateId)) return
@@ -634,55 +580,6 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       return 'N/A'
     })()
 
-    const discrepancyInfo = (() => {
-      const uniqueSignals = new Map<string, OpenDiscrepancyRow>()
-      for (const candidateProfileId of candidateProfileIds) {
-        for (const signal of discrepancyRowsByProfileId.get(candidateProfileId) ?? []) {
-          if (!uniqueSignals.has(signal.id)) {
-            uniqueSignals.set(signal.id, signal)
-          }
-        }
-      }
-
-      const sortedSignals = Array.from(uniqueSignals.values()).sort((left, right) => {
-        const leftScore = typeof left.priority_score === 'number' ? left.priority_score : 0
-        const rightScore = typeof right.priority_score === 'number' ? right.priority_score : 0
-        if (leftScore !== rightScore) return rightScore - leftScore
-        return right.created_at.localeCompare(left.created_at)
-      })
-
-      const top = sortedSignals[0] ?? null
-      if (!top) {
-        return {
-          top: '',
-          more: '',
-        }
-      }
-
-      const topSeverity = typeof top.severity === 'string' ? top.severity.toUpperCase() : 'OPEN'
-      return {
-        top: `[${topSeverity}] ${top.summary}`,
-        more:
-          sortedSignals.length > 1
-            ? `+${sortedSignals.length - 1} more open signal${sortedSignals.length - 1 === 1 ? '' : 's'}`
-            : '',
-      }
-    })()
-
-    const latestIpInfo = (() => {
-      for (const candidateProfileId of candidateProfileIds) {
-        const latest = latestIpByProfileId.get(candidateProfileId)
-        if (!latest) continue
-        const geo = geoByIp.get(latest.ip) ?? null
-        return {
-          ip: latest.ip,
-          geo: formatGeoLabel(geo),
-        }
-      }
-
-      return { ip: '', geo: '' }
-    })()
-
     const geoLocationsDisplay = (() => {
       const uniqueLabels: string[] = []
       for (const candidateProfileId of candidateProfileIds) {
@@ -705,22 +602,6 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       giftcard_display: giftcardDisplay,
       prior_participation_display:
         familyContextByProfileId[profileId]?.prior_participation_display ?? priorParticipationDisplay,
-      profile_hover_top_discrepancy: discrepancyInfo.top,
-      profile_hover_more_discrepancies: discrepancyInfo.more,
-      profile_hover_name: familyContextByProfileId[profileId]?.profile_hover_name ?? profileHoverName,
-      profile_hover_parent_name: familyContextByProfileId[profileId]?.profile_hover_parent_name ?? 'N/A',
-      profile_hover_email: familyContextByProfileId[profileId]?.profile_hover_email ?? profileHoverEmail,
-      profile_hover_student_phone: familyContextByProfileId[profileId]?.profile_hover_student_phone ?? '',
-      profile_hover_parent_email:
-        familyContextByProfileId[profileId]?.profile_hover_parent_email ?? profileHoverParentEmail,
-      profile_hover_latest_ip: latestIpInfo.ip,
-      profile_hover_latest_ip_geo: latestIpInfo.geo,
-      profile_hover_parent_phone: familyContextByProfileId[profileId]?.profile_hover_parent_phone ?? 'N/A',
-      profile_hover_student_geo: familyContextByProfileId[profileId]?.profile_hover_student_geo ?? 'N/A',
-      profile_hover_parent_geo: familyContextByProfileId[profileId]?.profile_hover_parent_geo ?? 'N/A',
-      profile_hover_student_submitted_address:
-        familyContextByProfileId[profileId]?.profile_hover_student_submitted_address ?? 'N/A',
-      profile_hover_parent_address: familyContextByProfileId[profileId]?.profile_hover_parent_address ?? 'N/A',
     }
   }
 

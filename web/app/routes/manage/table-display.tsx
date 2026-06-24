@@ -74,28 +74,34 @@ type WorkshopEnrollmentEnrichment = {
   profile_hover_parent_address: string
 }
 
+type WorkshopEnrollmentOnlyEnrichment = Pick<
+  WorkshopEnrollmentEnrichment,
+  'riding_display' | 'geo_locations_display' | 'giftcard_display' | 'prior_participation_display'
+>
+
 type WorkshopEnrollmentEnrichmentResponse = {
-  byProfileId: Record<string, WorkshopEnrollmentEnrichment>
+  byProfileId: Record<string, WorkshopEnrollmentOnlyEnrichment>
 }
 
+type FamilyContextEnrichment = Pick<
+  WorkshopEnrollmentEnrichment,
+  | 'prior_participation_display'
+  | 'profile_hover_top_discrepancy'
+  | 'profile_hover_more_discrepancies'
+  | 'profile_hover_name'
+  | 'profile_hover_parent_name'
+  | 'profile_hover_email'
+  | 'profile_hover_student_phone'
+  | 'profile_hover_parent_email'
+  | 'profile_hover_parent_phone'
+  | 'profile_hover_student_geo'
+  | 'profile_hover_parent_geo'
+  | 'profile_hover_student_submitted_address'
+  | 'profile_hover_parent_address'
+>
+
 type FamilyContextEnrichmentResponse = {
-  byProfileId: Record<
-    string,
-    Pick<
-      WorkshopEnrollmentEnrichment,
-      | 'prior_participation_display'
-      | 'profile_hover_name'
-      | 'profile_hover_parent_name'
-      | 'profile_hover_email'
-      | 'profile_hover_student_phone'
-      | 'profile_hover_parent_email'
-      | 'profile_hover_parent_phone'
-      | 'profile_hover_student_geo'
-      | 'profile_hover_parent_geo'
-      | 'profile_hover_student_submitted_address'
-      | 'profile_hover_parent_address'
-    >
-  >
+  byProfileId: Record<string, FamilyContextEnrichment>
 }
 
 type FederalDistrictCounts = {
@@ -147,6 +153,8 @@ const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
   'riding_display',
   'geo_locations_display',
   'giftcard_display',
+])
+const FAMILY_CONTEXT_COLUMNS = new Set([
   'prior_participation_display',
   'profile_hover_top_discrepancy',
   'profile_hover_more_discrepancies',
@@ -529,12 +537,13 @@ const buildAutoColumnWidths = ({
   const minWidths = columns.reduce<Record<string, number>>((acc, column) => {
     const label = (columnMeta?.[column]?.label ?? column).replace(/_/g, ' ')
     const numeric = Boolean(columnMeta?.[column]?.numeric)
+    const headerMinWidth = estimateHeaderMinWidth(label, numeric)
     const preferredMinWidth = columnMeta?.[column]?.minWidth
     if (typeof preferredMinWidth === 'number' && Number.isFinite(preferredMinWidth)) {
-      acc[column] = Math.max(40, Math.round(preferredMinWidth))
+      acc[column] = Math.max(headerMinWidth, Math.round(preferredMinWidth))
       return acc
     }
-    acc[column] = estimateHeaderMinWidth(label, numeric)
+    acc[column] = headerMinWidth
     return acc
   }, {})
 
@@ -888,7 +897,10 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
       if (activeRequestId !== requestId) return
 
       let mergedEnrichmentByProfileId = enrichmentByProfileId
-      if (isWorkshopEnrollmentTable && WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn)) {
+      if (
+        isWorkshopEnrollmentTable &&
+        (WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn) || FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))
+      ) {
         const allProfileIds = Array.from(
           new Set(
             rows
@@ -904,17 +916,24 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
             const query = new URLSearchParams()
             requestProfileIds.forEach(profileId => query.append('profileId', profileId))
 
-            const [workshopResponse, familyContextResponse] = await Promise.all([
-              fetch(`/manage/workshop-enrollment/enrichment?${query.toString()}`),
-              fetch(`/manage/family-context/enrichment?${query.toString()}`),
+            const [workshopPayload, familyPayload] = await Promise.all([
+              WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn)
+                ? fetch(`/manage/workshop-enrollment/enrichment?${query.toString()}`)
+                    .then(async response =>
+                      response.ok
+                        ? ((await response.json()) as WorkshopEnrollmentEnrichmentResponse)
+                        : ({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse)
+                    )
+                : Promise.resolve({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse),
+              FAMILY_CONTEXT_COLUMNS.has(openFilterColumn)
+                ? fetch(`/manage/family-context/enrichment?${query.toString()}`)
+                    .then(async response =>
+                      response.ok
+                        ? ((await response.json()) as FamilyContextEnrichmentResponse)
+                        : ({ byProfileId: {} } as FamilyContextEnrichmentResponse)
+                    )
+                : Promise.resolve({ byProfileId: {} } as FamilyContextEnrichmentResponse),
             ])
-
-            const workshopPayload = workshopResponse.ok
-              ? ((await workshopResponse.json()) as WorkshopEnrollmentEnrichmentResponse)
-              : { byProfileId: {} }
-            const familyPayload = familyContextResponse.ok
-              ? ((await familyContextResponse.json()) as FamilyContextEnrichmentResponse)
-              : { byProfileId: {} }
 
             const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
               riding_display: '',
@@ -1041,6 +1060,12 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   useEffect(() => {
     if (!isWorkshopEnrollmentTable) return
 
+    const shouldLoadWorkshopValues = columns.some(column => WORKSHOP_ENRICHMENT_COLUMNS.has(column))
+    const shouldLoadFamilyContext =
+      columns.includes('profile_display') || columns.some(column => FAMILY_CONTEXT_COLUMNS.has(column))
+
+    if (!shouldLoadWorkshopValues && !shouldLoadFamilyContext) return
+
     const missingProfileIds = Array.from(
       new Set(
         paginatedRows
@@ -1063,20 +1088,26 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
       try {
         const searchParams = new URLSearchParams()
         requestProfileIds.forEach(profileId => searchParams.append('profileId', profileId))
-        const response = await fetch(`/manage/workshop-enrollment/enrichment?${searchParams.toString()}`, {
-          signal: abortController.signal,
-        })
-
-        if (!response.ok) return
-        const familyContextResponsePromise = fetch(
-          `/manage/family-context/enrichment?${searchParams.toString()}`,
-          { signal: abortController.signal }
-        )
-        const payload = (await response.json()) as WorkshopEnrollmentEnrichmentResponse
-        const familyContextResponse = await familyContextResponsePromise
-        const familyPayload = familyContextResponse.ok
-          ? ((await familyContextResponse.json()) as FamilyContextEnrichmentResponse)
-          : { byProfileId: {} }
+        const [payload, familyPayload] = await Promise.all([
+          shouldLoadWorkshopValues
+            ? fetch(`/manage/workshop-enrollment/enrichment?${searchParams.toString()}`, {
+                signal: abortController.signal,
+              }).then(async response =>
+                response.ok
+                  ? ((await response.json()) as WorkshopEnrollmentEnrichmentResponse)
+                  : ({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse)
+              )
+            : Promise.resolve({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse),
+          shouldLoadFamilyContext
+            ? fetch(`/manage/family-context/enrichment?${searchParams.toString()}`, {
+                signal: abortController.signal,
+              }).then(async response =>
+                response.ok
+                  ? ((await response.json()) as FamilyContextEnrichmentResponse)
+                  : ({ byProfileId: {} } as FamilyContextEnrichmentResponse)
+              )
+            : Promise.resolve({ byProfileId: {} } as FamilyContextEnrichmentResponse),
+        ])
         const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
           riding_display: '',
           geo_locations_display: 'N/A',
@@ -1124,7 +1155,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     return () => {
       abortController.abort()
     }
-  }, [enrichmentByProfileId, isWorkshopEnrollmentTable, paginatedRows])
+  }, [columns, enrichmentByProfileId, isWorkshopEnrollmentTable, paginatedRows])
 
   useEffect(() => {
     if (!isFederalDistrictTable) return

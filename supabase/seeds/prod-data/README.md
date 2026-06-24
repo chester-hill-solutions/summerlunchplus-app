@@ -36,4 +36,6 @@ The prod snapshot should focus on operational/runtime tables (profiles, enrollme
 Switch `db.seed.sql_paths` in `supabase/config.toml`:
 
 - app + dummy: `./seeds/app-data/*.sql`, `./seeds/dummy-data/*.sql`
-- app + prod snapshot: `./seeds/app-data/*.sql`, `./seeds/prod-data/*.sql`
+- app + prod snapshot: `./seeds/app-data/*.sql`, `./seeds/prod-data/*-sanitized.sql`
+
+Use `*-sanitized.sql` for loadable snapshot files and keep raw dumps (for reference only) outside that suffix so they are not executed by default.

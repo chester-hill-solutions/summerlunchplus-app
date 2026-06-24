@@ -50,6 +50,15 @@ type FormAnswerRow = {
   value: unknown
 }
 
+type OpenDiscrepancyRow = {
+  id: string
+  family_profile_ids: string[] | null
+  severity: string
+  summary: string
+  priority_score: number | null
+  created_at: string
+}
+
 type AddressDraft = {
   submittedAt: number
   street_address?: string
@@ -60,6 +69,8 @@ type AddressDraft = {
 
 export type FamilyContextEnrichment = {
   prior_participation_display: string
+  profile_hover_top_discrepancy: string
+  profile_hover_more_discrepancies: string
   profile_hover_name: string
   profile_hover_parent_name: string
   profile_hover_email: string
@@ -205,6 +216,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
   const guardiansByChildId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
   const childrenByGuardianId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
   const profileIdsByUserId = new Map<string, string[]>()
+  const discrepancyRowsByProfileId = new Map<string, OpenDiscrepancyRow[]>()
 
   const seen = new Set<string>(normalizedProfileIds)
   const queue = [...normalizedProfileIds]
@@ -274,6 +286,29 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
     if (!existing.includes(profile.id)) {
       existing.push(profile.id)
       profileIdsByUserId.set(profile.user_id, existing)
+    }
+  }
+
+  const { data: discrepancyRowsRaw, error: discrepancyRowsError } = await (adminClient.from('suspicious_signal') as any)
+    .select('id, family_profile_ids, severity, summary, priority_score, created_at')
+    .eq('status', 'open')
+    .overlaps('family_profile_ids', normalizedProfileIds)
+    .order('priority_score', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (discrepancyRowsError) {
+    console.error('[family-context] failed to load discrepancy rows', {
+      profileCount: normalizedProfileIds.length,
+      error: discrepancyRowsError.message,
+    })
+  }
+
+  for (const signal of (discrepancyRowsRaw ?? []) as OpenDiscrepancyRow[]) {
+    for (const familyProfileId of signal.family_profile_ids ?? []) {
+      if (!normalizedProfileIds.includes(familyProfileId)) continue
+      const existing = discrepancyRowsByProfileId.get(familyProfileId) ?? []
+      existing.push(signal)
+      discrepancyRowsByProfileId.set(familyProfileId, existing)
     }
   }
 
@@ -531,8 +566,45 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
       return 'N/A'
     })()
 
+    const discrepancyInfo = (() => {
+      const uniqueSignals = new Map<string, OpenDiscrepancyRow>()
+      for (const candidateProfileId of candidateProfileIds) {
+        for (const signal of discrepancyRowsByProfileId.get(candidateProfileId) ?? []) {
+          if (!uniqueSignals.has(signal.id)) {
+            uniqueSignals.set(signal.id, signal)
+          }
+        }
+      }
+
+      const sortedSignals = Array.from(uniqueSignals.values()).sort((left, right) => {
+        const leftScore = typeof left.priority_score === 'number' ? left.priority_score : 0
+        const rightScore = typeof right.priority_score === 'number' ? right.priority_score : 0
+        if (leftScore !== rightScore) return rightScore - leftScore
+        return right.created_at.localeCompare(left.created_at)
+      })
+
+      const top = sortedSignals[0] ?? null
+      if (!top) {
+        return {
+          top: '',
+          more: '',
+        }
+      }
+
+      const topSeverity = typeof top.severity === 'string' ? top.severity.toUpperCase() : 'OPEN'
+      return {
+        top: `[${topSeverity}] ${top.summary}`,
+        more:
+          sortedSignals.length > 1
+            ? `+${sortedSignals.length - 1} more open signal${sortedSignals.length - 1 === 1 ? '' : 's'}`
+            : '',
+      }
+    })()
+
     byProfileId[profileId] = {
       prior_participation_display: priorParticipationDisplay,
+      profile_hover_top_discrepancy: discrepancyInfo.top,
+      profile_hover_more_discrepancies: discrepancyInfo.more,
       profile_hover_name: profileHoverName,
       profile_hover_parent_name: profileHoverParentName,
       profile_hover_email: profileHoverEmail,
