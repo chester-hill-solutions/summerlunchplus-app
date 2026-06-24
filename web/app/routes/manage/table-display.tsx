@@ -57,12 +57,30 @@ type WorkshopEnrollmentEnrichment = {
   profile_hover_name: string
   profile_hover_email: string
   profile_hover_parent_email: string
-  profile_hover_latest_ip: string
-  profile_hover_latest_ip_geo: string
+  profile_hover_parent_phone: string
+  profile_hover_parent_geo: string
+  profile_hover_student_submitted_address: string
+  profile_hover_parent_address: string
 }
 
 type WorkshopEnrollmentEnrichmentResponse = {
   byProfileId: Record<string, WorkshopEnrollmentEnrichment>
+}
+
+type FamilyContextEnrichmentResponse = {
+  byProfileId: Record<
+    string,
+    Pick<
+      WorkshopEnrollmentEnrichment,
+      | 'profile_hover_name'
+      | 'profile_hover_email'
+      | 'profile_hover_parent_email'
+      | 'profile_hover_parent_phone'
+      | 'profile_hover_parent_geo'
+      | 'profile_hover_student_submitted_address'
+      | 'profile_hover_parent_address'
+    >
+  >
 }
 
 type FederalDistrictCounts = {
@@ -708,7 +726,15 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
         })
 
         if (!response.ok) return
+        const familyContextResponsePromise = fetch(
+          `/manage/family-context/enrichment?${searchParams.toString()}`,
+          { signal: abortController.signal }
+        )
         const payload = (await response.json()) as WorkshopEnrollmentEnrichmentResponse
+        const familyContextResponse = await familyContextResponsePromise
+        const familyPayload = familyContextResponse.ok
+          ? ((await familyContextResponse.json()) as FamilyContextEnrichmentResponse)
+          : { byProfileId: {} }
         const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
           riding_display: '',
           geo_locations_display: 'N/A',
@@ -719,13 +745,19 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           profile_hover_name: 'N/A',
           profile_hover_email: 'N/A',
           profile_hover_parent_email: 'N/A',
-          profile_hover_latest_ip: 'N/A',
-          profile_hover_latest_ip_geo: 'N/A',
+          profile_hover_parent_phone: 'N/A',
+          profile_hover_parent_geo: 'N/A',
+          profile_hover_student_submitted_address: 'N/A',
+          profile_hover_parent_address: 'N/A',
         }
 
         const resolvedByProfileId = requestProfileIds.reduce<Record<string, WorkshopEnrollmentEnrichment>>(
           (acc, profileId) => {
-            acc[profileId] = payload?.byProfileId?.[profileId] ?? fallbackEnrichment
+            acc[profileId] = {
+              ...fallbackEnrichment,
+              ...(payload?.byProfileId?.[profileId] ?? {}),
+              ...(familyPayload?.byProfileId?.[profileId] ?? {}),
+            }
             return acc
           },
           {}
