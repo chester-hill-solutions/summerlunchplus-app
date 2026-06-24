@@ -642,6 +642,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [openFilterCacheEntry, setOpenFilterCacheEntry] = useState<FilterOptionsCacheEntry | null>(null)
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
+  const debugPerf = searchParams.get('debugPerf') === '1'
 
   useEffect(() => {
     const nextSort = searchParams.get('sort')
@@ -1129,6 +1130,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
     const abortController = new AbortController()
     void (async () => {
+      const startedAt = Date.now()
       try {
         const searchParams = new URLSearchParams()
         requestProfileIds.forEach(profileId => searchParams.append('profileId', profileId))
@@ -1187,6 +1189,14 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           ...prev,
           ...resolvedByProfileId,
         }))
+        if (debugPerf) {
+          console.info('[table-display] workshop row enrichment loaded', {
+            requestedProfiles: requestProfileIds.length,
+            workshopValues: shouldLoadWorkshopValues,
+            familyContext: shouldLoadFamilyContext,
+            ms: Date.now() - startedAt,
+          })
+        }
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
           console.error('[table display] enrichment fetch failed', error)
@@ -1343,6 +1353,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
     loadingEnrichmentProfileIdsRef.current.add(profileId)
     void (async () => {
+      const startedAt = Date.now()
       try {
         const query = new URLSearchParams()
         query.append('profileId', profileId)
@@ -1386,6 +1397,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
             profile_hover_parent_address: resolved.profile_hover_parent_address,
           },
         }))
+        if (debugPerf) {
+          console.info('[table-display] hover family-context loaded', {
+            profileId,
+            ms: Date.now() - startedAt,
+          })
+        }
       } catch (error) {
         console.error('[table display] family-context hover fetch failed', error)
       } finally {
