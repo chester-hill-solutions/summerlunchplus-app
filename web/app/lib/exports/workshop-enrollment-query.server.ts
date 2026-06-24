@@ -247,14 +247,22 @@ export async function loadWorkshopEnrollmentData(request: Request) {
         hoverCard: {
           titleField: 'profile_hover_name',
           titleFallback: 'N/A',
+          columns: {
+            leftTitle: 'Student',
+            rightTitle: 'Parent',
+            left: [
+              { label: 'Email', field: 'profile_hover_email', fallback: 'N/A' },
+              { label: 'Geo', field: 'profile_hover_student_geo', fallback: 'N/A' },
+              { label: 'Address', field: 'profile_hover_student_submitted_address', fallback: 'N/A' },
+            ],
+            right: [
+              { label: 'Email', field: 'profile_hover_parent_email', fallback: 'N/A' },
+              { label: 'Phone', field: 'profile_hover_parent_phone', fallback: 'N/A' },
+              { label: 'Geo', field: 'profile_hover_parent_geo', fallback: 'N/A' },
+              { label: 'Address', field: 'profile_hover_parent_address', fallback: 'N/A' },
+            ],
+          },
           fields: [
-            { label: 'Email', field: 'profile_hover_email', fallback: 'N/A' },
-            { label: 'Parent Email', field: 'profile_hover_parent_email', fallback: 'N/A' },
-            { label: 'Parent Phone', field: 'profile_hover_parent_phone', fallback: 'N/A' },
-            { label: 'Student Geo', field: 'profile_hover_student_geo', fallback: 'N/A' },
-            { label: 'Parent Geo', field: 'profile_hover_parent_geo', fallback: 'N/A' },
-            { label: 'Student Address', field: 'profile_hover_student_submitted_address', fallback: 'N/A' },
-            { label: 'Parent Address', field: 'profile_hover_parent_address', fallback: 'N/A' },
             { label: 'Top Discrepancy', field: 'profile_hover_top_discrepancy' },
             { label: 'More Open', field: 'profile_hover_more_discrepancies' },
           ],

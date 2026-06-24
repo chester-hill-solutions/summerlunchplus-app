@@ -45,6 +45,12 @@ type HoverCardConfig = {
   titleField?: string
   titleFallback?: string
   fields: HoverCardField[]
+  columns?: {
+    leftTitle?: string
+    rightTitle?: string
+    left: HoverCardField[]
+    right: HoverCardField[]
+  }
 }
 
 type WorkshopEnrollmentEnrichment = {
@@ -198,21 +204,49 @@ const normalizeHoverCardValue = (value: unknown) => {
 }
 
 const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardConfig) => {
-  if (!config?.fields.length) return null
+  if (!config) return null
+
+  const hasListFields = config.fields.length > 0
+  const hasColumns = Boolean(config.columns)
+  if (!hasListFields && !hasColumns) return null
 
   const titleRaw = config.titleField ? normalizeHoverCardValue(row[config.titleField]) : ''
   const title = titleRaw || config.titleFallback || ''
-  const fields = config.fields.map(field => {
+  const normalizeField = (field: HoverCardField) => {
     const rawValue = normalizeHoverCardValue(row[field.field])
     return {
       label: field.label,
       value: rawValue || field.fallback || '',
       visible: Boolean(rawValue) || Boolean(field.fallback),
     }
-  }).filter(field => field.visible)
+  }
 
-  const hasValue = Boolean(title) || fields.some(field => Boolean(field.value))
-  return hasValue ? { title, fields } : null
+  const fields = config.fields.map(normalizeField).filter(field => field.visible)
+
+  const columnLayout = config.columns
+    ? {
+        leftTitle: config.columns.leftTitle,
+        rightTitle: config.columns.rightTitle,
+        left: config.columns.left.map(normalizeField).filter(field => field.visible),
+        right: config.columns.right.map(normalizeField).filter(field => field.visible),
+      }
+    : null
+
+  const hasValue =
+    Boolean(title) ||
+    fields.some(field => Boolean(field.value)) ||
+    Boolean(
+      columnLayout &&
+        (columnLayout.left.length || columnLayout.right.length)
+    )
+
+  return hasValue
+    ? {
+        title,
+        fields,
+        columns: columnLayout,
+      }
+    : null
 }
 
 const getDirectionIndicator = (stage: 0 | 1 | 2) => {
@@ -1583,14 +1617,46 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                                 {hoverCardData.title ? (
                                   <p className="mb-1 truncate font-semibold text-foreground">{hoverCardData.title}</p>
                                 ) : null}
-                                <div className="space-y-1">
-                                  {hoverCardData.fields.map(field => (
-                                    <p key={`${column}-${field.label}`} className="break-words">
-                                      <span className="font-medium text-foreground">{field.label}: </span>
-                                      <span>{field.value || 'N/A'}</span>
-                                    </p>
-                                  ))}
-                                </div>
+                                {hoverCardData.columns ? (
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      {hoverCardData.columns.leftTitle ? (
+                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                          {hoverCardData.columns.leftTitle}
+                                        </p>
+                                      ) : null}
+                                      {hoverCardData.columns.left.map(field => (
+                                        <p key={`${column}-left-${field.label}`} className="break-words">
+                                          <span className="font-medium text-foreground">{field.label}: </span>
+                                          <span>{field.value || 'N/A'}</span>
+                                        </p>
+                                      ))}
+                                    </div>
+                                    <div className="space-y-1">
+                                      {hoverCardData.columns.rightTitle ? (
+                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                          {hoverCardData.columns.rightTitle}
+                                        </p>
+                                      ) : null}
+                                      {hoverCardData.columns.right.map(field => (
+                                        <p key={`${column}-right-${field.label}`} className="break-words">
+                                          <span className="font-medium text-foreground">{field.label}: </span>
+                                          <span>{field.value || 'N/A'}</span>
+                                        </p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : null}
+                                {hoverCardData.fields.length ? (
+                                  <div className="mt-2 space-y-1 border-t border-border/50 pt-2">
+                                    {hoverCardData.fields.map(field => (
+                                      <p key={`${column}-${field.label}`} className="break-words">
+                                        <span className="font-medium text-foreground">{field.label}: </span>
+                                        <span>{field.value || 'N/A'}</span>
+                                      </p>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
                           ) : (
