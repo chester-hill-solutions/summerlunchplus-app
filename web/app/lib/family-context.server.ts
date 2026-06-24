@@ -3,6 +3,10 @@ import { adminClient } from '@/lib/supabase/adminClient'
 
 const RELATIONSHIP_BATCH_SIZE = 100
 const IN_CLAUSE_BATCH_SIZE = 250
+const PRIOR_PARTICIPATION_QUESTION_CODES = [
+  'onboarding_prior_participation',
+  'child_prior_participation',
+] as const
 
 const ADDRESS_QUESTION_TO_FIELD = {
   address_street: 'street_address',
@@ -46,6 +50,15 @@ type FormAnswerRow = {
   value: unknown
 }
 
+type OpenDiscrepancyRow = {
+  id: string
+  family_profile_ids: string[] | null
+  severity: string
+  summary: string
+  priority_score: number | null
+  created_at: string
+}
+
 type AddressDraft = {
   submittedAt: number
   street_address?: string
@@ -55,6 +68,9 @@ type AddressDraft = {
 }
 
 export type FamilyContextEnrichment = {
+  prior_participation_display: string
+  profile_hover_top_discrepancy: string
+  profile_hover_more_discrepancies: string
   profile_hover_name: string
   profile_hover_parent_name: string
   profile_hover_email: string
@@ -69,6 +85,15 @@ export type FamilyContextEnrichment = {
 
 const normalizeText = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : null
+
+const normalizePriorParticipation = (value: unknown) => {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim().toLowerCase()
+  if (!trimmed) return null
+  if (trimmed === 'yes') return 'Yes'
+  if (trimmed === 'no') return 'No'
+  return value.trim()
+}
 
 const formatAddress = (input: {
   street_address?: string | null
@@ -191,6 +216,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
   const guardiansByChildId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
   const childrenByGuardianId = new Map<string, Array<{ profileId: string; primary: boolean }>>()
   const profileIdsByUserId = new Map<string, string[]>()
+  const discrepancyRowsByProfileId = new Map<string, OpenDiscrepancyRow[]>()
 
   const seen = new Set<string>(normalizedProfileIds)
   const queue = [...normalizedProfileIds]
@@ -260,6 +286,29 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
     if (!existing.includes(profile.id)) {
       existing.push(profile.id)
       profileIdsByUserId.set(profile.user_id, existing)
+    }
+  }
+
+  const { data: discrepancyRowsRaw, error: discrepancyRowsError } = await (adminClient.from('suspicious_signal') as any)
+    .select('id, family_profile_ids, severity, summary, priority_score, created_at')
+    .eq('status', 'open')
+    .overlaps('family_profile_ids', normalizedProfileIds)
+    .order('priority_score', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (discrepancyRowsError) {
+    console.error('[family-context] failed to load discrepancy rows', {
+      profileCount: normalizedProfileIds.length,
+      error: discrepancyRowsError.message,
+    })
+  }
+
+  for (const signal of (discrepancyRowsRaw ?? []) as OpenDiscrepancyRow[]) {
+    for (const familyProfileId of signal.family_profile_ids ?? []) {
+      if (!normalizedProfileIds.includes(familyProfileId)) continue
+      const existing = discrepancyRowsByProfileId.get(familyProfileId) ?? []
+      existing.push(signal)
+      discrepancyRowsByProfileId.set(familyProfileId, existing)
     }
   }
 
@@ -351,6 +400,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
 
   const submissionIds = Array.from(submissionsById.keys())
   const addressDraftsByProfileId = new Map<string, Map<string, AddressDraft>>()
+  const latestPriorParticipationByProfileId = new Map<string, { value: string; submittedAt: number }>()
   if (submissionIds.length) {
     const answerRows: FormAnswerRow[] = []
     const addressQuestionCodes = Object.keys(ADDRESS_QUESTION_TO_FIELD)
@@ -358,7 +408,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
       const { data, error } = await adminClient
         .from('form_answer')
         .select('submission_id, question_code, value')
-        .in('question_code', addressQuestionCodes)
+        .in('question_code', [...addressQuestionCodes, ...PRIOR_PARTICIPATION_QUESTION_CODES])
         .in('submission_id', submissionChunk)
 
       if (error) {
@@ -373,10 +423,8 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
     }
 
     for (const answer of answerRows) {
-      if (!(answer.question_code in ADDRESS_QUESTION_TO_FIELD)) continue
       const submission = submissionsById.get(answer.submission_id)
-      const value = normalizeText(answer.value)
-      if (!submission || !value) continue
+      if (!submission) continue
 
       const associatedProfileIds = new Set<string>()
       if (typeof submission.profile_id === 'string' && submission.profile_id) {
@@ -391,6 +439,25 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
 
       const submittedAt = Date.parse(submission.submitted_at ?? '')
       const submittedAtTime = Number.isNaN(submittedAt) ? 0 : submittedAt
+
+      if (PRIOR_PARTICIPATION_QUESTION_CODES.includes(answer.question_code as (typeof PRIOR_PARTICIPATION_QUESTION_CODES)[number])) {
+        const normalized = normalizePriorParticipation(answer.value)
+        if (!normalized) continue
+        for (const associatedProfileId of associatedProfileIds) {
+          const existing = latestPriorParticipationByProfileId.get(associatedProfileId)
+          if (!existing || submittedAtTime > existing.submittedAt) {
+            latestPriorParticipationByProfileId.set(associatedProfileId, {
+              value: normalized,
+              submittedAt: submittedAtTime,
+            })
+          }
+        }
+        continue
+      }
+
+      if (!(answer.question_code in ADDRESS_QUESTION_TO_FIELD)) continue
+      const value = normalizeText(answer.value)
+      if (!value) continue
       const field = ADDRESS_QUESTION_TO_FIELD[answer.question_code as keyof typeof ADDRESS_QUESTION_TO_FIELD]
       for (const associatedProfileId of associatedProfileIds) {
         upsertAddressDraft(
@@ -472,7 +539,72 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
       }) ??
       'N/A'
 
+    const candidateProfileIds: string[] = []
+    const addCandidate = (candidateId: string | null) => {
+      if (!candidateId || candidateProfileIds.includes(candidateId)) return
+      candidateProfileIds.push(candidateId)
+    }
+    addCandidate(inferredStudentProfileId)
+    addCandidate(inferredParentProfileId)
+    addCandidate(profileId)
+    if (typeof studentProfile?.user_id === 'string' && studentProfile.user_id) {
+      for (const sameUserProfileId of profileIdsByUserId.get(studentProfile.user_id) ?? []) {
+        addCandidate(sameUserProfileId)
+      }
+    }
+    if (typeof parentProfile?.user_id === 'string' && parentProfile.user_id) {
+      for (const sameUserProfileId of profileIdsByUserId.get(parentProfile.user_id) ?? []) {
+        addCandidate(sameUserProfileId)
+      }
+    }
+
+    const priorParticipationDisplay = (() => {
+      for (const candidateProfileId of candidateProfileIds) {
+        const value = latestPriorParticipationByProfileId.get(candidateProfileId)?.value
+        if (value) return value
+      }
+      return 'N/A'
+    })()
+
+    const discrepancyInfo = (() => {
+      const uniqueSignals = new Map<string, OpenDiscrepancyRow>()
+      for (const candidateProfileId of candidateProfileIds) {
+        for (const signal of discrepancyRowsByProfileId.get(candidateProfileId) ?? []) {
+          if (!uniqueSignals.has(signal.id)) {
+            uniqueSignals.set(signal.id, signal)
+          }
+        }
+      }
+
+      const sortedSignals = Array.from(uniqueSignals.values()).sort((left, right) => {
+        const leftScore = typeof left.priority_score === 'number' ? left.priority_score : 0
+        const rightScore = typeof right.priority_score === 'number' ? right.priority_score : 0
+        if (leftScore !== rightScore) return rightScore - leftScore
+        return right.created_at.localeCompare(left.created_at)
+      })
+
+      const top = sortedSignals[0] ?? null
+      if (!top) {
+        return {
+          top: '',
+          more: '',
+        }
+      }
+
+      const topSeverity = typeof top.severity === 'string' ? top.severity.toUpperCase() : 'OPEN'
+      return {
+        top: `[${topSeverity}] ${top.summary}`,
+        more:
+          sortedSignals.length > 1
+            ? `+${sortedSignals.length - 1} more open signal${sortedSignals.length - 1 === 1 ? '' : 's'}`
+            : '',
+      }
+    })()
+
     byProfileId[profileId] = {
+      prior_participation_display: priorParticipationDisplay,
+      profile_hover_top_discrepancy: discrepancyInfo.top,
+      profile_hover_more_discrepancies: discrepancyInfo.more,
       profile_hover_name: profileHoverName,
       profile_hover_parent_name: profileHoverParentName,
       profile_hover_email: profileHoverEmail,

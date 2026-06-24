@@ -35,7 +35,7 @@ export default function ManagePersonFormSubmissionsPage() {
         : submittedByFallback
           ? submittedByFallback.slice(0, 8)
           : '-',
-      form_name: formNameById[submission.form_id] ?? submission.form_id.slice(0, 8),
+      form_name: formNameById[submission.form_id] ?? 'Unknown form',
       submitted_at: formatDateTime(submission.submitted_at),
       submission_id: submission.id,
       view_answers: 'View answers',

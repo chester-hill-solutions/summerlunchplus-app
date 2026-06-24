@@ -222,7 +222,9 @@ export async function loadWorkshopEnrollmentData(request: Request) {
     }
   }
 
-  if (columns.includes('semester_range')) {
+  if (columns.includes('semester_title')) {
+    columns = [...columns.filter(column => column !== 'semester_title'), 'semester_title']
+  } else if (columns.includes('semester_range')) {
     columns = [...columns.filter(column => column !== 'semester_range'), 'semester_range']
   }
 
@@ -234,6 +236,8 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       filterable?: boolean
       numeric?: boolean
       maxChars?: number
+      minWidth?: number
+      preferredWidth?: number
       hoverCard?: unknown
     }
   >
@@ -272,7 +276,7 @@ export async function loadWorkshopEnrollmentData(request: Request) {
         },
       },
       enrolled_capacity: {
-        label: 'enrolled/capacity',
+        label: 'enrolled',
       },
       riding_display: {
         label: 'riding',
@@ -286,6 +290,14 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       },
       prior_participation_display: {
         label: 'been before?',
+        minWidth: 60,
+        preferredWidth: 60,
+      },
+      semester_title: {
+        label: 'semester',
+      },
+      semester_range: {
+        label: 'semester',
       },
     },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),

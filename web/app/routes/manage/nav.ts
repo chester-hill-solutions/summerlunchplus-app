@@ -94,6 +94,7 @@ export const manageSections: ManageNavSection[] = [
       { to: '/manage/request-metadata', label: 'Request metadata', description: 'Validate proxy headers and extracted request metadata.' },
       { to: '/manage/exports', label: 'Exports', description: 'Async export jobs and downloadable CSV files for manage lists.' },
       { to: '/manage/geoip-backfill', label: 'GeoIP backfill', description: 'Admin-triggered geolocation cache backfill for recent IP records.' },
+      { to: '/manage/riding-lookup', label: 'Riding lookup', description: 'Retry riding lookup for profiles missing federal district assignment.' },
       { to: '/manage/user-roles', label: 'User roles', description: 'The role each user currently holds.' },
       { to: '/manage/sign-up-terms-consent', label: 'Terms consent', description: 'Accepted terms snapshots captured at signup.' },
       { to: '/manage/sign-up-terms', label: 'Sign-up terms', description: 'Active terms copy shown during account creation.' },

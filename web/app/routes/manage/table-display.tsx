@@ -74,27 +74,34 @@ type WorkshopEnrollmentEnrichment = {
   profile_hover_parent_address: string
 }
 
+type WorkshopEnrollmentOnlyEnrichment = Pick<
+  WorkshopEnrollmentEnrichment,
+  'riding_display' | 'geo_locations_display' | 'giftcard_display' | 'prior_participation_display'
+>
+
 type WorkshopEnrollmentEnrichmentResponse = {
-  byProfileId: Record<string, WorkshopEnrollmentEnrichment>
+  byProfileId: Record<string, WorkshopEnrollmentOnlyEnrichment>
 }
 
+type FamilyContextEnrichment = Pick<
+  WorkshopEnrollmentEnrichment,
+  | 'prior_participation_display'
+  | 'profile_hover_top_discrepancy'
+  | 'profile_hover_more_discrepancies'
+  | 'profile_hover_name'
+  | 'profile_hover_parent_name'
+  | 'profile_hover_email'
+  | 'profile_hover_student_phone'
+  | 'profile_hover_parent_email'
+  | 'profile_hover_parent_phone'
+  | 'profile_hover_student_geo'
+  | 'profile_hover_parent_geo'
+  | 'profile_hover_student_submitted_address'
+  | 'profile_hover_parent_address'
+>
+
 type FamilyContextEnrichmentResponse = {
-  byProfileId: Record<
-    string,
-    Pick<
-      WorkshopEnrollmentEnrichment,
-      | 'profile_hover_name'
-      | 'profile_hover_parent_name'
-      | 'profile_hover_email'
-      | 'profile_hover_student_phone'
-      | 'profile_hover_parent_email'
-      | 'profile_hover_parent_phone'
-      | 'profile_hover_student_geo'
-      | 'profile_hover_parent_geo'
-      | 'profile_hover_student_submitted_address'
-      | 'profile_hover_parent_address'
-    >
-  >
+  byProfileId: Record<string, FamilyContextEnrichment>
 }
 
 type FederalDistrictCounts = {
@@ -121,6 +128,8 @@ type LoaderData = {
     filterable?: boolean
     numeric?: boolean
     maxChars?: number
+    minWidth?: number
+    preferredWidth?: number
     hoverCard?: HoverCardConfig
   }>
   canEditStatus?: boolean
@@ -137,13 +146,15 @@ const FILTER_POPOVER_ESTIMATED_HEIGHT = 340
 const FILTER_LOAD_CHUNK_SIZE = 300
 const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
-const FILTER_SEARCH_DEBOUNCE_MS = 150
 const FILTER_OPTION_MAX_VISIBLE_LIST = 500
 const FILTER_EMPTY_LABEL = '(empty)'
+const ENABLE_PERSISTED_COLUMN_WIDTHS = false
 const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
   'riding_display',
   'geo_locations_display',
   'giftcard_display',
+])
+const FAMILY_CONTEXT_COLUMNS = new Set([
   'prior_participation_display',
   'profile_hover_top_discrepancy',
   'profile_hover_more_discrepancies',
@@ -405,6 +416,7 @@ const personLinkForCell = (
 
 type TableDisplayProps = {
   headerActions?: ReactNode
+  paginationActions?: ReactNode
   data?: LoaderData
 }
 
@@ -417,6 +429,7 @@ type ResizeState = {
 const columnWidthStorageKey = (tableName: string) => `manage-table-column-widths:${tableName || 'unknown'}`
 
 const clampColumnWidth = (value: number) => Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(value)))
+const clampColumnWidthWithMin = (value: number, minWidth: number) => Math.max(minWidth, Math.min(MAX_COLUMN_WIDTH, Math.round(value)))
 
 const estimateHeaderMinWidth = (label: string, numeric: boolean) => {
   const headerEstimate = label.length * ESTIMATED_CHAR_WIDTH_PX + CELL_HORIZONTAL_PADDING_PX + HEADER_CONTROL_ALLOWANCE_PX
@@ -525,7 +538,13 @@ const buildAutoColumnWidths = ({
   const minWidths = columns.reduce<Record<string, number>>((acc, column) => {
     const label = (columnMeta?.[column]?.label ?? column).replace(/_/g, ' ')
     const numeric = Boolean(columnMeta?.[column]?.numeric)
-    acc[column] = estimateHeaderMinWidth(label, numeric)
+    const headerMinWidth = estimateHeaderMinWidth(label, numeric)
+    const preferredMinWidth = columnMeta?.[column]?.minWidth
+    if (typeof preferredMinWidth === 'number' && Number.isFinite(preferredMinWidth)) {
+      acc[column] = Math.max(headerMinWidth, Math.round(preferredMinWidth))
+      return acc
+    }
+    acc[column] = headerMinWidth
     return acc
   }, {})
 
@@ -539,7 +558,12 @@ const buildAutoColumnWidths = ({
       tableName,
       numeric: Boolean(columnMeta?.[column]?.numeric),
     })
-    const cappedWidth = Math.min(clampColumnWidth(estimated), Math.max(perColumnViewportCap, minWidth))
+    const preferredWidth = columnMeta?.[column]?.preferredWidth
+    const targetWidth =
+      typeof preferredWidth === 'number' && Number.isFinite(preferredWidth)
+        ? Math.round(preferredWidth)
+        : estimated
+    const cappedWidth = Math.min(clampColumnWidthWithMin(targetWidth, minWidth), Math.max(perColumnViewportCap, minWidth))
     acc[column] = Math.max(minWidth, cappedWidth)
     return acc
   }, {})
@@ -550,7 +574,7 @@ const buildAutoColumnWidths = ({
   }
 }
 
-export default function TableDisplay({ headerActions, data }: TableDisplayProps = {}) {
+export default function TableDisplay({ headerActions, paginationActions, data }: TableDisplayProps = {}) {
   const routeData = useLoaderData() as LoaderData | undefined
   const source = data ?? routeData
   const {
@@ -576,7 +600,6 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   const [pageSize, setPageSize] = useState<number>(50)
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null)
   const [filterSearch, setFilterSearch] = useState<Record<string, string>>({})
-  const [debouncedFilterSearch, setDebouncedFilterSearch] = useState<Record<string, string>>({})
   const [filterPopoverPosition, setFilterPopoverPosition] = useState<{ top: number; left: number } | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [createValues, setCreateValues] = useState<Record<string, string>>({})
@@ -632,15 +655,6 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   }, [searchParams, columns])
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setDebouncedFilterSearch(filterSearch)
-    }, FILTER_SEARCH_DEBOUNCE_MS)
-    return () => {
-      window.clearTimeout(timeout)
-    }
-  }, [filterSearch])
-
-  useEffect(() => {
     return () => {
       filterActiveRequestRef.current.clear()
       filterCacheRef.current.clear()
@@ -666,7 +680,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
       viewportWidth,
     })
 
-    if (typeof window !== 'undefined') {
+    if (ENABLE_PERSISTED_COLUMN_WIDTHS && typeof window !== 'undefined') {
       try {
         const parsed = JSON.parse(window.localStorage.getItem(columnWidthStorageKey(tableName)) ?? '{}')
         if (parsed && typeof parsed === 'object') {
@@ -674,7 +688,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
             const value = (parsed as Record<string, unknown>)[column]
             if (typeof value === 'number' && Number.isFinite(value)) {
               const minWidth = minWidths[column] ?? MIN_COLUMN_WIDTH
-              nextWidths[column] = Math.max(minWidth, clampColumnWidth(value))
+              nextWidths[column] = Math.max(minWidth, clampColumnWidthWithMin(value, minWidth))
             }
           }
         }
@@ -688,7 +702,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   }, [columns, columnMeta, rows, tableName])
 
   useEffect(() => {
-    if (!tableName || !Object.keys(columnWidths).length || typeof window === 'undefined') return
+    if (!ENABLE_PERSISTED_COLUMN_WIDTHS || !tableName || !Object.keys(columnWidths).length || typeof window === 'undefined') return
     window.localStorage.setItem(columnWidthStorageKey(tableName), JSON.stringify(columnWidths))
   }, [columnWidths, tableName])
 
@@ -698,7 +712,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     const onMouseMove = (event: MouseEvent) => {
       const deltaX = event.clientX - resizeState.startX
       const minWidth = columnMinWidths[resizeState.column] ?? MIN_COLUMN_WIDTH
-      const nextWidth = Math.max(minWidth, clampColumnWidth(resizeState.startWidth + deltaX))
+      const nextWidth = Math.max(minWidth, clampColumnWidthWithMin(resizeState.startWidth + deltaX, minWidth))
       setColumnWidths(prev => ({ ...prev, [resizeState.column]: nextWidth }))
     }
 
@@ -884,7 +898,10 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
       if (activeRequestId !== requestId) return
 
       let mergedEnrichmentByProfileId = enrichmentByProfileId
-      if (isWorkshopEnrollmentTable && WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn)) {
+      if (
+        isWorkshopEnrollmentTable &&
+        (WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn) || FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))
+      ) {
         const allProfileIds = Array.from(
           new Set(
             rows
@@ -900,20 +917,27 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
             const query = new URLSearchParams()
             requestProfileIds.forEach(profileId => query.append('profileId', profileId))
 
-            const [workshopResponse, familyContextResponse] = await Promise.all([
-              fetch(`/manage/workshop-enrollment/enrichment?${query.toString()}`),
-              fetch(`/manage/family-context/enrichment?${query.toString()}`),
+            const [workshopPayload, familyPayload] = await Promise.all([
+              WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn)
+                ? fetch(`/manage/workshop-enrollment/enrichment?${query.toString()}`)
+                    .then(async response =>
+                      response.ok
+                        ? ((await response.json()) as WorkshopEnrollmentEnrichmentResponse)
+                        : ({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse)
+                    )
+                : Promise.resolve({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse),
+              FAMILY_CONTEXT_COLUMNS.has(openFilterColumn)
+                ? fetch(`/manage/family-context/enrichment?${query.toString()}`)
+                    .then(async response =>
+                      response.ok
+                        ? ((await response.json()) as FamilyContextEnrichmentResponse)
+                        : ({ byProfileId: {} } as FamilyContextEnrichmentResponse)
+                    )
+                : Promise.resolve({ byProfileId: {} } as FamilyContextEnrichmentResponse),
             ])
 
-            const workshopPayload = workshopResponse.ok
-              ? ((await workshopResponse.json()) as WorkshopEnrollmentEnrichmentResponse)
-              : { byProfileId: {} }
-            const familyPayload = familyContextResponse.ok
-              ? ((await familyContextResponse.json()) as FamilyContextEnrichmentResponse)
-              : { byProfileId: {} }
-
             const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
-              riding_display: '',
+              riding_display: 'Not looked up',
               geo_locations_display: 'N/A',
               giftcard_display: 'N/A',
               prior_participation_display: 'N/A',
@@ -1037,6 +1061,12 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   useEffect(() => {
     if (!isWorkshopEnrollmentTable) return
 
+    const shouldLoadWorkshopValues = columns.some(column => WORKSHOP_ENRICHMENT_COLUMNS.has(column))
+    const shouldLoadFamilyContext =
+      columns.includes('profile_display') || columns.some(column => FAMILY_CONTEXT_COLUMNS.has(column))
+
+    if (!shouldLoadWorkshopValues && !shouldLoadFamilyContext) return
+
     const missingProfileIds = Array.from(
       new Set(
         paginatedRows
@@ -1059,22 +1089,28 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
       try {
         const searchParams = new URLSearchParams()
         requestProfileIds.forEach(profileId => searchParams.append('profileId', profileId))
-        const response = await fetch(`/manage/workshop-enrollment/enrichment?${searchParams.toString()}`, {
-          signal: abortController.signal,
-        })
-
-        if (!response.ok) return
-        const familyContextResponsePromise = fetch(
-          `/manage/family-context/enrichment?${searchParams.toString()}`,
-          { signal: abortController.signal }
-        )
-        const payload = (await response.json()) as WorkshopEnrollmentEnrichmentResponse
-        const familyContextResponse = await familyContextResponsePromise
-        const familyPayload = familyContextResponse.ok
-          ? ((await familyContextResponse.json()) as FamilyContextEnrichmentResponse)
-          : { byProfileId: {} }
+        const [payload, familyPayload] = await Promise.all([
+          shouldLoadWorkshopValues
+            ? fetch(`/manage/workshop-enrollment/enrichment?${searchParams.toString()}`, {
+                signal: abortController.signal,
+              }).then(async response =>
+                response.ok
+                  ? ((await response.json()) as WorkshopEnrollmentEnrichmentResponse)
+                  : ({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse)
+              )
+            : Promise.resolve({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse),
+          shouldLoadFamilyContext
+            ? fetch(`/manage/family-context/enrichment?${searchParams.toString()}`, {
+                signal: abortController.signal,
+              }).then(async response =>
+                response.ok
+                  ? ((await response.json()) as FamilyContextEnrichmentResponse)
+                  : ({ byProfileId: {} } as FamilyContextEnrichmentResponse)
+              )
+            : Promise.resolve({ byProfileId: {} } as FamilyContextEnrichmentResponse),
+        ])
         const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
-          riding_display: '',
+          riding_display: 'Not looked up',
           geo_locations_display: 'N/A',
           giftcard_display: 'N/A',
           prior_participation_display: 'N/A',
@@ -1120,7 +1156,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     return () => {
       abortController.abort()
     }
-  }, [enrichmentByProfileId, isWorkshopEnrollmentTable, paginatedRows])
+  }, [columns, enrichmentByProfileId, isWorkshopEnrollmentTable, paginatedRows])
 
   useEffect(() => {
     if (!isFederalDistrictTable) return
@@ -1539,7 +1575,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
 
   const openFilterOptions = openFilterCacheEntry?.allOptions ?? []
   const openFilterSearchInput = openFilterColumn ? filterSearch[openFilterColumn] ?? '' : ''
-  const openFilterSearch = openFilterColumn ? debouncedFilterSearch[openFilterColumn] ?? '' : ''
+  const openFilterSearch = openFilterSearchInput
   const visibleFilterOptions = openFilterOptions.filter(option =>
     displayFilterOption(option).toLowerCase().includes(openFilterSearch.toLowerCase())
   )
@@ -1630,6 +1666,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           Page {effectivePage} of {totalPages}
         </p>
         <div className="flex items-center gap-2 text-xs">
+          {paginationActions ? <div className="mr-1">{paginationActions}</div> : null}
           <label className="text-muted-foreground" htmlFor="page-size">
             Rows per page
           </label>

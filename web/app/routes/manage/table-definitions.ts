@@ -159,7 +159,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     label: 'Workshop Enrollments',
     table: 'workshop_enrollment',
     select: 'id, workshop_id, semester_id, profile_id, decided_by, status, requested_at',
-    columns: ['semester_range', 'workshop_description', 'profile_display', 'status', 'requested_at', 'decided_by_email'],
+    columns: ['semester_title', 'workshop_description', 'profile_display', 'status', 'requested_at', 'decided_by_email'],
     order: 'requested_at',
     lookupMappings: [
       {
@@ -172,9 +172,9 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
       {
         keyColumn: 'semester_id',
         table: 'semester',
-        resultColumn: 'semester_range',
-        select: 'id, name, starts_at, ends_at',
-        format: 'semester_range',
+        resultColumn: 'semester_title',
+        select: 'id, name, description',
+        format: 'semester_title',
       },
       {
         keyColumn: 'workshop_id',
