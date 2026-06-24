@@ -301,7 +301,10 @@ const foreignKeyOptions = async (
 }
 
 export function createTableLoader(tableName: string) {
-  return async function loader({ request }: LoaderFunctionArgs) {
+  return async function loader(
+    { request }: LoaderFunctionArgs,
+    options?: { includeForeignKeyOptions?: boolean }
+  ) {
     const definition = TABLE_DEFINITIONS[tableName]
     if (!definition) {
       throw new Response('Table not found', { status: 404 })
@@ -429,7 +432,8 @@ export function createTableLoader(tableName: string) {
     }
 
     const editorConfig = definition.editor
-    const fkOptions = editorConfig ? await foreignKeyOptions(supabase, tableName) : {}
+    const includeForeignKeyOptions = options?.includeForeignKeyOptions ?? true
+    const fkOptions = editorConfig && includeForeignKeyOptions ? await foreignKeyOptions(supabase, tableName) : {}
 
     return {
       columns: definition.columns,

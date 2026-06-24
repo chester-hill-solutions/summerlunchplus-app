@@ -86,19 +86,19 @@ const normalizeText = (value: unknown) =>
 
 const toRidingStatusLabel = (status: string | null, error: string | null) => {
   if (status === 'matched') {
-    return 'Lookup matched (district missing)'
+    return '0. Lookup matched (district missing)'
   }
   if (status === 'not_found') {
     if (error === 'district_not_seeded') {
-      return 'District not seeded'
+      return '0. District not seeded'
     }
-    return 'Postcode not found'
+    return '0. Postcode not found'
   }
   if (status === 'error') {
-    return `Lookup error${error ? ` (${error})` : ''}`
+    return `0. Lookup error${error ? ` (${error})` : ''}`
   }
   if (status) {
-    return `Lookup ${status}`
+    return `0. Lookup ${status}`
   }
   return null
 }
@@ -577,7 +577,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       ? toRidingStatusLabel(statusProfile.riding_lookup_status, statusProfile.riding_lookup_error)
       : null
 
-    const ridingDisplay = explicitRiding ?? ridingStatusLabel ?? 'Not looked up'
+    const ridingDisplay = explicitRiding ?? ridingStatusLabel ?? '0. Not looked up'
 
     const candidateProfileIds: string[] = []
     const addCandidate = (candidateId: string | null) => {

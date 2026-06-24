@@ -1,5 +1,8 @@
-import { useOutletContext } from 'react-router'
+import { useEffect, useState } from 'react'
+import { useFetcher, useLocation, useOutletContext } from 'react-router'
 
+import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import type { PersonLoaderData } from './person.shared'
 import { formatDate, formatDateTime } from './person.shared'
 
@@ -13,19 +16,102 @@ const geoStatusLabel: Record<PersonLoaderData['ipEvidence'][number]['geo_status'
 }
 
 export default function ManagePersonOverviewPage() {
-  const { profile, ipEvidence } = useOutletContext<PersonLoaderData>()
+  const { profile, ipEvidence, familyProfiles, primaryChildByGuardian, federalDistrictOptions } = useOutletContext<PersonLoaderData>()
+  const location = useLocation()
+  const ridingFetcher = useFetcher<{ error?: string; success?: boolean }>()
+  const [selectedRiding, setSelectedRiding] = useState(profile.federal_electoral_district_name ?? '')
+
+  useEffect(() => {
+    setSelectedRiding(profile.federal_electoral_district_name ?? '')
+  }, [profile.federal_electoral_district_name, profile.id])
+
+  const familyProfileById = new Map(familyProfiles.map(item => [item.id, item]))
+
+  const relatedProfile = (() => {
+    if (profile.role === 'guardian') {
+      const childId = primaryChildByGuardian[profile.id]
+      return childId ? familyProfileById.get(childId) ?? null : null
+    }
+
+    if (profile.role === 'student') {
+      const primaryGuardian = familyProfiles.find(
+        member => member.role === 'guardian' && primaryChildByGuardian[member.id] === profile.id
+      )
+      return primaryGuardian ?? familyProfiles.find(member => member.role === 'guardian') ?? null
+    }
+
+    return familyProfiles.find(member => member.id !== profile.id) ?? null
+  })()
+
+  const profileAddress = [profile.street_address, profile.city, profile.province, profile.postcode]
+    .filter(Boolean)
+    .join(', ')
+  const relatedAddress = relatedProfile
+    ? [relatedProfile.street_address, relatedProfile.city, relatedProfile.province, relatedProfile.postcode]
+        .filter(Boolean)
+        .join(', ')
+    : ''
 
   return (
     <section className="rounded-lg border bg-card p-4">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Personal information</h2>
-      <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
-        <p><span className="font-medium">Profile ID:</span> {profile.id}</p>
-        <p><span className="font-medium">User ID:</span> {profile.user_id ?? '-'}</p>
-        <p><span className="font-medium">Role:</span> {profile.role ?? '-'}</p>
-        <p><span className="font-medium">Email:</span> {profile.email ?? '-'}</p>
-        <p><span className="font-medium">Phone:</span> {profile.phone ?? '-'}</p>
-        <p><span className="font-medium">DOB:</span> {formatDate(profile.date_of_birth)}</p>
-        <p className="md:col-span-2"><span className="font-medium">Address:</span> {[profile.street_address, profile.city, profile.province, profile.postcode].filter(Boolean).join(', ') || '-'}</p>
+      <div className="mt-3 grid gap-4 md:grid-cols-2">
+        <div className="rounded-md border bg-muted/20 p-3 text-sm">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Selected profile</h3>
+          <div className="grid gap-2">
+            <p><span className="font-medium">Profile ID:</span> {profile.id}</p>
+            <p><span className="font-medium">User ID:</span> {profile.user_id ?? '-'}</p>
+            <p><span className="font-medium">Role:</span> {profile.role ?? '-'}</p>
+            <p><span className="font-medium">Email:</span> {profile.email ?? '-'}</p>
+            <p><span className="font-medium">Phone:</span> {profile.phone ?? '-'}</p>
+            <p><span className="font-medium">DOB:</span> {formatDate(profile.date_of_birth)}</p>
+            <p><span className="font-medium">Address:</span> {profileAddress || '-'}</p>
+            <div className="space-y-2 rounded border bg-background p-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Riding</p>
+              <p>
+                <span className="font-medium">Lookup status:</span> {profile.riding_lookup_status ?? 'not_attempted'}
+                {profile.riding_lookup_error ? ` (${profile.riding_lookup_error})` : ''}
+              </p>
+              <ridingFetcher.Form method="post" action={`/manage/person${location.search}`} className="space-y-2">
+                <input type="hidden" name="intent" value="update-riding" />
+                <input type="hidden" name="profile_id" value={profile.id} />
+                <input type="hidden" name="riding_name" value={selectedRiding} />
+                <Combobox
+                  value={selectedRiding}
+                  onChange={setSelectedRiding}
+                  options={[{ value: '', label: 'Unassigned' }, ...federalDistrictOptions]}
+                  placeholder="Select riding"
+                  disabled={ridingFetcher.state !== 'idle'}
+                />
+                <Button type="submit" size="sm" variant="outline" disabled={ridingFetcher.state !== 'idle'}>
+                  {ridingFetcher.state !== 'idle' ? 'Saving...' : 'Save riding'}
+                </Button>
+                {ridingFetcher.data?.error ? <p className="text-xs text-destructive">{ridingFetcher.data.error}</p> : null}
+                {ridingFetcher.data?.success ? <p className="text-xs text-emerald-600">Riding updated.</p> : null}
+              </ridingFetcher.Form>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-md border bg-muted/20 p-3 text-sm">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {profile.role === 'guardian' ? 'Primary child profile' : 'Related guardian profile'}
+          </h3>
+          {relatedProfile ? (
+            <div className="grid gap-2">
+              <p><span className="font-medium">Profile ID:</span> {relatedProfile.id}</p>
+              <p><span className="font-medium">User ID:</span> {relatedProfile.user_id ?? '-'}</p>
+              <p><span className="font-medium">Role:</span> {relatedProfile.role ?? '-'}</p>
+              <p><span className="font-medium">Email:</span> {relatedProfile.email ?? '-'}</p>
+              <p><span className="font-medium">Phone:</span> {relatedProfile.phone ?? '-'}</p>
+              <p><span className="font-medium">DOB:</span> {formatDate(relatedProfile.date_of_birth)}</p>
+              <p><span className="font-medium">Address:</span> {relatedAddress || '-'}</p>
+              <p><span className="font-medium">Riding:</span> {relatedProfile.federal_electoral_district_name ?? '-'}</p>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">No related child/guardian profile found.</p>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 border-t pt-3">

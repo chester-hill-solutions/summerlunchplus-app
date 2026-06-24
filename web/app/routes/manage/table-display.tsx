@@ -149,13 +149,15 @@ const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
 const FILTER_OPTION_MAX_VISIBLE_LIST = 500
 const FILTER_EMPTY_LABEL = '(empty)'
 const ENABLE_PERSISTED_COLUMN_WIDTHS = false
+const WORKSHOP_ENRICHMENT_BATCH_SIZE = 40
+const WORKSHOP_ENRICHMENT_FILTER_BOOTSTRAP_BATCH_SIZE = 200
 const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
   'riding_display',
   'geo_locations_display',
   'giftcard_display',
+  'prior_participation_display',
 ])
 const FAMILY_CONTEXT_COLUMNS = new Set([
-  'prior_participation_display',
   'profile_hover_top_discrepancy',
   'profile_hover_more_discrepancies',
   'profile_hover_name',
@@ -169,6 +171,22 @@ const FAMILY_CONTEXT_COLUMNS = new Set([
   'profile_hover_student_submitted_address',
   'profile_hover_parent_address',
 ])
+const WORKSHOP_FILTER_ENRICHMENT_COLUMNS = new Set([
+  ...Array.from(WORKSHOP_ENRICHMENT_COLUMNS),
+  ...Array.from(FAMILY_CONTEXT_COLUMNS),
+])
+
+const hasHydratedFamilyContext = (enrichment?: WorkshopEnrollmentEnrichment) =>
+  Boolean(
+    enrichment?.profile_hover_name ||
+      enrichment?.profile_hover_parent_name ||
+      enrichment?.profile_hover_email ||
+      enrichment?.profile_hover_parent_email ||
+      enrichment?.profile_hover_student_geo ||
+      enrichment?.profile_hover_parent_geo ||
+      enrichment?.profile_hover_top_discrepancy ||
+      enrichment?.profile_hover_more_discrepancies
+  )
 const DEFAULT_COLUMN_WIDTH = 180
 const DEFAULT_NUMERIC_COLUMN_WIDTH = 120
 const ACTIONS_COLUMN_WIDTH = 120
@@ -262,7 +280,9 @@ const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardCo
   if (!hasListFields && !hasColumns) return null
 
   const titleRaw = config.titleField ? normalizeHoverCardValue(row[config.titleField]) : ''
-  const title = titleRaw || config.titleFallback || ''
+  const profileDisplayFallback =
+    config.titleField === 'profile_hover_name' ? normalizeHoverCardValue(row.profile_display) : ''
+  const title = titleRaw || profileDisplayFallback || config.titleFallback || ''
   const normalizeField = (field: HoverCardField) => {
     const rawValue = normalizeHoverCardValue(row[field.field])
     return {
@@ -622,6 +642,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [openFilterCacheEntry, setOpenFilterCacheEntry] = useState<FilterOptionsCacheEntry | null>(null)
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
+  const debugPerf = searchParams.get('debugPerf') === '1'
 
   useEffect(() => {
     const nextSort = searchParams.get('sort')
@@ -1046,6 +1067,22 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const totalRows = derivedRows.length
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
   const effectivePage = Math.min(page, totalPages)
+  const hasActiveEnrichmentBackedFilters = useMemo(
+    () => Object.keys(filters).some(column => WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column)),
+    [filters]
+  )
+  const hasActiveFamilyContextFilters = useMemo(
+    () => Object.keys(filters).some(column => FAMILY_CONTEXT_COLUMNS.has(column)),
+    [filters]
+  )
+  const baseFiltersForEnrichmentFetch = useMemo(() => {
+    const next: Record<string, string[]> = {}
+    for (const [column, values] of Object.entries(filters)) {
+      if (WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column)) continue
+      next[column] = values
+    }
+    return next
+  }, [filters])
 
   useEffect(() => {
     if (effectivePage === page) return
@@ -1063,13 +1100,17 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
     const shouldLoadWorkshopValues = columns.some(column => WORKSHOP_ENRICHMENT_COLUMNS.has(column))
     const shouldLoadFamilyContext =
-      columns.includes('profile_display') || columns.some(column => FAMILY_CONTEXT_COLUMNS.has(column))
+      hasActiveFamilyContextFilters || Boolean(openFilterColumn && FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))
 
     if (!shouldLoadWorkshopValues && !shouldLoadFamilyContext) return
 
+    const enrichmentSeedRows = hasActiveEnrichmentBackedFilters
+      ? rows.filter(row => rowMatchesFilters(row, baseFiltersForEnrichmentFetch))
+      : paginatedRows
+
     const missingProfileIds = Array.from(
       new Set(
-        paginatedRows
+        enrichmentSeedRows
           .map(row => (typeof row.profile_id === 'string' ? row.profile_id : ''))
           .filter(profileId =>
             Boolean(profileId) &&
@@ -1081,11 +1122,15 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
     if (!missingProfileIds.length) return
 
-    const requestProfileIds = missingProfileIds.slice(0, 40)
+    const requestBatchSize = hasActiveEnrichmentBackedFilters
+      ? WORKSHOP_ENRICHMENT_FILTER_BOOTSTRAP_BATCH_SIZE
+      : WORKSHOP_ENRICHMENT_BATCH_SIZE
+    const requestProfileIds = missingProfileIds.slice(0, requestBatchSize)
     requestProfileIds.forEach(profileId => loadingEnrichmentProfileIdsRef.current.add(profileId))
 
     const abortController = new AbortController()
     void (async () => {
+      const startedAt = Date.now()
       try {
         const searchParams = new URLSearchParams()
         requestProfileIds.forEach(profileId => searchParams.append('profileId', profileId))
@@ -1144,6 +1189,14 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           ...prev,
           ...resolvedByProfileId,
         }))
+        if (debugPerf) {
+          console.info('[table-display] workshop row enrichment loaded', {
+            requestedProfiles: requestProfileIds.length,
+            workshopValues: shouldLoadWorkshopValues,
+            familyContext: shouldLoadFamilyContext,
+            ms: Date.now() - startedAt,
+          })
+        }
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
           console.error('[table display] enrichment fetch failed', error)
@@ -1156,7 +1209,17 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     return () => {
       abortController.abort()
     }
-  }, [columns, enrichmentByProfileId, isWorkshopEnrollmentTable, paginatedRows])
+  }, [
+    baseFiltersForEnrichmentFetch,
+    columns,
+    enrichmentByProfileId,
+    hasActiveFamilyContextFilters,
+    hasActiveEnrichmentBackedFilters,
+    isWorkshopEnrollmentTable,
+    openFilterColumn,
+    paginatedRows,
+    rows,
+  ])
 
   useEffect(() => {
     if (!isFederalDistrictTable) return
@@ -1281,6 +1344,71 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       setPageSize(nextPageSize)
     }
     syncSearch(filters, sortColumn, sortStage, boundedPage, nextPageSize)
+  }
+
+  const requestFamilyContextForProfile = (profileId: string) => {
+    if (!isWorkshopEnrollmentTable || !profileId) return
+    const existing = enrichmentByProfileId[profileId]
+    if (hasHydratedFamilyContext(existing) || loadingEnrichmentProfileIdsRef.current.has(profileId)) return
+
+    loadingEnrichmentProfileIdsRef.current.add(profileId)
+    void (async () => {
+      const startedAt = Date.now()
+      try {
+        const query = new URLSearchParams()
+        query.append('profileId', profileId)
+        const response = await fetch(`/manage/family-context/enrichment?${query.toString()}`)
+        if (!response.ok) return
+        const payload = (await response.json()) as FamilyContextEnrichmentResponse
+        const resolved = payload?.byProfileId?.[profileId] ?? {
+          prior_participation_display: 'N/A',
+          profile_hover_top_discrepancy: '',
+          profile_hover_more_discrepancies: '',
+          profile_hover_name: 'N/A',
+          profile_hover_parent_name: 'N/A',
+          profile_hover_email: 'N/A',
+          profile_hover_student_phone: '',
+          profile_hover_parent_email: 'N/A',
+          profile_hover_parent_phone: 'N/A',
+          profile_hover_student_geo: 'N/A',
+          profile_hover_parent_geo: 'N/A',
+          profile_hover_student_submitted_address: 'N/A',
+          profile_hover_parent_address: 'N/A',
+        }
+
+        setEnrichmentByProfileId(prev => ({
+          ...prev,
+          [profileId]: {
+            riding_display: prev[profileId]?.riding_display ?? '',
+            geo_locations_display: prev[profileId]?.geo_locations_display ?? 'N/A',
+            giftcard_display: prev[profileId]?.giftcard_display ?? 'N/A',
+            prior_participation_display: prev[profileId]?.prior_participation_display ?? resolved.prior_participation_display,
+            profile_hover_top_discrepancy: resolved.profile_hover_top_discrepancy,
+            profile_hover_more_discrepancies: resolved.profile_hover_more_discrepancies,
+            profile_hover_name: resolved.profile_hover_name,
+            profile_hover_parent_name: resolved.profile_hover_parent_name,
+            profile_hover_email: resolved.profile_hover_email,
+            profile_hover_student_phone: resolved.profile_hover_student_phone,
+            profile_hover_parent_email: resolved.profile_hover_parent_email,
+            profile_hover_parent_phone: resolved.profile_hover_parent_phone,
+            profile_hover_student_geo: resolved.profile_hover_student_geo,
+            profile_hover_parent_geo: resolved.profile_hover_parent_geo,
+            profile_hover_student_submitted_address: resolved.profile_hover_student_submitted_address,
+            profile_hover_parent_address: resolved.profile_hover_parent_address,
+          },
+        }))
+        if (debugPerf) {
+          console.info('[table-display] hover family-context loaded', {
+            profileId,
+            ms: Date.now() - startedAt,
+          })
+        }
+      } catch (error) {
+        console.error('[table display] family-context hover fetch failed', error)
+      } finally {
+        loadingEnrichmentProfileIdsRef.current.delete(profileId)
+      }
+    })()
   }
 
   const effectiveSelectedValuesForColumn = (column: string, allOptionsForColumn: string[]) => {
@@ -1592,6 +1720,19 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const openFilterSelectedValues = openFilterColumn
     ? effectiveSelectedValuesForColumn(openFilterColumn, openFilterOptions)
     : []
+  const isOpenFilterApplied = openFilterColumn ? hasOwn(filters, openFilterColumn) : false
+
+  const clearOpenFilter = () => {
+    if (!openFilterColumn) return
+    setFilters(prev => {
+      if (!hasOwn(prev, openFilterColumn)) return prev
+      const next = { ...prev }
+      delete next[openFilterColumn]
+      setPage(1)
+      syncSearch(next, sortColumn, sortStage, 1, pageSize)
+      return next
+    })
+  }
 
   const selectVisibleFilterOptions = () => {
     if (!openFilterColumn) return
@@ -1603,6 +1744,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
   const clearVisibleFilterOptions = () => {
     if (!openFilterColumn) return
+    if (!canRenderFilterOptionsList) {
+      clearOpenFilter()
+      return
+    }
     const allOptionsForColumn = openFilterOptions
     const current = effectiveSelectedValuesForColumn(openFilterColumn, allOptionsForColumn)
     const visibleSet = new Set(visibleFilterOptions)
@@ -1973,6 +2118,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                             if (!filterable) return
                             appendFilter(column, cellValue)
                           }}
+                          onMouseEnter={() => {
+                            if (!isWorkshopEnrollment || column !== 'profile_display') return
+                            const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+                            if (!profileId) return
+                            requestFamilyContextForProfile(profileId)
+                          }}
                         >
                           {hoverCardData ? (
                             <div className="group/hovercard relative inline-block max-w-full">
@@ -2151,8 +2302,17 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                 </button>
                 <button
                   type="button"
+                  onClick={clearOpenFilter}
+                  disabled={!isOpenFilterApplied}
+                  aria-label="Clear current filter"
+                  className="rounded border border-input px-2 py-1 hover:bg-muted"
+                >
+                  Clear filter
+                </button>
+                <button
+                  type="button"
                   onClick={clearVisibleFilterOptions}
-                  disabled={!canRenderFilterOptionsList}
+                  disabled={!canRenderFilterOptionsList && !isOpenFilterApplied}
                   aria-label="Clear visible options"
                   className="rounded border border-input px-2 py-1 hover:bg-muted"
                 >

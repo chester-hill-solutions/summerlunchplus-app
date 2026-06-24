@@ -9,6 +9,7 @@ import type { Route } from './+types/riding-lookup'
 
 type MissingRidingProfile = {
   id: string
+  user_id: string | null
   role: string | null
   firstname: string | null
   surname: string | null
@@ -17,6 +18,15 @@ type MissingRidingProfile = {
   riding_lookup_status: string | null
   riding_lookup_error: string | null
   riding_lookup_last_attempt_at: string | null
+}
+
+type RetryDetail = {
+  profileId: string
+  profileLabel: string
+  postcode: string | null
+  outcome: 'matched' | 'not_found' | 'district_not_seeded' | 'failed' | 'skipped_missing_postcode'
+  reason: string | null
+  attempts: number
 }
 
 type ActionData = {
@@ -28,10 +38,13 @@ type ActionData = {
     failed: number
     districtNotSeeded: number
     skippedMissingPostcode: number
+    details: RetryDetail[]
   }
 }
 
 const normalizePostcode = (value: string) => value.replace(/\s+/g, '').toUpperCase()
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+const RETRYABLE_REASONS = new Set(['rate_limited', 'timeout', 'upstream', 'network'])
 
 const profileLabel = (profile: MissingRidingProfile) => {
   const name = [profile.firstname?.trim(), profile.surname?.trim()].filter(Boolean).join(' ')
@@ -44,7 +57,7 @@ const resolveCandidates = async (limit: number) => {
   const { data, error } = await adminClient
     .from('profile')
     .select(
-      'id, role, firstname, surname, email, postcode, federal_electoral_district_name, riding_lookup_status, riding_lookup_error, riding_lookup_last_attempt_at'
+      'id, user_id, role, firstname, surname, email, postcode, federal_electoral_district_name, riding_lookup_status, riding_lookup_error, riding_lookup_last_attempt_at'
     )
     .is('federal_electoral_district_name', null)
     .order('riding_lookup_last_attempt_at', { ascending: true, nullsFirst: true })
@@ -60,17 +73,46 @@ const resolveCandidates = async (limit: number) => {
 }
 
 const refreshProfileRiding = async (profile: MissingRidingProfile) => {
-  const attemptedAt = new Date().toISOString()
+  if (profile.user_id) {
+    const { error: roleSyncError } = await adminClient
+      .from('user_roles')
+      .upsert(
+        {
+          user_id: profile.user_id,
+          role: profile.role ?? 'unassigned',
+        } as never,
+        { onConflict: 'user_id', ignoreDuplicates: true }
+      )
+
+    if (roleSyncError) {
+      throw new Error(`role_sync_failed:${roleSyncError.message}`)
+    }
+  }
+
+  let attemptedAt = new Date().toISOString()
   const postcode = typeof profile.postcode === 'string' ? normalizePostcode(profile.postcode) : ''
   if (!postcode) {
     await adminClient
       .from('profile')
       .update({ riding_lookup_last_attempt_at: attemptedAt })
       .eq('id', profile.id)
-    return { outcome: 'skipped_missing_postcode' as const }
+    return { outcome: 'skipped_missing_postcode' as const, reason: 'missing_postcode', attempts: 0 }
   }
 
-  const lookup = await ridingLookupProvider.lookupByPostcode(postcode)
+  let lookup = await ridingLookupProvider.lookupByPostcode(postcode)
+  let attempts = 1
+
+  while (
+    lookup.status === 'error' &&
+    RETRYABLE_REASONS.has(lookup.reason) &&
+    attempts < 3
+  ) {
+    await sleep(250 * attempts)
+    lookup = await ridingLookupProvider.lookupByPostcode(postcode)
+    attempts += 1
+  }
+
+  attemptedAt = new Date().toISOString()
 
   if (lookup.status === 'matched') {
     const { data: districtRow } = await (adminClient.from('federal_electoral_district') as any)
@@ -90,7 +132,7 @@ const refreshProfileRiding = async (profile: MissingRidingProfile) => {
         .eq('id', profile.id)
 
       if (error) throw new Error(error.message)
-      return { outcome: 'matched' as const }
+      return { outcome: 'matched' as const, reason: null, attempts }
     }
 
     const { error } = await adminClient
@@ -103,7 +145,7 @@ const refreshProfileRiding = async (profile: MissingRidingProfile) => {
       })
       .eq('id', profile.id)
     if (error) throw new Error(error.message)
-    return { outcome: 'district_not_seeded' as const }
+    return { outcome: 'district_not_seeded' as const, reason: 'district_not_seeded', attempts }
   }
 
   if (lookup.status === 'not_found') {
@@ -117,7 +159,7 @@ const refreshProfileRiding = async (profile: MissingRidingProfile) => {
       })
       .eq('id', profile.id)
     if (error) throw new Error(error.message)
-    return { outcome: 'not_found' as const }
+    return { outcome: 'not_found' as const, reason: 'postcode_not_found', attempts }
   }
 
   const { error } = await adminClient
@@ -129,7 +171,7 @@ const refreshProfileRiding = async (profile: MissingRidingProfile) => {
     })
     .eq('id', profile.id)
   if (error) throw new Error(error.message)
-  return { outcome: 'failed' as const }
+  return { outcome: 'failed' as const, reason: lookup.reason, attempts }
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -141,7 +183,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { data: missingWithPostcodeRaw } = await adminClient
     .from('profile')
     .select(
-      'id, role, firstname, surname, email, postcode, riding_lookup_status, riding_lookup_error, riding_lookup_last_attempt_at'
+      'id, user_id, role, firstname, surname, email, postcode, riding_lookup_status, riding_lookup_error, riding_lookup_last_attempt_at'
     )
     .is('federal_electoral_district_name', null)
     .not('postcode', 'is', null)
@@ -185,7 +227,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     const { data, error } = await adminClient
       .from('profile')
-      .select('id, role, firstname, surname, email, postcode, riding_lookup_status, riding_lookup_error, riding_lookup_last_attempt_at')
+      .select('id, user_id, role, firstname, surname, email, postcode, riding_lookup_status, riding_lookup_error, riding_lookup_last_attempt_at')
       .in('id', profileIds)
 
     if (error) {
@@ -211,6 +253,7 @@ export async function action({ request }: Route.ActionArgs) {
     failed: 0,
     districtNotSeeded: 0,
     skippedMissingPostcode: 0,
+    details: [] as RetryDetail[],
   }
 
   for (const profile of candidates) {
@@ -222,14 +265,34 @@ export async function action({ request }: Route.ActionArgs) {
       else if (refresh.outcome === 'failed') result.failed += 1
       else if (refresh.outcome === 'district_not_seeded') result.districtNotSeeded += 1
       else if (refresh.outcome === 'skipped_missing_postcode') result.skippedMissingPostcode += 1
+
+      result.details.push({
+        profileId: profile.id,
+        profileLabel: profileLabel(profile),
+        postcode: typeof profile.postcode === 'string' && profile.postcode.trim() ? profile.postcode.trim() : null,
+        outcome: refresh.outcome,
+        reason: refresh.reason,
+        attempts: refresh.attempts,
+      })
+
+      await sleep(200)
     } catch (error) {
       result.attempted += 1
       result.failed += 1
+      result.details.push({
+        profileId: profile.id,
+        profileLabel: profileLabel(profile),
+        postcode: typeof profile.postcode === 'string' && profile.postcode.trim() ? profile.postcode.trim() : null,
+        outcome: 'failed',
+        reason: error instanceof Error ? error.message : 'unknown_error',
+        attempts: 1,
+      })
       console.error('[riding lookup] manual retry failed', {
         profileId: profile.id,
         profile: profileLabel(profile),
         error,
       })
+      await sleep(200)
     }
   }
 
@@ -252,35 +315,38 @@ export default function RidingLookupPage() {
         </p>
       </header>
 
-      <section className="rounded-lg border bg-card p-4 space-y-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Current queue</h2>
-        <div className="grid gap-2 text-sm md:grid-cols-2">
-          <p><span className="font-medium">Missing riding with postcode:</span> {missingWithPostcode.length}</p>
-          <p><span className="font-medium">Missing riding without postcode:</span> {missingWithoutPostcodeCount}</p>
-        </div>
-      </section>
+      <div className="grid gap-4 md:grid-cols-2">
+        <section className="rounded-lg border bg-card p-4 space-y-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Current queue</h2>
+          <div className="grid gap-2 text-sm">
+            <p><span className="font-medium">Missing riding with postcode:</span> {missingWithPostcode.length}</p>
+            <p><span className="font-medium">Missing riding without postcode:</span> {missingWithoutPostcodeCount}</p>
+          </div>
+        </section>
 
-      <Form method="post" className="rounded-lg border bg-card p-4 space-y-3">
-        <input type="hidden" name="intent" value="retry-batch" />
-        <label className="grid gap-1 text-sm md:max-w-xs">
-          <span className="text-muted-foreground">Retry first N missing profiles (1-300)</span>
-          <input
-            name="max_profiles"
-            type="number"
-            min={1}
-            max={300}
-            defaultValue={50}
-            className="h-10 rounded border border-input bg-background px-3"
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
-        >
-          {isSubmitting ? 'Retrying...' : 'Retry batch'}
-        </button>
-      </Form>
+        <Form method="post" className="rounded-lg border bg-card p-4 space-y-3">
+          <input type="hidden" name="intent" value="retry-batch" />
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Retry batch</h2>
+          <label className="grid gap-1 text-sm md:max-w-xs">
+            <span className="text-muted-foreground">Retry first N missing profiles (1-300)</span>
+            <input
+              name="max_profiles"
+              type="number"
+              min={1}
+              max={300}
+              defaultValue={50}
+              className="h-10 rounded border border-input bg-background px-3"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+          >
+            {isSubmitting ? 'Retrying...' : 'Retry batch'}
+          </button>
+        </Form>
+      </div>
 
       {missingWithPostcode.length ? (
         <Form method="post" className="rounded-lg border bg-card p-4 space-y-3">
@@ -339,7 +405,7 @@ export default function RidingLookupPage() {
       ) : null}
 
       {actionData?.result ? (
-        <section className="rounded-lg border bg-card p-4 space-y-2 text-sm">
+        <section className="rounded-lg border bg-card p-4 space-y-3 text-sm">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Last retry result</h2>
           <div className="grid gap-2 md:grid-cols-2">
             <p><span className="font-medium">Attempted:</span> {actionData.result.attempted}</p>
@@ -349,6 +415,35 @@ export default function RidingLookupPage() {
             <p><span className="font-medium">Failed:</span> {actionData.result.failed}</p>
             <p><span className="font-medium">Skipped missing postcode:</span> {actionData.result.skippedMissingPostcode}</p>
           </div>
+          {actionData.result.details.length ? (
+            <div className="max-h-72 overflow-auto rounded border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2">Profile</th>
+                    <th className="px-3 py-2">Postcode</th>
+                    <th className="px-3 py-2">Outcome</th>
+                    <th className="px-3 py-2">Reason</th>
+                    <th className="px-3 py-2">Attempts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {actionData.result.details.map(detail => (
+                    <tr key={detail.profileId} className="border-t">
+                      <td className="px-3 py-2 align-top">
+                        <div className="font-medium">{detail.profileLabel}</div>
+                        <div className="text-xs text-muted-foreground">{detail.profileId}</div>
+                      </td>
+                      <td className="px-3 py-2 align-top">{detail.postcode ?? 'N/A'}</td>
+                      <td className="px-3 py-2 align-top">{detail.outcome}</td>
+                      <td className="px-3 py-2 align-top">{detail.reason ?? 'N/A'}</td>
+                      <td className="px-3 py-2 align-top">{detail.attempts}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>
