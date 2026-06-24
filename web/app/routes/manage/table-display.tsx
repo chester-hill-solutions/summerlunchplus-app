@@ -122,6 +122,8 @@ type LoaderData = {
     filterable?: boolean
     numeric?: boolean
     maxChars?: number
+    minWidth?: number
+    preferredWidth?: number
     hoverCard?: HoverCardConfig
   }>
   canEditStatus?: boolean
@@ -417,6 +419,7 @@ type ResizeState = {
 const columnWidthStorageKey = (tableName: string) => `manage-table-column-widths:${tableName || 'unknown'}`
 
 const clampColumnWidth = (value: number) => Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(value)))
+const clampColumnWidthWithMin = (value: number, minWidth: number) => Math.max(minWidth, Math.min(MAX_COLUMN_WIDTH, Math.round(value)))
 
 const estimateHeaderMinWidth = (label: string, numeric: boolean) => {
   const headerEstimate = label.length * ESTIMATED_CHAR_WIDTH_PX + CELL_HORIZONTAL_PADDING_PX + HEADER_CONTROL_ALLOWANCE_PX
@@ -525,6 +528,11 @@ const buildAutoColumnWidths = ({
   const minWidths = columns.reduce<Record<string, number>>((acc, column) => {
     const label = (columnMeta?.[column]?.label ?? column).replace(/_/g, ' ')
     const numeric = Boolean(columnMeta?.[column]?.numeric)
+    const preferredMinWidth = columnMeta?.[column]?.minWidth
+    if (typeof preferredMinWidth === 'number' && Number.isFinite(preferredMinWidth)) {
+      acc[column] = Math.max(40, Math.round(preferredMinWidth))
+      return acc
+    }
     acc[column] = estimateHeaderMinWidth(label, numeric)
     return acc
   }, {})
@@ -539,7 +547,12 @@ const buildAutoColumnWidths = ({
       tableName,
       numeric: Boolean(columnMeta?.[column]?.numeric),
     })
-    const cappedWidth = Math.min(clampColumnWidth(estimated), Math.max(perColumnViewportCap, minWidth))
+    const preferredWidth = columnMeta?.[column]?.preferredWidth
+    const targetWidth =
+      typeof preferredWidth === 'number' && Number.isFinite(preferredWidth)
+        ? Math.round(preferredWidth)
+        : estimated
+    const cappedWidth = Math.min(clampColumnWidthWithMin(targetWidth, minWidth), Math.max(perColumnViewportCap, minWidth))
     acc[column] = Math.max(minWidth, cappedWidth)
     return acc
   }, {})
@@ -664,7 +677,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
             const value = (parsed as Record<string, unknown>)[column]
             if (typeof value === 'number' && Number.isFinite(value)) {
               const minWidth = minWidths[column] ?? MIN_COLUMN_WIDTH
-              nextWidths[column] = Math.max(minWidth, clampColumnWidth(value))
+              nextWidths[column] = Math.max(minWidth, clampColumnWidthWithMin(value, minWidth))
             }
           }
         }
@@ -688,7 +701,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     const onMouseMove = (event: MouseEvent) => {
       const deltaX = event.clientX - resizeState.startX
       const minWidth = columnMinWidths[resizeState.column] ?? MIN_COLUMN_WIDTH
-      const nextWidth = Math.max(minWidth, clampColumnWidth(resizeState.startWidth + deltaX))
+      const nextWidth = Math.max(minWidth, clampColumnWidthWithMin(resizeState.startWidth + deltaX, minWidth))
       setColumnWidths(prev => ({ ...prev, [resizeState.column]: nextWidth }))
     }
 

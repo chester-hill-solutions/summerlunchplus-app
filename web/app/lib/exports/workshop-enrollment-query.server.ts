@@ -234,6 +234,8 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       filterable?: boolean
       numeric?: boolean
       maxChars?: number
+      minWidth?: number
+      preferredWidth?: number
       hoverCard?: unknown
     }
   >
@@ -272,7 +274,7 @@ export async function loadWorkshopEnrollmentData(request: Request) {
         },
       },
       enrolled_capacity: {
-        label: 'enrolled/capacity',
+        label: 'enrolled',
       },
       riding_display: {
         label: 'riding',
@@ -286,6 +288,8 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       },
       prior_participation_display: {
         label: 'been before?',
+        minWidth: 60,
+        preferredWidth: 60,
       },
     },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),

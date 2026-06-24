@@ -3,7 +3,10 @@ import { adminClient } from '@/lib/supabase/adminClient'
 
 const RELATIONSHIP_BATCH_SIZE = 100
 const IN_CLAUSE_BATCH_SIZE = 250
-const PRIOR_PARTICIPATION_QUESTION_CODE = 'onboarding_prior_participation'
+const PRIOR_PARTICIPATION_QUESTION_CODES = [
+  'onboarding_prior_participation',
+  'child_prior_participation',
+] as const
 
 const ADDRESS_QUESTION_TO_FIELD = {
   address_street: 'street_address',
@@ -370,7 +373,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
       const { data, error } = await adminClient
         .from('form_answer')
         .select('submission_id, question_code, value')
-        .in('question_code', [...addressQuestionCodes, PRIOR_PARTICIPATION_QUESTION_CODE])
+        .in('question_code', [...addressQuestionCodes, ...PRIOR_PARTICIPATION_QUESTION_CODES])
         .in('submission_id', submissionChunk)
 
       if (error) {
@@ -402,7 +405,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
       const submittedAt = Date.parse(submission.submitted_at ?? '')
       const submittedAtTime = Number.isNaN(submittedAt) ? 0 : submittedAt
 
-      if (answer.question_code === PRIOR_PARTICIPATION_QUESTION_CODE) {
+      if (PRIOR_PARTICIPATION_QUESTION_CODES.includes(answer.question_code as (typeof PRIOR_PARTICIPATION_QUESTION_CODES)[number])) {
         const normalized = normalizePriorParticipation(answer.value)
         if (!normalized) continue
         for (const associatedProfileId of associatedProfileIds) {

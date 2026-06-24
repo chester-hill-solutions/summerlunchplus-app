@@ -3,7 +3,10 @@ import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { resolveIpGeolocation } from '@/lib/geoip.server'
 
 const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
-const PRIOR_PARTICIPATION_QUESTION_CODE = 'onboarding_prior_participation'
+const PRIOR_PARTICIPATION_QUESTION_CODES = [
+  'onboarding_prior_participation',
+  'child_prior_participation',
+] as const
 const RELATIONSHIP_BATCH_SIZE = 100
 const IN_CLAUSE_BATCH_SIZE = 250
 
@@ -466,7 +469,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
         const { data, error } = await adminClient
           .from('form_answer')
           .select('submission_id, question_code, value')
-          .in('question_code', [GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE, PRIOR_PARTICIPATION_QUESTION_CODE])
+          .in('question_code', [GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE, ...PRIOR_PARTICIPATION_QUESTION_CODES])
           .in('submission_id', submissionChunk)
 
         if (error) {
@@ -516,7 +519,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
             continue
           }
 
-          if (answer.question_code === PRIOR_PARTICIPATION_QUESTION_CODE) {
+          if (PRIOR_PARTICIPATION_QUESTION_CODES.includes(answer.question_code as (typeof PRIOR_PARTICIPATION_QUESTION_CODES)[number])) {
             const normalized = normalizePriorParticipation(value)
             if (!normalized) continue
             for (const profileId of associatedProfileIds) {
