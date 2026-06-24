@@ -149,6 +149,8 @@ const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
 const FILTER_OPTION_MAX_VISIBLE_LIST = 500
 const FILTER_EMPTY_LABEL = '(empty)'
 const ENABLE_PERSISTED_COLUMN_WIDTHS = false
+const WORKSHOP_ENRICHMENT_BATCH_SIZE = 40
+const WORKSHOP_ENRICHMENT_FILTER_BOOTSTRAP_BATCH_SIZE = 200
 const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
   'riding_display',
   'geo_locations_display',
@@ -266,7 +268,9 @@ const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardCo
   if (!hasListFields && !hasColumns) return null
 
   const titleRaw = config.titleField ? normalizeHoverCardValue(row[config.titleField]) : ''
-  const title = titleRaw || config.titleFallback || ''
+  const profileDisplayFallback =
+    config.titleField === 'profile_hover_name' ? normalizeHoverCardValue(row.profile_display) : ''
+  const title = titleRaw || profileDisplayFallback || config.titleFallback || ''
   const normalizeField = (field: HoverCardField) => {
     const rawValue = normalizeHoverCardValue(row[field.field])
     return {
@@ -1101,7 +1105,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
     if (!missingProfileIds.length) return
 
-    const requestProfileIds = missingProfileIds.slice(0, 40)
+    const requestBatchSize = hasActiveEnrichmentBackedFilters
+      ? WORKSHOP_ENRICHMENT_FILTER_BOOTSTRAP_BATCH_SIZE
+      : WORKSHOP_ENRICHMENT_BATCH_SIZE
+    const requestProfileIds = missingProfileIds.slice(0, requestBatchSize)
     requestProfileIds.forEach(profileId => loadingEnrichmentProfileIdsRef.current.add(profileId))
 
     const abortController = new AbortController()

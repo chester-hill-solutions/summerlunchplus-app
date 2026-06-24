@@ -24,8 +24,11 @@ const toTime = (value: unknown) => {
 
 export async function loadWorkshopEnrollmentData(request: Request) {
   const auth = await requireAuth(request)
-  const base = await baseLoader({ request } as LoaderFunctionArgs)
   const canManageEnrollments = isRoleAtLeast(auth.claims.role, 'admin')
+  const base = await baseLoader(
+    { request } as LoaderFunctionArgs,
+    { includeForeignKeyOptions: canManageEnrollments }
+  )
 
   const rows = (base.rows ?? []) as Array<Record<string, unknown>>
   const workshopIds = Array.from(
