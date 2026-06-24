@@ -58,6 +58,7 @@ type WorkshopEnrollmentEnrichment = {
   profile_hover_email: string
   profile_hover_parent_email: string
   profile_hover_parent_phone: string
+  profile_hover_student_geo: string
   profile_hover_parent_geo: string
   profile_hover_student_submitted_address: string
   profile_hover_parent_address: string
@@ -76,6 +77,7 @@ type FamilyContextEnrichmentResponse = {
       | 'profile_hover_email'
       | 'profile_hover_parent_email'
       | 'profile_hover_parent_phone'
+      | 'profile_hover_student_geo'
       | 'profile_hover_parent_geo'
       | 'profile_hover_student_submitted_address'
       | 'profile_hover_parent_address'
@@ -746,6 +748,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           profile_hover_email: 'N/A',
           profile_hover_parent_email: 'N/A',
           profile_hover_parent_phone: 'N/A',
+          profile_hover_student_geo: 'N/A',
           profile_hover_parent_geo: 'N/A',
           profile_hover_student_submitted_address: 'N/A',
           profile_hover_parent_address: 'N/A',

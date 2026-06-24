@@ -59,6 +59,7 @@ export type FamilyContextEnrichment = {
   profile_hover_email: string
   profile_hover_parent_email: string
   profile_hover_parent_phone: string
+  profile_hover_student_geo: string
   profile_hover_parent_geo: string
   profile_hover_student_submitted_address: string
   profile_hover_parent_address: string
@@ -442,6 +443,13 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
       return formatGeoLabel(geoByIp.get(latestParentIp.ip) ?? null)
     })()
 
+    const studentGeo = (() => {
+      if (!inferredStudentProfileId) return null
+      const latestStudentIp = latestIpByProfileId.get(inferredStudentProfileId)
+      if (!latestStudentIp) return null
+      return formatGeoLabel(geoByIp.get(latestStudentIp.ip) ?? null)
+    })()
+
     const profileHoverParentAddress =
       formatAddress({
         street_address: parentProfile?.street_address,
@@ -465,6 +473,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
       profile_hover_email: profileHoverEmail,
       profile_hover_parent_email: profileHoverParentEmail,
       profile_hover_parent_phone: profileHoverParentPhone,
+      profile_hover_student_geo: studentGeo ?? 'N/A',
       profile_hover_parent_geo: parentGeo ?? 'N/A',
       profile_hover_student_submitted_address: profileHoverStudentSubmittedAddress,
       profile_hover_parent_address: profileHoverParentAddress,

@@ -34,6 +34,7 @@ const fallbackWorkshopEnrollmentEnrichment = {
   profile_hover_email: 'N/A',
   profile_hover_parent_email: 'N/A',
   profile_hover_parent_phone: 'N/A',
+  profile_hover_student_geo: 'N/A',
   profile_hover_parent_geo: 'N/A',
   profile_hover_student_submitted_address: 'N/A',
   profile_hover_parent_address: 'N/A',

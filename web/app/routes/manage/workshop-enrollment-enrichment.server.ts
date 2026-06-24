@@ -59,6 +59,7 @@ export type WorkshopEnrollmentEnrichment = {
   profile_hover_latest_ip: string
   profile_hover_latest_ip_geo: string
   profile_hover_parent_phone: string
+  profile_hover_student_geo: string
   profile_hover_parent_geo: string
   profile_hover_student_submitted_address: string
   profile_hover_parent_address: string
@@ -707,6 +708,7 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       profile_hover_latest_ip: latestIpInfo.ip,
       profile_hover_latest_ip_geo: latestIpInfo.geo,
       profile_hover_parent_phone: familyContextByProfileId[profileId]?.profile_hover_parent_phone ?? 'N/A',
+      profile_hover_student_geo: familyContextByProfileId[profileId]?.profile_hover_student_geo ?? 'N/A',
       profile_hover_parent_geo: familyContextByProfileId[profileId]?.profile_hover_parent_geo ?? 'N/A',
       profile_hover_student_submitted_address:
         familyContextByProfileId[profileId]?.profile_hover_student_submitted_address ?? 'N/A',
