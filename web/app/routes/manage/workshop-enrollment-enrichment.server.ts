@@ -18,6 +18,9 @@ type RidingProfileRow = {
   surname: string | null
   email: string | null
   federal_electoral_district_name: string | null
+  riding_lookup_status: string | null
+  riding_lookup_error: string | null
+  riding_lookup_last_attempt_at: string | null
 }
 
 type GuardianChildEdge = {
@@ -80,6 +83,25 @@ const normalizeRiding = (value: unknown) =>
 
 const normalizeText = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : null
+
+const toRidingStatusLabel = (status: string | null, error: string | null) => {
+  if (status === 'matched') {
+    return 'Lookup matched (district missing)'
+  }
+  if (status === 'not_found') {
+    if (error === 'district_not_seeded') {
+      return 'District not seeded'
+    }
+    return 'Postcode not found'
+  }
+  if (status === 'error') {
+    return `Lookup error${error ? ` (${error})` : ''}`
+  }
+  if (status) {
+    return `Lookup ${status}`
+  }
+  return null
+}
 
 const normalizePriorParticipation = (value: unknown) => {
   if (typeof value !== 'string') return null
@@ -198,7 +220,9 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
   for (const profileChunk of chunkArray(profileScope, IN_CLAUSE_BATCH_SIZE)) {
     const { data, error } = await adminClient
       .from('profile')
-      .select('id, user_id, role, firstname, surname, email, federal_electoral_district_name')
+      .select(
+        'id, user_id, role, firstname, surname, email, federal_electoral_district_name, riding_lookup_status, riding_lookup_error, riding_lookup_last_attempt_at'
+      )
       .in('id', profileChunk)
 
     if (error) {
@@ -529,8 +553,31 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       ? normalizeRiding(profileById.get(inferredParentProfileId)?.federal_electoral_district_name)
       : null
 
-    const ridingDisplay =
-      studentRiding ?? parentRiding ?? normalizeRiding(enrollmentProfile?.federal_electoral_district_name) ?? ''
+    const explicitRiding =
+      studentRiding ?? parentRiding ?? normalizeRiding(enrollmentProfile?.federal_electoral_district_name)
+
+    const ridingStatusProfiles = [
+      inferredStudentProfileId ? profileById.get(inferredStudentProfileId) ?? null : null,
+      inferredParentProfileId ? profileById.get(inferredParentProfileId) ?? null : null,
+      enrollmentProfile,
+    ].filter((profile): profile is RidingProfileRow => Boolean(profile))
+
+    const staleLookupProfile = ridingStatusProfiles
+      .filter(profile => typeof profile.riding_lookup_last_attempt_at === 'string' && profile.riding_lookup_last_attempt_at)
+      .sort((left, right) =>
+        (right.riding_lookup_last_attempt_at ?? '').localeCompare(left.riding_lookup_last_attempt_at ?? '')
+      )[0]
+
+    const statusProfile =
+      ridingStatusProfiles.find(profile => toRidingStatusLabel(profile.riding_lookup_status, profile.riding_lookup_error)) ??
+      staleLookupProfile ??
+      null
+
+    const ridingStatusLabel = statusProfile
+      ? toRidingStatusLabel(statusProfile.riding_lookup_status, statusProfile.riding_lookup_error)
+      : null
+
+    const ridingDisplay = explicitRiding ?? ridingStatusLabel ?? 'Not looked up'
 
     const candidateProfileIds: string[] = []
     const addCandidate = (candidateId: string | null) => {

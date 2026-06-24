@@ -79,6 +79,7 @@ export default [
     route("exports", "routes/manage/exports.tsx"),
     route("exports/:jobId/download", "routes/manage/exports.$jobId.download.ts"),
     route("geoip-backfill", "routes/manage/geoip-backfill.tsx"),
+    route("riding-lookup", "routes/manage/riding-lookup.tsx"),
     route("family-context/enrichment", "routes/manage/family-context.enrichment.ts"),
     route("federal-electoral-district/enrichment", "routes/manage/federal-electoral-district.enrichment.ts"),
     route("federal-electoral-district", "routes/manage/federal-electoral-district.tsx"),
