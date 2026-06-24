@@ -169,6 +169,10 @@ const FAMILY_CONTEXT_COLUMNS = new Set([
   'profile_hover_student_submitted_address',
   'profile_hover_parent_address',
 ])
+const WORKSHOP_FILTER_ENRICHMENT_COLUMNS = new Set([
+  ...Array.from(WORKSHOP_ENRICHMENT_COLUMNS),
+  ...Array.from(FAMILY_CONTEXT_COLUMNS),
+])
 const DEFAULT_COLUMN_WIDTH = 180
 const DEFAULT_NUMERIC_COLUMN_WIDTH = 120
 const ACTIONS_COLUMN_WIDTH = 120
@@ -1046,6 +1050,18 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const totalRows = derivedRows.length
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
   const effectivePage = Math.min(page, totalPages)
+  const hasActiveEnrichmentBackedFilters = useMemo(
+    () => Object.keys(filters).some(column => WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column)),
+    [filters]
+  )
+  const baseFiltersForEnrichmentFetch = useMemo(() => {
+    const next: Record<string, string[]> = {}
+    for (const [column, values] of Object.entries(filters)) {
+      if (WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column)) continue
+      next[column] = values
+    }
+    return next
+  }, [filters])
 
   useEffect(() => {
     if (effectivePage === page) return
@@ -1067,9 +1083,13 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
     if (!shouldLoadWorkshopValues && !shouldLoadFamilyContext) return
 
+    const enrichmentSeedRows = hasActiveEnrichmentBackedFilters
+      ? rows.filter(row => rowMatchesFilters(row, baseFiltersForEnrichmentFetch))
+      : paginatedRows
+
     const missingProfileIds = Array.from(
       new Set(
-        paginatedRows
+        enrichmentSeedRows
           .map(row => (typeof row.profile_id === 'string' ? row.profile_id : ''))
           .filter(profileId =>
             Boolean(profileId) &&
@@ -1156,7 +1176,15 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     return () => {
       abortController.abort()
     }
-  }, [columns, enrichmentByProfileId, isWorkshopEnrollmentTable, paginatedRows])
+  }, [
+    baseFiltersForEnrichmentFetch,
+    columns,
+    enrichmentByProfileId,
+    hasActiveEnrichmentBackedFilters,
+    isWorkshopEnrollmentTable,
+    paginatedRows,
+    rows,
+  ])
 
   useEffect(() => {
     if (!isFederalDistrictTable) return
@@ -1592,6 +1620,19 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const openFilterSelectedValues = openFilterColumn
     ? effectiveSelectedValuesForColumn(openFilterColumn, openFilterOptions)
     : []
+  const isOpenFilterApplied = openFilterColumn ? hasOwn(filters, openFilterColumn) : false
+
+  const clearOpenFilter = () => {
+    if (!openFilterColumn) return
+    setFilters(prev => {
+      if (!hasOwn(prev, openFilterColumn)) return prev
+      const next = { ...prev }
+      delete next[openFilterColumn]
+      setPage(1)
+      syncSearch(next, sortColumn, sortStage, 1, pageSize)
+      return next
+    })
+  }
 
   const selectVisibleFilterOptions = () => {
     if (!openFilterColumn) return
@@ -1603,6 +1644,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
   const clearVisibleFilterOptions = () => {
     if (!openFilterColumn) return
+    if (!canRenderFilterOptionsList) {
+      clearOpenFilter()
+      return
+    }
     const allOptionsForColumn = openFilterOptions
     const current = effectiveSelectedValuesForColumn(openFilterColumn, allOptionsForColumn)
     const visibleSet = new Set(visibleFilterOptions)
@@ -2151,8 +2196,17 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                 </button>
                 <button
                   type="button"
+                  onClick={clearOpenFilter}
+                  disabled={!isOpenFilterApplied}
+                  aria-label="Clear current filter"
+                  className="rounded border border-input px-2 py-1 hover:bg-muted"
+                >
+                  Clear filter
+                </button>
+                <button
+                  type="button"
                   onClick={clearVisibleFilterOptions}
-                  disabled={!canRenderFilterOptionsList}
+                  disabled={!canRenderFilterOptionsList && !isOpenFilterApplied}
                   aria-label="Clear visible options"
                   className="rounded border border-input px-2 py-1 hover:bg-muted"
                 >
