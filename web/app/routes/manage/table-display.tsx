@@ -142,6 +142,7 @@ const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
 const FILTER_OPTION_MAX_VISIBLE_LIST = 500
 const FILTER_EMPTY_LABEL = '(empty)'
+const ENABLE_PERSISTED_COLUMN_WIDTHS = false
 const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
   'riding_display',
   'geo_locations_display',
@@ -669,7 +670,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
       viewportWidth,
     })
 
-    if (typeof window !== 'undefined') {
+    if (ENABLE_PERSISTED_COLUMN_WIDTHS && typeof window !== 'undefined') {
       try {
         const parsed = JSON.parse(window.localStorage.getItem(columnWidthStorageKey(tableName)) ?? '{}')
         if (parsed && typeof parsed === 'object') {
@@ -691,7 +692,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   }, [columns, columnMeta, rows, tableName])
 
   useEffect(() => {
-    if (!tableName || !Object.keys(columnWidths).length || typeof window === 'undefined') return
+    if (!ENABLE_PERSISTED_COLUMN_WIDTHS || !tableName || !Object.keys(columnWidths).length || typeof window === 'undefined') return
     window.localStorage.setItem(columnWidthStorageKey(tableName), JSON.stringify(columnWidths))
   }, [columnWidths, tableName])
 
