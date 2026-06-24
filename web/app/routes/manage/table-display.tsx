@@ -1543,8 +1543,10 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   const visibleFilterOptions = openFilterOptions.filter(option =>
     displayFilterOption(option).toLowerCase().includes(openFilterSearch.toLowerCase())
   )
+  const hasFilterSearchQuery = openFilterSearch.trim().length > 0
   const isOpenFilterLoading = !openFilterCacheEntry || openFilterCacheEntry.status === 'loading' || openFilterCacheEntry.status === 'idle'
-  const shouldHideOptionsList = (openFilterCacheEntry?.totalCount ?? 0) > FILTER_OPTION_MAX_VISIBLE_LIST
+  const shouldHideOptionsList =
+    (openFilterCacheEntry?.totalCount ?? 0) > FILTER_OPTION_MAX_VISIBLE_LIST && !hasFilterSearchQuery
   const canRenderFilterOptionsList = openFilterCacheEntry?.status === 'loaded' && !shouldHideOptionsList
   const openFilterStatusText = isOpenFilterLoading
     ? 'Loading...'
