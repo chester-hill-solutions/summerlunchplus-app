@@ -65,6 +65,7 @@ type WorkshopEnrollmentEnrichment = {
   profile_hover_name: string
   profile_hover_parent_name: string
   profile_hover_email: string
+  profile_hover_student_phone: string
   profile_hover_parent_email: string
   profile_hover_parent_phone: string
   profile_hover_student_geo: string
@@ -85,6 +86,7 @@ type FamilyContextEnrichmentResponse = {
       | 'profile_hover_name'
       | 'profile_hover_parent_name'
       | 'profile_hover_email'
+      | 'profile_hover_student_phone'
       | 'profile_hover_parent_email'
       | 'profile_hover_parent_phone'
       | 'profile_hover_student_geo'
@@ -237,8 +239,8 @@ const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardCo
           config.columns.rightTitle ||
           config.columns.rightTitleFallback ||
           '',
-        left: config.columns.left.map(normalizeField).filter(field => field.visible),
-        right: config.columns.right.map(normalizeField).filter(field => field.visible),
+        left: config.columns.left.map(normalizeField),
+        right: config.columns.right.map(normalizeField),
       }
     : null
 
@@ -247,7 +249,8 @@ const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardCo
     fields.some(field => Boolean(field.value)) ||
     Boolean(
       columnLayout &&
-        (columnLayout.left.length || columnLayout.right.length)
+        (columnLayout.left.some(field => Boolean(field.value)) ||
+          columnLayout.right.some(field => Boolean(field.value)))
     )
 
   return hasValue
@@ -788,15 +791,16 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           prior_participation_display: 'N/A',
           profile_hover_top_discrepancy: '',
           profile_hover_more_discrepancies: '',
-          profile_hover_name: 'N/A',
-          profile_hover_parent_name: 'N/A',
-          profile_hover_email: 'N/A',
-          profile_hover_parent_email: 'N/A',
-          profile_hover_parent_phone: 'N/A',
-          profile_hover_student_geo: 'N/A',
-          profile_hover_parent_geo: 'N/A',
-          profile_hover_student_submitted_address: 'N/A',
-          profile_hover_parent_address: 'N/A',
+          profile_hover_name: '',
+          profile_hover_parent_name: '',
+          profile_hover_email: '',
+          profile_hover_student_phone: '',
+          profile_hover_parent_email: '',
+          profile_hover_parent_phone: '',
+          profile_hover_student_geo: '',
+          profile_hover_parent_geo: '',
+          profile_hover_student_submitted_address: '',
+          profile_hover_parent_address: '',
         }
 
         const resolvedByProfileId = requestProfileIds.reduce<Record<string, WorkshopEnrollmentEnrichment>>(
@@ -1624,7 +1628,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                           {hoverCardData ? (
                             <div className="group/hovercard relative inline-block max-w-full">
                               {content}
-                              <div className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:visible group-hover/hovercard:opacity-100">
+                              <div className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:pointer-events-auto group-hover/hovercard:visible group-hover/hovercard:opacity-100 group-focus-within/hovercard:pointer-events-auto group-focus-within/hovercard:visible group-focus-within/hovercard:opacity-100 select-text">
                                 {hoverCardData.title || hoverCardData.columns?.rightTitle ? (
                                   <div className="mb-1 grid grid-cols-2 gap-3">
                                     <p className="truncate font-semibold text-foreground">{hoverCardData.title || 'N/A'}</p>
@@ -1638,30 +1642,40 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                                 {hoverCardData.columns ? (
                                   <div className="grid grid-cols-2 gap-3">
                                     <div className="space-y-1">
-                                      {hoverCardData.columns.leftTitle ? (
-                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                          {hoverCardData.columns.leftTitle}
-                                        </p>
-                                      ) : null}
-                                      {hoverCardData.columns.left.map(field => (
-                                        <p key={`${column}-left-${field.label}`} className="break-words">
-                                          <span className="font-medium text-foreground">{field.label}: </span>
-                                          <span>{field.value || 'N/A'}</span>
-                                        </p>
-                                      ))}
+                                      {Array.from({
+                                        length: Math.max(
+                                          hoverCardData.columns.left.length,
+                                          hoverCardData.columns.right.length
+                                        ),
+                                      }).map((_, index) => {
+                                        const field = hoverCardData.columns?.left[index]
+                                        return (
+                                          <p key={`${column}-left-${index}`} className="min-h-4 break-words">
+                                            {field?.label ? (
+                                              <span className="font-medium text-foreground">{field.label}: </span>
+                                            ) : null}
+                                            <span>{field?.value || ''}</span>
+                                          </p>
+                                        )
+                                      })}
                                     </div>
-                                    <div className="space-y-1">
-                                      {hoverCardData.columns.rightTitle ? (
-                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                          {hoverCardData.columns.rightTitle}
-                                        </p>
-                                      ) : null}
-                                      {hoverCardData.columns.right.map(field => (
-                                        <p key={`${column}-right-${field.label}`} className="break-words">
-                                          <span className="font-medium text-foreground">{field.label}: </span>
-                                          <span>{field.value || 'N/A'}</span>
-                                        </p>
-                                      ))}
+                                    <div className="space-y-1 text-right">
+                                      {Array.from({
+                                        length: Math.max(
+                                          hoverCardData.columns.left.length,
+                                          hoverCardData.columns.right.length
+                                        ),
+                                      }).map((_, index) => {
+                                        const field = hoverCardData.columns?.right[index]
+                                        return (
+                                          <p key={`${column}-right-${index}`} className="min-h-4 break-words">
+                                            {field?.label ? (
+                                              <span className="font-medium text-foreground">{field.label}: </span>
+                                            ) : null}
+                                            <span>{field?.value || ''}</span>
+                                          </p>
+                                        )
+                                      })}
                                     </div>
                                   </div>
                                 ) : null}
@@ -1669,7 +1683,9 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                                   <div className="mt-2 space-y-1 border-t border-border/50 pt-2">
                                     {hoverCardData.fields.map(field => (
                                       <p key={`${column}-${field.label}`} className="break-words">
-                                        <span className="font-medium text-foreground">{field.label}: </span>
+                                        {field.label ? (
+                                          <span className="font-medium text-foreground">{field.label}: </span>
+                                        ) : null}
                                         <span>{field.value || 'N/A'}</span>
                                       </p>
                                     ))}
