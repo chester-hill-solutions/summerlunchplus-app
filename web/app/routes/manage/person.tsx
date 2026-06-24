@@ -123,7 +123,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const profileQuery = adminClient
     .from('profile')
-    .select('id, user_id, role, firstname, surname, email, phone, street_address, city, province, postcode, date_of_birth')
+    .select(
+      'id, user_id, role, firstname, surname, email, phone, street_address, city, province, postcode, date_of_birth, federal_electoral_district_name, riding_lookup_status, riding_lookup_last_attempt_at, riding_lookup_error'
+    )
 
   const { data: profileRow } = profileIdParam
     ? await profileQuery.eq('id', profileIdParam).maybeSingle()
@@ -295,10 +297,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const familyProfileIds = Array.from(seen)
 
-  const [{ data: familyProfilesRaw }, { data: enrollmentRowsRaw }, { data: suspiciousSignalsRaw }] = await Promise.all([
+  const [{ data: familyProfilesRaw }, { data: enrollmentRowsRaw }, { data: suspiciousSignalsRaw }, { data: districtRowsRaw }] = await Promise.all([
     adminClient
       .from('profile')
-      .select('id, user_id, role, firstname, surname, email, phone, street_address, city, province, postcode, date_of_birth')
+      .select(
+        'id, user_id, role, firstname, surname, email, phone, street_address, city, province, postcode, date_of_birth, federal_electoral_district_name, riding_lookup_status, riding_lookup_last_attempt_at, riding_lookup_error'
+      )
       .in('id', familyProfileIds),
     adminClient
       .from('workshop_enrollment')
@@ -311,6 +315,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .order('priority_score', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(200),
+    adminClient
+      .from('federal_electoral_district')
+      .select('name')
+      .order('name', { ascending: true }),
   ])
 
   const familyProfiles = (familyProfilesRaw ?? []) as ProfileRow[]
@@ -423,6 +431,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return acc
   }, {})
 
+  const federalDistrictOptions = (districtRowsRaw ?? [])
+    .filter(row => typeof row.name === 'string' && row.name.trim())
+    .map(row => {
+      const name = row.name.trim()
+      return { value: name, label: name }
+    })
+
   return {
     profile: profileRow as ProfileRow,
     activityEvents,
@@ -437,7 +452,60 @@ export async function loader({ request }: LoaderFunctionArgs) {
     classByWorkshop,
     attendanceByClass,
     suspiciousSignals,
+    federalDistrictOptions,
   } satisfies PersonLoaderData
+}
+
+export async function action({ request }: LoaderFunctionArgs) {
+  const auth = await requireAuth(request)
+  if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+    return new Response('Unauthorized', { status: 403, headers: auth.headers })
+  }
+
+  const formData = await request.formData()
+  const intent = String(formData.get('intent') ?? '')
+  if (intent !== 'update-riding') {
+    return new Response('Unsupported action', { status: 400, headers: auth.headers })
+  }
+
+  const profileId = String(formData.get('profile_id') ?? '').trim()
+  const ridingNameRaw = String(formData.get('riding_name') ?? '').trim()
+  const ridingName = ridingNameRaw || null
+
+  if (!profileId) {
+    return { error: 'Missing profile id.' }
+  }
+
+  if (ridingName) {
+    const { data: districtRow, error: districtError } = await adminClient
+      .from('federal_electoral_district')
+      .select('name')
+      .eq('name', ridingName)
+      .maybeSingle()
+
+    if (districtError) {
+      return { error: districtError.message }
+    }
+    if (!districtRow?.name) {
+      return { error: 'Selected riding does not exist.' }
+    }
+  }
+
+  const { error: updateError } = await adminClient
+    .from('profile')
+    .update({
+      federal_electoral_district_name: ridingName,
+      riding_lookup_status: ridingName ? 'matched' : 'skipped',
+      riding_lookup_error: null,
+      riding_lookup_last_attempt_at: new Date().toISOString(),
+    })
+    .eq('id', profileId)
+
+  if (updateError) {
+    return { error: updateError.message }
+  }
+
+  return { success: true }
 }
 
 export default function ManagePersonLayoutPage() {

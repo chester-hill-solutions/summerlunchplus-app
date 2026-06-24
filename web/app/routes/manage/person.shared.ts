@@ -13,6 +13,10 @@ export type ProfileRow = {
   province: string | null
   postcode: string | null
   date_of_birth: string | null
+  federal_electoral_district_name?: string | null
+  riding_lookup_status?: string | null
+  riding_lookup_last_attempt_at?: string | null
+  riding_lookup_error?: string | null
 }
 
 export type SuspiciousSignalRow = {
@@ -102,6 +106,7 @@ export type PersonLoaderData = {
   }>
   formNameById: Record<string, string>
   suspiciousSignals: SuspiciousSignalRow[]
+  federalDistrictOptions: Array<{ value: string; label: string }>
 }
 
 export const formatDate = (value: string | null) => {
