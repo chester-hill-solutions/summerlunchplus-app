@@ -134,6 +134,30 @@ const FILTER_EMPTY_TOKEN = '__none__'
 const FILTER_POPOVER_WIDTH = 256
 const FILTER_POPOVER_MARGIN = 8
 const FILTER_POPOVER_ESTIMATED_HEIGHT = 340
+const FILTER_LOAD_CHUNK_SIZE = 300
+const FILTER_CACHE_MAX_ENTRIES = 40
+const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
+const FILTER_SEARCH_DEBOUNCE_MS = 150
+const FILTER_OPTION_MAX_VISIBLE_LIST = 500
+const FILTER_EMPTY_LABEL = '(empty)'
+const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
+  'riding_display',
+  'geo_locations_display',
+  'giftcard_display',
+  'prior_participation_display',
+  'profile_hover_top_discrepancy',
+  'profile_hover_more_discrepancies',
+  'profile_hover_name',
+  'profile_hover_parent_name',
+  'profile_hover_email',
+  'profile_hover_student_phone',
+  'profile_hover_parent_email',
+  'profile_hover_parent_phone',
+  'profile_hover_student_geo',
+  'profile_hover_parent_geo',
+  'profile_hover_student_submitted_address',
+  'profile_hover_parent_address',
+])
 const DEFAULT_COLUMN_WIDTH = 180
 const DEFAULT_NUMERIC_COLUMN_WIDTH = 120
 const ACTIONS_COLUMN_WIDTH = 120
@@ -146,6 +170,16 @@ const CELL_HORIZONTAL_PADDING_PX = 32
 const HEADER_CONTROL_ALLOWANCE_PX = 30
 const MAX_ROWS_FOR_WIDTH_ESTIMATION = 1500
 const hasOwn = (obj: object, key: string) => Object.prototype.hasOwnProperty.call(obj, key)
+
+type FilterOptionsStatus = 'idle' | 'loading' | 'loaded' | 'error'
+
+type FilterOptionsCacheEntry = {
+  status: FilterOptionsStatus
+  allOptions: string[]
+  totalCount: number
+  updatedAt: number
+  error?: string
+}
 
 const isTimestampColumn = (column: string) => column.endsWith('_at') || timestampColumns.has(column)
 
@@ -274,6 +308,36 @@ const TABLE_SELECT_CLASS_NAME =
 
 const normalizeFilterValues = (values: string[]) =>
   Array.from(new Set(values.filter(value => value !== undefined)))
+
+const displayFilterOption = (value: string) =>
+  value === '' ? FILTER_EMPTY_LABEL : value
+
+const filterOptionPriority = (value: string) => {
+  if (value === '') return 0
+  if (value === 'NULL') return 1
+  if (value === '...') return 2
+  return 3
+}
+
+const sortFilterOptions = (values: string[]) => {
+  const deduped = Array.from(new Set(values))
+  deduped.sort((left, right) => {
+    const leftPriority = filterOptionPriority(left)
+    const rightPriority = filterOptionPriority(right)
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority
+    return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })
+  })
+  return deduped
+}
+
+const filterKeySignature = (input: Record<string, string[]>, excludedColumn: string) => {
+  const keys = Object.keys(input)
+    .filter(key => key !== excludedColumn)
+    .sort((left, right) => left.localeCompare(right))
+  return keys
+    .map(key => `${key}:${(input[key] ?? []).slice().sort((a, b) => a.localeCompare(b)).join('|')}`)
+    .join(';')
+}
 
 const toLocalDateTimeValue = (value: unknown) =>
   typeof value === 'string' && value ? toLocalDateTimeInputValue(value) : ''
@@ -512,6 +576,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   const [pageSize, setPageSize] = useState<number>(50)
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null)
   const [filterSearch, setFilterSearch] = useState<Record<string, string>>({})
+  const [debouncedFilterSearch, setDebouncedFilterSearch] = useState<Record<string, string>>({})
   const [filterPopoverPosition, setFilterPopoverPosition] = useState<{ top: number; left: number } | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [createValues, setCreateValues] = useState<Record<string, string>>({})
@@ -526,6 +591,12 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   const loadingDistrictRidingsRef = useRef<Set<string>>(new Set())
   const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const filterPopoverRef = useRef<HTMLDivElement | null>(null)
+  const filterCacheRef = useRef<Map<string, FilterOptionsCacheEntry>>(new Map())
+  const filterCacheLruRef = useRef<string[]>([])
+  const filterActiveRequestRef = useRef<Map<string, number>>(new Map())
+  const filterRequestCounterRef = useRef(0)
+  const openFilterCacheKeyRef = useRef<string | null>(null)
+  const [openFilterCacheEntry, setOpenFilterCacheEntry] = useState<FilterOptionsCacheEntry | null>(null)
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
 
@@ -559,6 +630,23 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     setPage(nextPage)
     setPageSize(nextPageSize)
   }, [searchParams, columns])
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedFilterSearch(filterSearch)
+    }, FILTER_SEARCH_DEBOUNCE_MS)
+    return () => {
+      window.clearTimeout(timeout)
+    }
+  }, [filterSearch])
+
+  useEffect(() => {
+    return () => {
+      filterActiveRequestRef.current.clear()
+      filterCacheRef.current.clear()
+      filterCacheLruRef.current = []
+    }
+  }, [])
 
   useEffect(() => {
     if (!editorFetcher.data?.success) return
@@ -704,6 +792,219 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     })
   }, [districtCountsByRiding, enrichmentByProfileId, isFederalDistrictTable, isWorkshopEnrollmentTable, rows])
 
+  const filterDataRevision = useMemo(
+    () =>
+      [
+        rowsWithEnrichment.length,
+        Object.keys(enrichmentByProfileId).length,
+        Object.keys(districtCountsByRiding).length,
+      ].join(':'),
+    [districtCountsByRiding, enrichmentByProfileId, rowsWithEnrichment.length]
+  )
+
+  const openFilterCacheKey = useMemo(() => {
+    if (!openFilterColumn) return null
+    return [
+      tableName || 'unknown',
+      openFilterColumn,
+      filterDataRevision,
+      filterKeySignature(filters, openFilterColumn),
+    ].join('::')
+  }, [filterDataRevision, filters, openFilterColumn, tableName])
+
+  useEffect(() => {
+    openFilterCacheKeyRef.current = openFilterCacheKey
+  }, [openFilterCacheKey])
+
+  const touchFilterCacheKey = (key: string) => {
+    const nextLru = filterCacheLruRef.current.filter(item => item !== key)
+    nextLru.unshift(key)
+    filterCacheLruRef.current = nextLru
+  }
+
+  const writeFilterCache = (key: string, value: FilterOptionsCacheEntry) => {
+    filterCacheRef.current.set(key, value)
+    touchFilterCacheKey(key)
+    while (filterCacheLruRef.current.length > FILTER_CACHE_MAX_ENTRIES) {
+      const evicted = filterCacheLruRef.current.pop()
+      if (!evicted) break
+      filterCacheRef.current.delete(evicted)
+      filterActiveRequestRef.current.delete(evicted)
+    }
+  }
+
+  const readFilterCache = (key: string) => {
+    const cached = filterCacheRef.current.get(key)
+    if (!cached) return null
+    if (Date.now() - cached.updatedAt > FILTER_CACHE_TTL_MS) {
+      filterCacheRef.current.delete(key)
+      filterCacheLruRef.current = filterCacheLruRef.current.filter(item => item !== key)
+      filterActiveRequestRef.current.delete(key)
+      return null
+    }
+    touchFilterCacheKey(key)
+    return cached
+  }
+
+  const computeAllOptionsForColumn = (column: string, nextFilters: Record<string, string[]>) => {
+    const nextOptions = new Set<string>()
+    for (const row of rowsWithEnrichment) {
+      if (!rowMatchesFilters(row, nextFilters, column)) continue
+      nextOptions.add(getCellValue(column, row, tableName))
+    }
+    return sortFilterOptions(Array.from(nextOptions))
+  }
+
+  useEffect(() => {
+    if (!openFilterColumn || !openFilterCacheKey) {
+      setOpenFilterCacheEntry(null)
+      return
+    }
+
+    const cached = readFilterCache(openFilterCacheKey)
+    if (cached) {
+      setOpenFilterCacheEntry(cached)
+      return
+    }
+
+    const requestId = filterRequestCounterRef.current + 1
+    filterRequestCounterRef.current = requestId
+    filterActiveRequestRef.current.set(openFilterCacheKey, requestId)
+
+    const loadingEntry: FilterOptionsCacheEntry = {
+      status: 'loading',
+      allOptions: [],
+      totalCount: 0,
+      updatedAt: Date.now(),
+    }
+    setOpenFilterCacheEntry(loadingEntry)
+
+    void (async () => {
+      const activeRequestId = filterActiveRequestRef.current.get(openFilterCacheKey)
+      if (activeRequestId !== requestId) return
+
+      let mergedEnrichmentByProfileId = enrichmentByProfileId
+      if (isWorkshopEnrollmentTable && WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn)) {
+        const allProfileIds = Array.from(
+          new Set(
+            rows
+              .map(row => (typeof row.profile_id === 'string' ? row.profile_id : ''))
+              .filter(profileId => Boolean(profileId) && !mergedEnrichmentByProfileId[profileId])
+          )
+        )
+
+        if (allProfileIds.length) {
+          const fetchedByProfileId: Record<string, WorkshopEnrollmentEnrichment> = {}
+          for (let i = 0; i < allProfileIds.length; i += 40) {
+            const requestProfileIds = allProfileIds.slice(i, i + 40)
+            const query = new URLSearchParams()
+            requestProfileIds.forEach(profileId => query.append('profileId', profileId))
+
+            const [workshopResponse, familyContextResponse] = await Promise.all([
+              fetch(`/manage/workshop-enrollment/enrichment?${query.toString()}`),
+              fetch(`/manage/family-context/enrichment?${query.toString()}`),
+            ])
+
+            const workshopPayload = workshopResponse.ok
+              ? ((await workshopResponse.json()) as WorkshopEnrollmentEnrichmentResponse)
+              : { byProfileId: {} }
+            const familyPayload = familyContextResponse.ok
+              ? ((await familyContextResponse.json()) as FamilyContextEnrichmentResponse)
+              : { byProfileId: {} }
+
+            const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
+              riding_display: '',
+              geo_locations_display: 'N/A',
+              giftcard_display: 'N/A',
+              prior_participation_display: 'N/A',
+              profile_hover_top_discrepancy: '',
+              profile_hover_more_discrepancies: '',
+              profile_hover_name: '',
+              profile_hover_parent_name: '',
+              profile_hover_email: '',
+              profile_hover_student_phone: '',
+              profile_hover_parent_email: '',
+              profile_hover_parent_phone: '',
+              profile_hover_student_geo: '',
+              profile_hover_parent_geo: '',
+              profile_hover_student_submitted_address: '',
+              profile_hover_parent_address: '',
+            }
+
+            requestProfileIds.forEach(profileId => {
+              fetchedByProfileId[profileId] = {
+                ...fallbackEnrichment,
+                ...(workshopPayload?.byProfileId?.[profileId] ?? {}),
+                ...(familyPayload?.byProfileId?.[profileId] ?? {}),
+              }
+            })
+
+            const activeDuringFetch = filterActiveRequestRef.current.get(openFilterCacheKey)
+            if (activeDuringFetch !== requestId) return
+          }
+
+          mergedEnrichmentByProfileId = {
+            ...mergedEnrichmentByProfileId,
+            ...fetchedByProfileId,
+          }
+          setEnrichmentByProfileId(prev => ({
+            ...prev,
+            ...fetchedByProfileId,
+          }))
+        }
+      }
+
+      const rowsWithFullEnrichment = rows.map(row => {
+        if (!isWorkshopEnrollmentTable) return row
+        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+        if (!profileId) return row
+        const enrichment = mergedEnrichmentByProfileId[profileId]
+        return enrichment ? { ...row, ...enrichment } : row
+      })
+
+      const candidateRows = rowsWithFullEnrichment.filter(row => rowMatchesFilters(row, filters, openFilterColumn))
+      const unique = new Set<string>()
+      let index = 0
+
+      const processChunk = () => {
+        const activeChunkRequestId = filterActiveRequestRef.current.get(openFilterCacheKey)
+        if (activeChunkRequestId !== requestId) return
+
+        const end = Math.min(index + FILTER_LOAD_CHUNK_SIZE, candidateRows.length)
+        for (; index < end; index += 1) {
+          unique.add(getCellValue(openFilterColumn, candidateRows[index], tableName))
+        }
+
+        if (index < candidateRows.length) {
+          window.setTimeout(processChunk, 0)
+          return
+        }
+
+        const allOptions = sortFilterOptions(Array.from(unique))
+        const loadedEntry: FilterOptionsCacheEntry = {
+          status: 'loaded',
+          allOptions,
+          totalCount: allOptions.length,
+          updatedAt: Date.now(),
+        }
+        writeFilterCache(openFilterCacheKey, loadedEntry)
+        if (openFilterCacheKeyRef.current === openFilterCacheKey) {
+          setOpenFilterCacheEntry(loadedEntry)
+        }
+        filterActiveRequestRef.current.delete(openFilterCacheKey)
+      }
+
+      processChunk()
+    })()
+
+    return () => {
+      const activeRequestId = filterActiveRequestRef.current.get(openFilterCacheKey)
+      if (activeRequestId === requestId) {
+        filterActiveRequestRef.current.delete(openFilterCacheKey)
+      }
+    }
+  }, [filters, openFilterCacheKey, openFilterColumn, rowsWithEnrichment, tableName])
+
   const derivedRows = useMemo(() => {
     let adjustedRows = rowsWithEnrichment.filter(row => rowMatchesFilters(row, filters))
     if (sortColumn && sortStage > 0) {
@@ -717,18 +1018,6 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     }
     return adjustedRows
   }, [rowsWithEnrichment, columns, filters, sortColumn, sortStage, tableName])
-
-  const filterOptionsByColumn = useMemo(() => {
-    return columns.reduce<Record<string, string[]>>((acc, column) => {
-      const nextOptions = new Set<string>()
-      for (const row of rowsWithEnrichment) {
-        if (!rowMatchesFilters(row, filters, column)) continue
-        nextOptions.add(getCellValue(column, row, tableName))
-      }
-      acc[column] = Array.from(nextOptions).sort((a, b) => a.localeCompare(b))
-      return acc
-    }, {})
-  }, [columns, rowsWithEnrichment, filters, tableName])
 
   const totalRows = derivedRows.length
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
@@ -914,12 +1203,16 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     })
   }
 
-  const updateFilterValues = (column: string, values: string[], emptyBehavior: 'none' | 'all' = 'none') => {
+  const updateFilterValues = (
+    column: string,
+    values: string[],
+    allOptionsForColumn: string[],
+    emptyBehavior: 'none' | 'all' = 'none'
+  ) => {
     setFilters(prev => {
       const next = { ...prev }
       const normalized = normalizeFilterValues(values)
-      const allOptions = filterOptionsByColumn[column] ?? []
-      const isAllSelected = allOptions.length > 0 && normalized.length === allOptions.length
+      const isAllSelected = allOptionsForColumn.length > 0 && normalized.length === allOptionsForColumn.length
 
       if (!normalized.length) {
         if (emptyBehavior === 'all') {
@@ -938,18 +1231,11 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     })
   }
 
-  const setColumnUnfiltered = (column: string) => {
-    updateFilterValues(column, [], 'all')
-  }
-
-  const clearColumnFilter = (column: string) => {
-    updateFilterValues(column, [], 'none')
-  }
-
   const appendFilter = (column: string, value: string) => {
     const current = filters[column] ?? []
     if (current.includes(value)) return
-    updateFilterValues(column, [...current, value])
+    const allOptionsForColumn = computeAllOptionsForColumn(column, filters)
+    updateFilterValues(column, [...current, value], allOptionsForColumn)
   }
 
   const setPageAndSync = (nextPage: number, nextPageSize = pageSize) => {
@@ -961,11 +1247,11 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     syncSearch(filters, sortColumn, sortStage, boundedPage, nextPageSize)
   }
 
-  const effectiveSelectedValuesForColumn = (column: string) => {
+  const effectiveSelectedValuesForColumn = (column: string, allOptionsForColumn: string[]) => {
     if (hasOwn(filters, column)) {
       return filters[column] ?? []
     }
-    return filterOptionsByColumn[column] ?? []
+    return allOptionsForColumn
   }
 
   const isClassAttendance = tableName === 'class-attendance'
@@ -1251,16 +1537,40 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     )
   }
 
-  const openFilterOptions = openFilterColumn
-    ? filterOptionsByColumn[openFilterColumn] ?? []
-    : []
-  const openFilterSearch = openFilterColumn ? filterSearch[openFilterColumn] ?? '' : ''
+  const openFilterOptions = openFilterCacheEntry?.allOptions ?? []
+  const openFilterSearchInput = openFilterColumn ? filterSearch[openFilterColumn] ?? '' : ''
+  const openFilterSearch = openFilterColumn ? debouncedFilterSearch[openFilterColumn] ?? '' : ''
   const visibleFilterOptions = openFilterOptions.filter(option =>
-    option.toLowerCase().includes(openFilterSearch.toLowerCase())
+    displayFilterOption(option).toLowerCase().includes(openFilterSearch.toLowerCase())
   )
+  const isOpenFilterLoading = !openFilterCacheEntry || openFilterCacheEntry.status === 'loading' || openFilterCacheEntry.status === 'idle'
+  const shouldHideOptionsList = (openFilterCacheEntry?.totalCount ?? 0) > FILTER_OPTION_MAX_VISIBLE_LIST
+  const canRenderFilterOptionsList = openFilterCacheEntry?.status === 'loaded' && !shouldHideOptionsList
+  const openFilterStatusText = isOpenFilterLoading
+    ? 'Loading...'
+    : shouldHideOptionsList
+      ? 'there are over 500 unique values, search to narrow'
+      : `Showing ${visibleFilterOptions.length} of ${openFilterCacheEntry?.totalCount ?? 0} options`
   const openFilterSelectedValues = openFilterColumn
-    ? effectiveSelectedValuesForColumn(openFilterColumn)
+    ? effectiveSelectedValuesForColumn(openFilterColumn, openFilterOptions)
     : []
+
+  const selectVisibleFilterOptions = () => {
+    if (!openFilterColumn) return
+    const allOptionsForColumn = openFilterOptions
+    const current = effectiveSelectedValuesForColumn(openFilterColumn, allOptionsForColumn)
+    const next = normalizeFilterValues([...current, ...visibleFilterOptions])
+    updateFilterValues(openFilterColumn, next, allOptionsForColumn)
+  }
+
+  const clearVisibleFilterOptions = () => {
+    if (!openFilterColumn) return
+    const allOptionsForColumn = openFilterOptions
+    const current = effectiveSelectedValuesForColumn(openFilterColumn, allOptionsForColumn)
+    const visibleSet = new Set(visibleFilterOptions)
+    const next = current.filter(value => !visibleSet.has(value))
+    updateFilterValues(openFilterColumn, next, allOptionsForColumn)
+  }
 
   return (
     <div className="-mx-6 flex min-w-0 flex-col gap-4">
@@ -1775,36 +2085,47 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
             >
               <input
                 type="text"
-                value={openFilterSearch}
+                value={openFilterSearchInput}
                 onChange={event => {
                   const nextValue = event.target.value
                   setFilterSearch(prev => ({ ...prev, [openFilterColumn]: nextValue }))
                 }}
                 placeholder="Search options"
+                aria-label="Search filter options"
+                aria-describedby="filter-options-status"
                 className="mb-2 h-8 w-full rounded border border-input bg-background px-2 text-xs"
               />
+
+              <p id="filter-options-status" aria-live="polite" className="mb-2 text-muted-foreground">
+                {openFilterStatusText}
+              </p>
 
               <div className="mb-2 flex items-center justify-between gap-2">
                 <button
                   type="button"
-                  onClick={() => setColumnUnfiltered(openFilterColumn)}
+                  onClick={selectVisibleFilterOptions}
+                  disabled={!canRenderFilterOptionsList}
+                  aria-label="Select all visible options"
                   className="rounded border border-input px-2 py-1 hover:bg-muted"
                 >
                   Select all
                 </button>
                 <button
                   type="button"
-                  onClick={() => clearColumnFilter(openFilterColumn)}
+                  onClick={clearVisibleFilterOptions}
+                  disabled={!canRenderFilterOptionsList}
+                  aria-label="Clear visible options"
                   className="rounded border border-input px-2 py-1 hover:bg-muted"
                 >
                   Clear
                 </button>
               </div>
 
-              <div className="max-h-56 space-y-1 overflow-auto rounded border border-border/50 p-1">
+              {canRenderFilterOptionsList ? (
+                <div className="max-h-56 space-y-1 overflow-auto rounded border border-border/50 p-1" role="listbox">
                 {visibleFilterOptions.map(option => {
                   const selected = openFilterSelectedValues.includes(option)
-                  const labelText = option || '(empty)'
+                  const labelText = displayFilterOption(option)
                   return (
                     <label
                       key={`${openFilterColumn}-${option || '__empty__'}`}
@@ -1815,12 +2136,18 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                         type="checkbox"
                         checked={selected}
                         onChange={event => {
+                          const allOptionsForColumn = openFilterOptions
                           if (event.target.checked) {
-                            updateFilterValues(openFilterColumn, [...openFilterSelectedValues, option])
+                            updateFilterValues(
+                              openFilterColumn,
+                              [...openFilterSelectedValues, option],
+                              allOptionsForColumn
+                            )
                           } else {
                             updateFilterValues(
                               openFilterColumn,
-                              openFilterSelectedValues.filter(value => value !== option)
+                              openFilterSelectedValues.filter(value => value !== option),
+                              allOptionsForColumn
                             )
                           }
                         }}
@@ -1832,7 +2159,8 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                 {visibleFilterOptions.length === 0 ? (
                   <p className="px-1 py-2 text-muted-foreground">No options</p>
                 ) : null}
-              </div>
+                </div>
+              ) : null}
             </div>,
             document.body
           )
