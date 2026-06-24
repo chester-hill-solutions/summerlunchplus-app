@@ -107,10 +107,15 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       profile_hover_top_discrepancy: '',
       profile_hover_more_discrepancies: '',
       profile_hover_name: '',
+      profile_hover_parent_name: '',
       profile_hover_email: '',
+      profile_hover_student_phone: '',
       profile_hover_parent_email: '',
-      profile_hover_latest_ip: '',
-      profile_hover_latest_ip_geo: '',
+      profile_hover_parent_phone: '',
+      profile_hover_student_geo: '',
+      profile_hover_parent_geo: '',
+      profile_hover_student_submitted_address: '',
+      profile_hover_parent_address: '',
     }
 
     if (!profileSignals.length) {
@@ -244,11 +249,23 @@ export async function loadWorkshopEnrollmentData(request: Request) {
         hoverCard: {
           titleField: 'profile_hover_name',
           titleFallback: 'N/A',
+          columns: {
+            rightTitleField: 'profile_hover_parent_name',
+            rightTitleFallback: 'Parent',
+            left: [
+              { label: '', field: 'profile_hover_email', fallback: '' },
+              { label: '', field: 'profile_hover_student_phone', fallback: '' },
+              { label: '', field: 'profile_hover_student_geo', fallback: '' },
+              { label: '', field: 'profile_hover_student_submitted_address', fallback: '' },
+            ],
+            right: [
+              { label: '', field: 'profile_hover_parent_email', fallback: '' },
+              { label: '', field: 'profile_hover_parent_phone', fallback: '' },
+              { label: '', field: 'profile_hover_parent_geo', fallback: '' },
+              { label: '', field: 'profile_hover_parent_address', fallback: '' },
+            ],
+          },
           fields: [
-            { label: 'Email', field: 'profile_hover_email', fallback: 'N/A' },
-            { label: 'Parent Email', field: 'profile_hover_parent_email', fallback: 'N/A' },
-            { label: 'Latest IP', field: 'profile_hover_latest_ip', fallback: 'N/A' },
-            { label: 'Latest IP Geo', field: 'profile_hover_latest_ip_geo', fallback: 'N/A' },
             { label: 'Top Discrepancy', field: 'profile_hover_top_discrepancy' },
             { label: 'More Open', field: 'profile_hover_more_discrepancies' },
           ],

@@ -45,6 +45,14 @@ type HoverCardConfig = {
   titleField?: string
   titleFallback?: string
   fields: HoverCardField[]
+  columns?: {
+    leftTitle?: string
+    rightTitle?: string
+    rightTitleField?: string
+    rightTitleFallback?: string
+    left: HoverCardField[]
+    right: HoverCardField[]
+  }
 }
 
 type WorkshopEnrollmentEnrichment = {
@@ -55,14 +63,38 @@ type WorkshopEnrollmentEnrichment = {
   profile_hover_top_discrepancy: string
   profile_hover_more_discrepancies: string
   profile_hover_name: string
+  profile_hover_parent_name: string
   profile_hover_email: string
+  profile_hover_student_phone: string
   profile_hover_parent_email: string
-  profile_hover_latest_ip: string
-  profile_hover_latest_ip_geo: string
+  profile_hover_parent_phone: string
+  profile_hover_student_geo: string
+  profile_hover_parent_geo: string
+  profile_hover_student_submitted_address: string
+  profile_hover_parent_address: string
 }
 
 type WorkshopEnrollmentEnrichmentResponse = {
   byProfileId: Record<string, WorkshopEnrollmentEnrichment>
+}
+
+type FamilyContextEnrichmentResponse = {
+  byProfileId: Record<
+    string,
+    Pick<
+      WorkshopEnrollmentEnrichment,
+      | 'profile_hover_name'
+      | 'profile_hover_parent_name'
+      | 'profile_hover_email'
+      | 'profile_hover_student_phone'
+      | 'profile_hover_parent_email'
+      | 'profile_hover_parent_phone'
+      | 'profile_hover_student_geo'
+      | 'profile_hover_parent_geo'
+      | 'profile_hover_student_submitted_address'
+      | 'profile_hover_parent_address'
+    >
+  >
 }
 
 type FederalDistrictCounts = {
@@ -178,21 +210,56 @@ const normalizeHoverCardValue = (value: unknown) => {
 }
 
 const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardConfig) => {
-  if (!config?.fields.length) return null
+  if (!config) return null
+
+  const hasListFields = config.fields.length > 0
+  const hasColumns = Boolean(config.columns)
+  if (!hasListFields && !hasColumns) return null
 
   const titleRaw = config.titleField ? normalizeHoverCardValue(row[config.titleField]) : ''
   const title = titleRaw || config.titleFallback || ''
-  const fields = config.fields.map(field => {
+  const normalizeField = (field: HoverCardField) => {
     const rawValue = normalizeHoverCardValue(row[field.field])
     return {
       label: field.label,
       value: rawValue || field.fallback || '',
       visible: Boolean(rawValue) || Boolean(field.fallback),
     }
-  }).filter(field => field.visible)
+  }
 
-  const hasValue = Boolean(title) || fields.some(field => Boolean(field.value))
-  return hasValue ? { title, fields } : null
+  const fields = config.fields.map(normalizeField).filter(field => field.visible)
+
+  const columnLayout = config.columns
+    ? {
+        leftTitle: config.columns.leftTitle,
+        rightTitle:
+          (config.columns.rightTitleField
+            ? normalizeHoverCardValue(row[config.columns.rightTitleField])
+            : '') ||
+          config.columns.rightTitle ||
+          config.columns.rightTitleFallback ||
+          '',
+        left: config.columns.left.map(normalizeField),
+        right: config.columns.right.map(normalizeField),
+      }
+    : null
+
+  const hasValue =
+    Boolean(title) ||
+    fields.some(field => Boolean(field.value)) ||
+    Boolean(
+      columnLayout &&
+        (columnLayout.left.some(field => Boolean(field.value)) ||
+          columnLayout.right.some(field => Boolean(field.value)))
+    )
+
+  return hasValue
+    ? {
+        title,
+        fields,
+        columns: columnLayout,
+      }
+    : null
 }
 
 const getDirectionIndicator = (stage: 0 | 1 | 2) => {
@@ -708,7 +775,15 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
         })
 
         if (!response.ok) return
+        const familyContextResponsePromise = fetch(
+          `/manage/family-context/enrichment?${searchParams.toString()}`,
+          { signal: abortController.signal }
+        )
         const payload = (await response.json()) as WorkshopEnrollmentEnrichmentResponse
+        const familyContextResponse = await familyContextResponsePromise
+        const familyPayload = familyContextResponse.ok
+          ? ((await familyContextResponse.json()) as FamilyContextEnrichmentResponse)
+          : { byProfileId: {} }
         const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
           riding_display: '',
           geo_locations_display: 'N/A',
@@ -716,16 +791,25 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
           prior_participation_display: 'N/A',
           profile_hover_top_discrepancy: '',
           profile_hover_more_discrepancies: '',
-          profile_hover_name: 'N/A',
-          profile_hover_email: 'N/A',
-          profile_hover_parent_email: 'N/A',
-          profile_hover_latest_ip: 'N/A',
-          profile_hover_latest_ip_geo: 'N/A',
+          profile_hover_name: '',
+          profile_hover_parent_name: '',
+          profile_hover_email: '',
+          profile_hover_student_phone: '',
+          profile_hover_parent_email: '',
+          profile_hover_parent_phone: '',
+          profile_hover_student_geo: '',
+          profile_hover_parent_geo: '',
+          profile_hover_student_submitted_address: '',
+          profile_hover_parent_address: '',
         }
 
         const resolvedByProfileId = requestProfileIds.reduce<Record<string, WorkshopEnrollmentEnrichment>>(
           (acc, profileId) => {
-            acc[profileId] = payload?.byProfileId?.[profileId] ?? fallbackEnrichment
+            acc[profileId] = {
+              ...fallbackEnrichment,
+              ...(payload?.byProfileId?.[profileId] ?? {}),
+              ...(familyPayload?.byProfileId?.[profileId] ?? {}),
+            }
             return acc
           },
           {}
@@ -1544,18 +1628,73 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
                           {hoverCardData ? (
                             <div className="group/hovercard relative inline-block max-w-full">
                               {content}
-                              <div className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-72 rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:visible group-hover/hovercard:opacity-100">
-                                {hoverCardData.title ? (
-                                  <p className="mb-1 truncate font-semibold text-foreground">{hoverCardData.title}</p>
+                              <div
+                                className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:pointer-events-auto group-hover/hovercard:visible group-hover/hovercard:opacity-100 group-focus-within/hovercard:pointer-events-auto group-focus-within/hovercard:visible group-focus-within/hovercard:opacity-100 select-text"
+                                onClick={event => event.stopPropagation()}
+                                onMouseDown={event => event.stopPropagation()}
+                              >
+                                {hoverCardData.title || hoverCardData.columns?.rightTitle ? (
+                                  <div className="mb-1 grid grid-cols-2 gap-3">
+                                    <p className="truncate font-semibold text-foreground">{hoverCardData.title || 'N/A'}</p>
+                                    {hoverCardData.columns?.rightTitle ? (
+                                      <p className="truncate text-right font-semibold text-foreground">
+                                        {hoverCardData.columns.rightTitle}
+                                      </p>
+                                    ) : null}
+                                  </div>
                                 ) : null}
-                                <div className="space-y-1">
-                                  {hoverCardData.fields.map(field => (
-                                    <p key={`${column}-${field.label}`} className="break-words">
-                                      <span className="font-medium text-foreground">{field.label}: </span>
-                                      <span>{field.value || 'N/A'}</span>
-                                    </p>
-                                  ))}
-                                </div>
+                                {hoverCardData.columns ? (
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                      {Array.from({
+                                        length: Math.max(
+                                          hoverCardData.columns.left.length,
+                                          hoverCardData.columns.right.length
+                                        ),
+                                      }).map((_, index) => {
+                                        const field = hoverCardData.columns?.left[index]
+                                        return (
+                                          <p key={`${column}-left-${index}`} className="min-h-4 break-words">
+                                            {field?.label ? (
+                                              <span className="font-medium text-foreground">{field.label}: </span>
+                                            ) : null}
+                                            <span>{field?.value || ''}</span>
+                                          </p>
+                                        )
+                                      })}
+                                    </div>
+                                    <div className="space-y-1 text-right">
+                                      {Array.from({
+                                        length: Math.max(
+                                          hoverCardData.columns.left.length,
+                                          hoverCardData.columns.right.length
+                                        ),
+                                      }).map((_, index) => {
+                                        const field = hoverCardData.columns?.right[index]
+                                        return (
+                                          <p key={`${column}-right-${index}`} className="min-h-4 break-words">
+                                            {field?.label ? (
+                                              <span className="font-medium text-foreground">{field.label}: </span>
+                                            ) : null}
+                                            <span>{field?.value || ''}</span>
+                                          </p>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                ) : null}
+                                {hoverCardData.fields.length ? (
+                                  <div className="mt-2 space-y-1 border-t border-border/50 pt-2">
+                                    {hoverCardData.fields.map(field => (
+                                      <p key={`${column}-${field.label}`} className="break-words">
+                                        {field.label ? (
+                                          <span className="font-medium text-foreground">{field.label}: </span>
+                                        ) : null}
+                                        <span>{field.value || 'N/A'}</span>
+                                      </p>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
                           ) : (

@@ -1,3 +1,4 @@
+import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { loadWorkshopEnrollmentData } from '@/lib/exports/workshop-enrollment-query.server'
 import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
 
@@ -30,10 +31,15 @@ const fallbackWorkshopEnrollmentEnrichment = {
   profile_hover_top_discrepancy: '',
   profile_hover_more_discrepancies: '',
   profile_hover_name: 'N/A',
+  profile_hover_parent_name: 'N/A',
   profile_hover_email: 'N/A',
+  profile_hover_student_phone: '',
   profile_hover_parent_email: 'N/A',
-  profile_hover_latest_ip: 'N/A',
-  profile_hover_latest_ip_geo: 'N/A',
+  profile_hover_parent_phone: 'N/A',
+  profile_hover_student_geo: 'N/A',
+  profile_hover_parent_geo: 'N/A',
+  profile_hover_student_submitted_address: 'N/A',
+  profile_hover_parent_address: 'N/A',
 }
 
 export const buildWorkshopEnrollmentSnapshot = async ({
@@ -60,15 +66,20 @@ export const buildWorkshopEnrollmentSnapshot = async ({
         const enrichmentProfileIds = Array.from(
           new Set(baseRows.map(row => normalizeText(row.profile_id)).filter(Boolean))
         )
-        const enrichmentByProfileId = enrichmentProfileIds.length
-          ? await loadWorkshopEnrollmentEnrichment(enrichmentProfileIds)
-          : {}
+        const [enrichmentByProfileId, familyContextByProfileId] = enrichmentProfileIds.length
+          ? await Promise.all([
+              loadWorkshopEnrollmentEnrichment(enrichmentProfileIds),
+              loadFamilyContextByProfileIds(enrichmentProfileIds),
+            ])
+          : [{}, {}]
 
         return baseRows.map(row => {
           const profileId = normalizeText(row.profile_id)
-          const enrichment = profileId
-            ? (enrichmentByProfileId[profileId] ?? fallbackWorkshopEnrollmentEnrichment)
-            : fallbackWorkshopEnrollmentEnrichment
+          const enrichment = {
+            ...fallbackWorkshopEnrollmentEnrichment,
+            ...(profileId ? (enrichmentByProfileId[profileId] ?? {}) : {}),
+            ...(profileId ? (familyContextByProfileId[profileId] ?? {}) : {}),
+          }
           return {
             ...row,
             ...enrichment,

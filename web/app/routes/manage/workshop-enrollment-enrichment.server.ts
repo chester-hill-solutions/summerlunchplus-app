@@ -1,4 +1,5 @@
 import { adminClient } from '@/lib/supabase/adminClient'
+import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { resolveIpGeolocation } from '@/lib/geoip.server'
 
 const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
@@ -53,10 +54,17 @@ export type WorkshopEnrollmentEnrichment = {
   profile_hover_top_discrepancy: string
   profile_hover_more_discrepancies: string
   profile_hover_name: string
+  profile_hover_parent_name: string
   profile_hover_email: string
+  profile_hover_student_phone: string
   profile_hover_parent_email: string
   profile_hover_latest_ip: string
   profile_hover_latest_ip_geo: string
+  profile_hover_parent_phone: string
+  profile_hover_student_geo: string
+  profile_hover_parent_geo: string
+  profile_hover_student_submitted_address: string
+  profile_hover_parent_address: string
 }
 
 const flagEmojiForCountryCode = (countryCode: string | null) => {
@@ -146,6 +154,8 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
   if (!normalizedProfileIds.length) {
     return byProfileId
   }
+
+  const familyContextByProfileId = await loadFamilyContextByProfileIds(normalizedProfileIds)
 
   let profileById = new Map<string, RidingProfileRow>()
   const profileIdsByUserId = new Map<string, string[]>()
@@ -693,11 +703,20 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       prior_participation_display: priorParticipationDisplay,
       profile_hover_top_discrepancy: discrepancyInfo.top,
       profile_hover_more_discrepancies: discrepancyInfo.more,
-      profile_hover_name: profileHoverName,
-      profile_hover_email: profileHoverEmail,
-      profile_hover_parent_email: profileHoverParentEmail,
+      profile_hover_name: familyContextByProfileId[profileId]?.profile_hover_name ?? profileHoverName,
+      profile_hover_parent_name: familyContextByProfileId[profileId]?.profile_hover_parent_name ?? 'N/A',
+      profile_hover_email: familyContextByProfileId[profileId]?.profile_hover_email ?? profileHoverEmail,
+      profile_hover_student_phone: familyContextByProfileId[profileId]?.profile_hover_student_phone ?? '',
+      profile_hover_parent_email:
+        familyContextByProfileId[profileId]?.profile_hover_parent_email ?? profileHoverParentEmail,
       profile_hover_latest_ip: latestIpInfo.ip,
       profile_hover_latest_ip_geo: latestIpInfo.geo,
+      profile_hover_parent_phone: familyContextByProfileId[profileId]?.profile_hover_parent_phone ?? 'N/A',
+      profile_hover_student_geo: familyContextByProfileId[profileId]?.profile_hover_student_geo ?? 'N/A',
+      profile_hover_parent_geo: familyContextByProfileId[profileId]?.profile_hover_parent_geo ?? 'N/A',
+      profile_hover_student_submitted_address:
+        familyContextByProfileId[profileId]?.profile_hover_student_submitted_address ?? 'N/A',
+      profile_hover_parent_address: familyContextByProfileId[profileId]?.profile_hover_parent_address ?? 'N/A',
     }
   }
 

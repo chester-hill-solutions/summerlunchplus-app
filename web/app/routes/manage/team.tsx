@@ -59,16 +59,11 @@ export default function TeamLayout() {
     <main className="flex w-full items-start">
       <aside
         className={cn(
-          'sticky top-16 z-50 h-[calc(100svh-4rem)] shrink-0 overflow-y-auto overflow-x-visible border-r bg-card transition-[width] duration-200',
-          sidebarCollapsed ? 'w-16' : 'w-64'
+          'sticky top-16 z-[80] h-[calc(100svh-4rem)] shrink-0 border-r bg-card transition-[width] duration-200',
+          sidebarCollapsed ? 'w-16 overflow-visible' : 'w-64 overflow-y-auto'
         )}
       >
-        <div
-          className={cn(
-            'flex flex-col p-2',
-            sidebarCollapsed ? 'overflow-visible' : 'overflow-visible'
-          )}
-        >
+        <div className="flex flex-col p-2">
           <div className={cn('flex items-center', sidebarCollapsed ? 'justify-center' : 'justify-between')}>
             {!sidebarCollapsed ? (
               <NavLink
@@ -110,7 +105,7 @@ export default function TeamLayout() {
                       <img src={section.stickerSrc} alt={section.label} className="size-20 object-contain" />
                     </button>
 
-                    <div className="pointer-events-none absolute left-full top-0 z-[70] hidden w-64 rounded-lg border bg-card p-2 shadow-lg group-hover:block group-hover:pointer-events-auto group-focus-within:block group-focus-within:pointer-events-auto">
+                    <div className="pointer-events-none absolute left-full top-0 z-[90] hidden w-64 rounded-lg border bg-card p-2 shadow-lg group-hover:block group-hover:pointer-events-auto group-focus-within:block group-focus-within:pointer-events-auto">
                       <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {section.label}
                       </p>
