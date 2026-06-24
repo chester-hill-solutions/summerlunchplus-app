@@ -1,4 +1,4 @@
-import { Link, useOutletContext } from 'react-router'
+import { Link, useLocation, useOutletContext } from 'react-router'
 
 import {
   Table,
@@ -15,6 +15,8 @@ import { profileLabel } from './person.shared'
 export default function ManagePersonFamilyPage() {
   const { familyProfiles, primaryChildByGuardian } = useOutletContext<PersonLoaderData>()
   const profileById = new Map(familyProfiles.map(item => [item.id, item]))
+  const location = useLocation()
+  const returnTo = `${location.pathname}${location.search}`
 
   return (
     <section className="rounded-lg border bg-card p-4">
@@ -39,7 +41,16 @@ export default function ManagePersonFamilyPage() {
               return (
                 <TableRow key={member.id}>
                   <TableCell>
-                    <Link to={`/manage/person?profileId=${member.id}`} className="underline decoration-dotted underline-offset-2 hover:text-primary">
+                    <Link
+                      to={{
+                        pathname: '/manage/person',
+                        search: new URLSearchParams({
+                          profileId: member.id,
+                          returnTo,
+                        }).toString(),
+                      }}
+                      className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                    >
                       {profileLabel(member)}
                     </Link>
                   </TableCell>
