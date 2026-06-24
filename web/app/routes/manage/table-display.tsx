@@ -83,6 +83,7 @@ type FamilyContextEnrichmentResponse = {
     string,
     Pick<
       WorkshopEnrollmentEnrichment,
+      | 'prior_participation_display'
       | 'profile_hover_name'
       | 'profile_hover_parent_name'
       | 'profile_hover_email'
@@ -137,7 +138,6 @@ const FILTER_POPOVER_ESTIMATED_HEIGHT = 340
 const FILTER_LOAD_CHUNK_SIZE = 300
 const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
-const FILTER_SEARCH_DEBOUNCE_MS = 150
 const FILTER_OPTION_MAX_VISIBLE_LIST = 500
 const FILTER_EMPTY_LABEL = '(empty)'
 const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
@@ -576,7 +576,6 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
   const [pageSize, setPageSize] = useState<number>(50)
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null)
   const [filterSearch, setFilterSearch] = useState<Record<string, string>>({})
-  const [debouncedFilterSearch, setDebouncedFilterSearch] = useState<Record<string, string>>({})
   const [filterPopoverPosition, setFilterPopoverPosition] = useState<{ top: number; left: number } | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [createValues, setCreateValues] = useState<Record<string, string>>({})
@@ -630,15 +629,6 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
     setPage(nextPage)
     setPageSize(nextPageSize)
   }, [searchParams, columns])
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setDebouncedFilterSearch(filterSearch)
-    }, FILTER_SEARCH_DEBOUNCE_MS)
-    return () => {
-      window.clearTimeout(timeout)
-    }
-  }, [filterSearch])
 
   useEffect(() => {
     return () => {
@@ -1539,7 +1529,7 @@ export default function TableDisplay({ headerActions, data }: TableDisplayProps 
 
   const openFilterOptions = openFilterCacheEntry?.allOptions ?? []
   const openFilterSearchInput = openFilterColumn ? filterSearch[openFilterColumn] ?? '' : ''
-  const openFilterSearch = openFilterColumn ? debouncedFilterSearch[openFilterColumn] ?? '' : ''
+  const openFilterSearch = openFilterSearchInput
   const visibleFilterOptions = openFilterOptions.filter(option =>
     displayFilterOption(option).toLowerCase().includes(openFilterSearch.toLowerCase())
   )

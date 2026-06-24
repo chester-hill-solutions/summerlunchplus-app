@@ -700,7 +700,8 @@ export async function loadWorkshopEnrollmentEnrichment(profileIds: string[]) {
       riding_display: ridingDisplay,
       geo_locations_display: geoLocationsDisplay,
       giftcard_display: giftcardDisplay,
-      prior_participation_display: priorParticipationDisplay,
+      prior_participation_display:
+        familyContextByProfileId[profileId]?.prior_participation_display ?? priorParticipationDisplay,
       profile_hover_top_discrepancy: discrepancyInfo.top,
       profile_hover_more_discrepancies: discrepancyInfo.more,
       profile_hover_name: familyContextByProfileId[profileId]?.profile_hover_name ?? profileHoverName,

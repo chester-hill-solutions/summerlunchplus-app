@@ -3,6 +3,7 @@ import { adminClient } from '@/lib/supabase/adminClient'
 
 const RELATIONSHIP_BATCH_SIZE = 100
 const IN_CLAUSE_BATCH_SIZE = 250
+const PRIOR_PARTICIPATION_QUESTION_CODE = 'onboarding_prior_participation'
 
 const ADDRESS_QUESTION_TO_FIELD = {
   address_street: 'street_address',
@@ -55,6 +56,7 @@ type AddressDraft = {
 }
 
 export type FamilyContextEnrichment = {
+  prior_participation_display: string
   profile_hover_name: string
   profile_hover_parent_name: string
   profile_hover_email: string
@@ -69,6 +71,15 @@ export type FamilyContextEnrichment = {
 
 const normalizeText = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : null
+
+const normalizePriorParticipation = (value: unknown) => {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim().toLowerCase()
+  if (!trimmed) return null
+  if (trimmed === 'yes') return 'Yes'
+  if (trimmed === 'no') return 'No'
+  return value.trim()
+}
 
 const formatAddress = (input: {
   street_address?: string | null
@@ -351,6 +362,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
 
   const submissionIds = Array.from(submissionsById.keys())
   const addressDraftsByProfileId = new Map<string, Map<string, AddressDraft>>()
+  const latestPriorParticipationByProfileId = new Map<string, { value: string; submittedAt: number }>()
   if (submissionIds.length) {
     const answerRows: FormAnswerRow[] = []
     const addressQuestionCodes = Object.keys(ADDRESS_QUESTION_TO_FIELD)
@@ -358,7 +370,7 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
       const { data, error } = await adminClient
         .from('form_answer')
         .select('submission_id, question_code, value')
-        .in('question_code', addressQuestionCodes)
+        .in('question_code', [...addressQuestionCodes, PRIOR_PARTICIPATION_QUESTION_CODE])
         .in('submission_id', submissionChunk)
 
       if (error) {
@@ -373,10 +385,8 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
     }
 
     for (const answer of answerRows) {
-      if (!(answer.question_code in ADDRESS_QUESTION_TO_FIELD)) continue
       const submission = submissionsById.get(answer.submission_id)
-      const value = normalizeText(answer.value)
-      if (!submission || !value) continue
+      if (!submission) continue
 
       const associatedProfileIds = new Set<string>()
       if (typeof submission.profile_id === 'string' && submission.profile_id) {
@@ -391,6 +401,25 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
 
       const submittedAt = Date.parse(submission.submitted_at ?? '')
       const submittedAtTime = Number.isNaN(submittedAt) ? 0 : submittedAt
+
+      if (answer.question_code === PRIOR_PARTICIPATION_QUESTION_CODE) {
+        const normalized = normalizePriorParticipation(answer.value)
+        if (!normalized) continue
+        for (const associatedProfileId of associatedProfileIds) {
+          const existing = latestPriorParticipationByProfileId.get(associatedProfileId)
+          if (!existing || submittedAtTime > existing.submittedAt) {
+            latestPriorParticipationByProfileId.set(associatedProfileId, {
+              value: normalized,
+              submittedAt: submittedAtTime,
+            })
+          }
+        }
+        continue
+      }
+
+      if (!(answer.question_code in ADDRESS_QUESTION_TO_FIELD)) continue
+      const value = normalizeText(answer.value)
+      if (!value) continue
       const field = ADDRESS_QUESTION_TO_FIELD[answer.question_code as keyof typeof ADDRESS_QUESTION_TO_FIELD]
       for (const associatedProfileId of associatedProfileIds) {
         upsertAddressDraft(
@@ -472,7 +501,35 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
       }) ??
       'N/A'
 
+    const candidateProfileIds: string[] = []
+    const addCandidate = (candidateId: string | null) => {
+      if (!candidateId || candidateProfileIds.includes(candidateId)) return
+      candidateProfileIds.push(candidateId)
+    }
+    addCandidate(inferredStudentProfileId)
+    addCandidate(inferredParentProfileId)
+    addCandidate(profileId)
+    if (typeof studentProfile?.user_id === 'string' && studentProfile.user_id) {
+      for (const sameUserProfileId of profileIdsByUserId.get(studentProfile.user_id) ?? []) {
+        addCandidate(sameUserProfileId)
+      }
+    }
+    if (typeof parentProfile?.user_id === 'string' && parentProfile.user_id) {
+      for (const sameUserProfileId of profileIdsByUserId.get(parentProfile.user_id) ?? []) {
+        addCandidate(sameUserProfileId)
+      }
+    }
+
+    const priorParticipationDisplay = (() => {
+      for (const candidateProfileId of candidateProfileIds) {
+        const value = latestPriorParticipationByProfileId.get(candidateProfileId)?.value
+        if (value) return value
+      }
+      return 'N/A'
+    })()
+
     byProfileId[profileId] = {
+      prior_participation_display: priorParticipationDisplay,
       profile_hover_name: profileHoverName,
       profile_hover_parent_name: profileHoverParentName,
       profile_hover_email: profileHoverEmail,
