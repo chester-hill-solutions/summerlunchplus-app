@@ -194,6 +194,35 @@ export default function ManagePersonDiscrepanciesPage() {
                       </ul>
                     </div>
                   ) : null}
+
+                  {signal.signal_type === 'ip_org_greylist' ? (
+                    <div className="mt-2 rounded border bg-background p-2 text-xs">
+                      <p className="font-medium">Greylist org evidence</p>
+                      <ul className="mt-1 space-y-1">
+                        <li>
+                          • Matches:{' '}
+                          {typeof details?.greylist_match_count === 'number'
+                            ? String(details.greylist_match_count)
+                            : 'Unknown'}
+                        </li>
+                        {(Array.isArray(details?.orgs) ? details?.orgs : []).map((entry, idx) => (
+                          <li key={`${signal.id}-org-${idx}`}>• Org: {typeof entry === 'string' ? entry : 'Unknown'}</li>
+                        ))}
+                        {(Array.isArray(details?.evidence) ? details?.evidence : []).map((entry, idx) => {
+                          const row = toRecord(entry as Json)
+                          const source = typeof row?.source === 'string' ? row.source : 'event'
+                          const occurredAt = typeof row?.occurred_at === 'string' ? formatDateTime(row.occurred_at) : '-'
+                          const ip = typeof row?.ip_address === 'string' ? row.ip_address : 'n/a'
+                          const org = typeof row?.org === 'string' ? row.org : 'Unknown'
+                          return (
+                            <li key={`${signal.id}-grey-${idx}`}>
+                              • {source}: {occurredAt} (IP {ip}, org {org})
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
                 </article>
               )
             })}

@@ -131,7 +131,7 @@ export default function ManagePersonActivityPage() {
       geo_status: { label: 'Geo status', preferredWidth: 180 },
       geo: { label: 'Geo', preferredWidth: 220 },
       geo_reason: { label: 'Reason', preferredWidth: 320, truncate: true },
-      forwarded_chain: { label: 'Forwarded chain', preferredWidth: 300, truncate: true },
+      forwarded_chain: { label: 'Forwarded chain', preferredWidth: 300, truncate: true, fitContentOnLoad: true },
       event_id: { label: 'Event ID', preferredWidth: 250, truncate: true },
     },
   }} />

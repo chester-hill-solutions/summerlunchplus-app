@@ -7,6 +7,7 @@ import {
   detectIpProfileLocationMismatchSignal,
   detectNetworkDistanceSignal,
   type IpLocationEvidence,
+  type SignalSeverity,
   type SuspiciousSignalType,
 } from '@/lib/suspicious-signals'
 
@@ -27,8 +28,19 @@ type LoginEventRow = {
   event_at: string
   ip_address: unknown
   ip_selected: unknown
+  ip_chain: unknown
   forwarded_for: string | null
   metadata: Json
+}
+
+type OrgPolicyClass = 'infra_proxy' | 'consumer_isp' | 'vpn_hosting_datacenter' | 'trusted_enterprise' | 'unknown'
+
+type OrgPolicyRow = {
+  org_pattern: string
+  match_mode: 'exact' | 'contains' | 'regex'
+  policy_class: OrgPolicyClass
+  note: string | null
+  priority: number
 }
 
 const parseForwardedFirstIp = (value: string | null) => {
@@ -38,6 +50,111 @@ const parseForwardedFirstIp = (value: string | null) => {
     .map(part => part.trim())
     .find(Boolean)
   return first || null
+}
+
+const parseIpChain = (value: unknown) => {
+  if (!Array.isArray(value)) return [] as string[]
+  return value
+    .map(entry => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean)
+}
+
+const collectCandidateIps = (input: {
+  ip_chain?: unknown
+  ip_selected?: unknown
+  ip_address?: unknown
+  forwarded_for?: string | null
+}) => {
+  const seen = new Set<string>()
+  const values: string[] = []
+  for (const ip of [
+    ...parseIpChain(input.ip_chain),
+    typeof input.ip_selected === 'string' ? input.ip_selected.trim() : '',
+    typeof input.ip_address === 'string' ? input.ip_address.trim() : '',
+    parseForwardedFirstIp(input.forwarded_for ?? null) ?? '',
+  ]) {
+    if (!ip || seen.has(ip)) continue
+    seen.add(ip)
+    values.push(ip)
+  }
+  return values
+}
+
+const matchOrgPolicy = (org: string | null, policies: OrgPolicyRow[]) => {
+  if (!org) return null
+  const normalized = org.trim().toLowerCase()
+  if (!normalized) return null
+
+  for (const policy of policies) {
+    const pattern = policy.org_pattern.trim().toLowerCase()
+    if (!pattern) continue
+    if (policy.match_mode === 'exact' && normalized === pattern) return policy
+    if (policy.match_mode === 'contains' && normalized.includes(pattern)) return policy
+    if (policy.match_mode === 'regex') {
+      try {
+        if (new RegExp(pattern, 'i').test(org)) return policy
+      } catch {
+        continue
+      }
+    }
+  }
+  return null
+}
+
+const orgPolicyRank = (policyClass: OrgPolicyClass | null) => {
+  switch (policyClass) {
+    case 'consumer_isp':
+      return 40
+    case 'trusted_enterprise':
+      return 35
+    case 'unknown':
+      return 25
+    case 'vpn_hosting_datacenter':
+      return 15
+    case 'infra_proxy':
+      return 5
+    default:
+      return 20
+  }
+}
+
+const detectIpOrgGreylistSignal = (args: {
+  evidence: Array<{
+    event_id: string
+    source: 'form_submission' | 'login_event'
+    occurred_at: string
+    ip_address: string
+    org: string | null
+    policy: OrgPolicyRow | null
+  }>
+}) => {
+  const matches = args.evidence.filter(entry => entry.policy?.policy_class === 'vpn_hosting_datacenter')
+  if (!matches.length) return null
+
+  const uniqueOrgs = Array.from(new Set(matches.map(match => (match.org ?? '').trim()).filter(Boolean)))
+  const severity: SignalSeverity = matches.length >= 3 ? 'high' : 'medium'
+
+  return {
+    severity,
+    title: 'Network org greylist match',
+    summary:
+      uniqueOrgs.length === 1
+        ? `Recent activity matched greylisted network org: ${uniqueOrgs[0]}.`
+        : `Recent activity matched ${uniqueOrgs.length} greylisted network orgs.`,
+    details: {
+      greylist_match_count: matches.length,
+      orgs: uniqueOrgs,
+      evidence: matches.slice(0, 8).map(match => ({
+        event_id: match.event_id,
+        source: match.source,
+        occurred_at: match.occurred_at,
+        ip_address: match.ip_address,
+        org: match.org,
+        policy_pattern: match.policy?.org_pattern ?? null,
+        policy_note: match.policy?.note ?? null,
+      })),
+    } satisfies Record<string, Json>,
+  }
 }
 
 const familyGraphForProfile = async (profileId: string) => {
@@ -88,7 +205,7 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
       .in('id', familyProfileIds),
     adminClient
       .from('form_submission')
-      .select('id, profile_id, submitted_at, ip_address, ip_selected, forwarded_for, metadata')
+      .select('id, profile_id, submitted_at, ip_address, ip_selected, ip_chain, forwarded_for, metadata')
       .in('profile_id', familyProfileIds)
       .order('submitted_at', { ascending: false })
       .limit(40),
@@ -190,6 +307,7 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
   }
 
   let ipMismatchSignal: ReturnType<typeof detectIpProfileLocationMismatchSignal> = null
+  let ipOrgGreylistSignal: ReturnType<typeof detectIpOrgGreylistSignal> = null
   if (subjectProfile) {
     const subjectUserId = typeof subjectProfile.user_id === 'string' ? subjectProfile.user_id : null
     const subjectSubmissions = (submissions ?? [])
@@ -199,42 +317,85 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
     const { data: loginEvents } = subjectUserId
       ? await adminClient
           .from('login_event')
-          .select('id, event_at, ip_address, ip_selected, forwarded_for, metadata')
+          .select('id, event_at, ip_address, ip_selected, ip_chain, forwarded_for, metadata')
           .eq('user_id', subjectUserId)
           .order('event_at', { ascending: false })
           .limit(20)
       : { data: [] }
 
-    const eventCandidates: Array<{ eventId: string; source: 'form_submission' | 'login_event'; occurredAt: string; ip: string }> = []
+    const { data: orgPolicyRows } = await (adminClient.from('ip_org_policy' as any) as any)
+      .select('org_pattern, match_mode, policy_class, note, priority')
+      .eq('enabled', true)
+      .order('priority', { ascending: true })
+
+    const orgPolicies: OrgPolicyRow[] = ((orgPolicyRows ?? []) as Array<Record<string, unknown>>)
+      .map(row => {
+        const matchMode: OrgPolicyRow['match_mode'] =
+          row.match_mode === 'exact' || row.match_mode === 'contains' || row.match_mode === 'regex'
+            ? row.match_mode
+            : 'contains'
+        const policyClass: OrgPolicyRow['policy_class'] =
+          row.policy_class === 'infra_proxy' ||
+          row.policy_class === 'consumer_isp' ||
+          row.policy_class === 'vpn_hosting_datacenter' ||
+          row.policy_class === 'trusted_enterprise' ||
+          row.policy_class === 'unknown'
+            ? row.policy_class
+            : 'unknown'
+
+        return {
+          org_pattern: typeof row.org_pattern === 'string' ? row.org_pattern : '',
+          match_mode: matchMode,
+          policy_class: policyClass,
+          note: typeof row.note === 'string' ? row.note : null,
+          priority: typeof row.priority === 'number' ? row.priority : 100,
+        }
+      })
+      .filter(row => Boolean(row.org_pattern))
+
+    const eventCandidates: Array<{
+      eventId: string
+      source: 'form_submission' | 'login_event'
+      occurredAt: string
+      ips: string[]
+      selectedIp: string | null
+    }> = []
 
     for (const submission of subjectSubmissions) {
-      const ipAddress =
-        (typeof submission.ip_selected === 'string' && submission.ip_selected) ||
-        (typeof submission.ip_address === 'string' && submission.ip_address) ||
-        parseForwardedFirstIp(typeof submission.forwarded_for === 'string' ? submission.forwarded_for : null)
-      if (!ipAddress || !submission.id || !submission.submitted_at) continue
+      const ips = collectCandidateIps({
+        ip_chain: (submission as Record<string, unknown>).ip_chain,
+        ip_selected: submission.ip_selected,
+        ip_address: submission.ip_address,
+        forwarded_for: typeof submission.forwarded_for === 'string' ? submission.forwarded_for : null,
+      })
+      if (!ips.length || !submission.id || !submission.submitted_at) continue
       eventCandidates.push({
         eventId: submission.id,
         source: 'form_submission',
         occurredAt: submission.submitted_at,
-        ip: ipAddress,
+        ips,
+        selectedIp: typeof submission.ip_selected === 'string' ? submission.ip_selected : null,
       })
     }
 
     for (const event of (loginEvents ?? []) as LoginEventRow[]) {
-      const ipAddress =
-        (typeof event.ip_selected === 'string' && event.ip_selected) ||
-        (typeof event.ip_address === 'string' && event.ip_address) || parseForwardedFirstIp(event.forwarded_for)
-      if (!ipAddress || !event.id || !event.event_at) continue
+      const ips = collectCandidateIps({
+        ip_chain: event.ip_chain,
+        ip_selected: event.ip_selected,
+        ip_address: event.ip_address,
+        forwarded_for: event.forwarded_for,
+      })
+      if (!ips.length || !event.id || !event.event_at) continue
       eventCandidates.push({
         eventId: event.id,
         source: 'login_event',
         occurredAt: event.event_at,
-        ip: ipAddress,
+        ips,
+        selectedIp: typeof event.ip_selected === 'string' ? event.ip_selected : null,
       })
     }
 
-    const uniqueIps = Array.from(new Set(eventCandidates.map(event => event.ip)))
+    const uniqueIps = Array.from(new Set(eventCandidates.flatMap(event => event.ips)))
     const locationByIp = new Map<string, Awaited<ReturnType<typeof resolveIpGeolocation>>>()
     await Promise.all(
       uniqueIps.map(async ip => {
@@ -243,21 +404,58 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
       })
     )
 
+    const greylistEvidence: Array<{
+      event_id: string
+      source: 'form_submission' | 'login_event'
+      occurred_at: string
+      ip_address: string
+      org: string | null
+      policy: OrgPolicyRow | null
+    }> = []
+
     const ipEvents = eventCandidates
       .map((candidate): IpLocationEvidence | null => {
-        const location = locationByIp.get(candidate.ip)
-        if (!location) return null
+        const evaluated = candidate.ips
+          .map(ip => {
+            const location = locationByIp.get(ip) ?? null
+            const org = location?.org ?? null
+            const policy = matchOrgPolicy(org, orgPolicies)
+            if (policy?.policy_class === 'vpn_hosting_datacenter') {
+              greylistEvidence.push({
+                event_id: candidate.eventId,
+                source: candidate.source,
+                occurred_at: candidate.occurredAt,
+                ip_address: ip,
+                org,
+                policy,
+              })
+            }
+            const score =
+              (policy ? orgPolicyRank(policy.policy_class) : 20) +
+              (candidate.selectedIp === ip ? 8 : 0) +
+              (location ? 10 : 0)
+            return {
+              ip,
+              location,
+              score,
+            }
+          })
+          .sort((left, right) => right.score - left.score)
+
+        const best = evaluated.find(entry => entry.location) ?? evaluated[0]
+        if (!best?.location) return null
+
         return {
           event_id: candidate.eventId,
           source: candidate.source,
           occurred_at: candidate.occurredAt,
-          ip_address: candidate.ip,
-          country_code: location.countryCode,
-          region: location.region,
-          city: location.city,
-          latitude: location.latitude,
-          longitude: location.longitude,
-          provider: location.source ?? null,
+          ip_address: best.ip,
+          country_code: best.location.countryCode,
+          region: best.location.region,
+          city: best.location.city,
+          latitude: best.location.latitude,
+          longitude: best.location.longitude,
+          provider: best.location.source ?? null,
         }
       })
       .filter((event): event is IpLocationEvidence => event !== null)
@@ -266,6 +464,8 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
       subjectProfile,
       events: ipEvents,
     })
+
+    ipOrgGreylistSignal = detectIpOrgGreylistSignal({ evidence: greylistEvidence })
   }
 
   const subjectDistrictName =
@@ -340,6 +540,19 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
     })
   }
 
+  if (ipOrgGreylistSignal) {
+    const priority = computeSignalPriority('ip_org_greylist', ipOrgGreylistSignal.severity, ipOrgGreylistSignal.details)
+    signals.push({
+      signal_type: 'ip_org_greylist',
+      severity: ipOrgGreylistSignal.severity,
+      summary: ipOrgGreylistSignal.summary,
+      title: ipOrgGreylistSignal.title,
+      details: ipOrgGreylistSignal.details,
+      priority_score: priority.score,
+      priority_reason: priority.reason,
+    })
+  }
+
   if (subjectDistrictName && subjectDistrict && subjectDistrict.whitelist === false) {
     const ridingDetails = {
       district_name: subjectDistrictName,
@@ -368,6 +581,7 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
       'non_whitelisted_riding',
       'cross_family_exact_address',
       'ip_profile_location_mismatch',
+      'ip_org_greylist',
     ])
 
   if (!signals.length) return

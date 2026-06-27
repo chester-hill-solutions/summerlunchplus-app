@@ -89,6 +89,7 @@ export const manageSections: ManageNavSection[] = [
     defaultCollapsed: true,
     items: [
       { to: '/manage/login-event', label: 'Login events', description: 'Successful sign-in metadata and source context.' },
+      { to: '/manage/ip-org-policy', label: 'IP org policy', description: 'Classify network org strings for proxy, ISP, and greylist discrepancy handling.' },
       { to: '/manage/semester-form-requirement', label: 'Semester surveys', description: 'Map one pre/post survey form per semester.' },
       { to: '/manage/role-permission', label: 'Role permissions', description: 'Permissions assigned to each role.' },
       { to: '/manage/request-metadata', label: 'Request metadata', description: 'Validate proxy headers and extracted request metadata.' },

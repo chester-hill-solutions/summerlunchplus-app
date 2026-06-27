@@ -241,6 +241,7 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       maxChars?: number
       minWidth?: number
       preferredWidth?: number
+      fitContentOnLoad?: boolean
       hoverCard?: unknown
     }
   >
@@ -286,6 +287,7 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       },
       geo_locations_display: {
         label: 'geo locations',
+        fitContentOnLoad: true,
       },
       giftcard_display: {
         label: 'giftcard',

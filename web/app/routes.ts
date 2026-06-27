@@ -66,6 +66,7 @@ export default [
     route("form-assignment", "routes/manage/form-assignment.tsx"),
     route("form-submission", "routes/manage/form-submission.tsx"),
     route("login-event", "routes/manage/login-event.tsx"),
+    route("ip-org-policy", "routes/manage/ip-org-policy.tsx"),
     route("email-message", "routes/manage/email-message.tsx"),
     route("email-drafts", "routes/manage/email-drafts.tsx"),
     route("email-drafts/:draftId", "routes/manage/email-drafts.$draftId.tsx"),

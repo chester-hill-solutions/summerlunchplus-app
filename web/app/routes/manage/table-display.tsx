@@ -131,6 +131,7 @@ type LoaderData = {
     maxChars?: number
     minWidth?: number
     preferredWidth?: number
+    fitContentOnLoad?: boolean
     hoverCard?: HoverCardConfig
   }>
   canEditStatus?: boolean
@@ -572,6 +573,7 @@ const buildAutoColumnWidths = ({
   const widths = columns.reduce<Record<string, number>>((acc, column) => {
     const label = (columnMeta?.[column]?.label ?? column).replace(/_/g, ' ')
     const minWidth = minWidths[column] ?? MIN_COLUMN_WIDTH
+    const fitContentOnLoad = Boolean(columnMeta?.[column]?.fitContentOnLoad)
     const estimated = estimateContentWidth({
       column,
       label,
@@ -581,7 +583,7 @@ const buildAutoColumnWidths = ({
     })
     const preferredWidth = columnMeta?.[column]?.preferredWidth
     const targetWidth =
-      typeof preferredWidth === 'number' && Number.isFinite(preferredWidth)
+      !fitContentOnLoad && typeof preferredWidth === 'number' && Number.isFinite(preferredWidth)
         ? Math.round(preferredWidth)
         : estimated
     const cappedWidth = Math.min(clampColumnWidthWithMin(targetWidth, minWidth), Math.max(perColumnViewportCap, minWidth))
@@ -646,6 +648,39 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
   const debugPerf = searchParams.get('debugPerf') === '1'
+
+  const rowsWithEnrichment = useMemo(() => {
+    return rows.map(row => {
+      let nextRow = row
+
+      if (isWorkshopEnrollmentTable) {
+        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+        const enrichment = profileId ? enrichmentByProfileId[profileId] : null
+        if (enrichment) {
+          nextRow = { ...nextRow, ...enrichment }
+        }
+      }
+
+      if (isFederalDistrictTable) {
+        const ridingName = typeof row.name === 'string' ? row.name.trim() : ''
+        const counts = ridingName ? districtCountsByRiding[ridingName] : null
+        if (counts) {
+          nextRow = { ...nextRow, ...counts }
+        } else {
+          nextRow = {
+            ...nextRow,
+            total: '...',
+            accepted: '...',
+            pending: '...',
+            waitlisted: '...',
+            declined: '...',
+          }
+        }
+      }
+
+      return nextRow
+    })
+  }, [districtCountsByRiding, enrichmentByProfileId, isFederalDistrictTable, isWorkshopEnrollmentTable, rows])
 
   useEffect(() => {
     const nextSort = searchParams.get('sort')
@@ -729,6 +764,43 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     if (!ENABLE_PERSISTED_COLUMN_WIDTHS || !tableName || !Object.keys(columnWidths).length || typeof window === 'undefined') return
     window.localStorage.setItem(columnWidthStorageKey(tableName), JSON.stringify(columnWidths))
   }, [columnWidths, tableName])
+
+  useEffect(() => {
+    const fitColumns = columns.filter(column => Boolean(columnMeta[column]?.fitContentOnLoad))
+    if (!fitColumns.length) return
+    if (!Object.keys(columnWidths).length) return
+
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440
+    const perColumnViewportCap = Math.max(MIN_COLUMN_WIDTH, Math.floor(viewportWidth * MAX_COLUMN_WIDTH_VW_RATIO))
+
+    setColumnWidths(prev => {
+      let changed = false
+      const next = { ...prev }
+
+      for (const column of fitColumns) {
+        const label = (columnMeta[column]?.label ?? column).replace(/_/g, ' ')
+        const minWidth = columnMinWidths[column] ?? estimateHeaderMinWidth(label, Boolean(columnMeta[column]?.numeric))
+        const estimated = estimateContentWidth({
+          column,
+          label,
+          rows: rowsWithEnrichment,
+          tableName,
+          numeric: Boolean(columnMeta[column]?.numeric),
+        })
+        const cappedWidth = Math.min(
+          clampColumnWidthWithMin(estimated, minWidth),
+          Math.max(perColumnViewportCap, minWidth)
+        )
+        const currentWidth = next[column] ?? minWidth
+        if (cappedWidth > currentWidth) {
+          next[column] = cappedWidth
+          changed = true
+        }
+      }
+
+      return changed ? next : prev
+    })
+  }, [columnMeta, columnMinWidths, columnWidths, columns, rowsWithEnrichment, tableName])
 
   useEffect(() => {
     if (!resizeState) return
@@ -821,39 +893,6 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       const cellValue = getCellValue(column, row, tableName)
       return selectedValues.includes(cellValue)
     })
-
-  const rowsWithEnrichment = useMemo(() => {
-    return rows.map(row => {
-      let nextRow = row
-
-      if (isWorkshopEnrollmentTable) {
-        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
-        const enrichment = profileId ? enrichmentByProfileId[profileId] : null
-        if (enrichment) {
-          nextRow = { ...nextRow, ...enrichment }
-        }
-      }
-
-      if (isFederalDistrictTable) {
-        const ridingName = typeof row.name === 'string' ? row.name.trim() : ''
-        const counts = ridingName ? districtCountsByRiding[ridingName] : null
-        if (counts) {
-          nextRow = { ...nextRow, ...counts }
-        } else {
-          nextRow = {
-            ...nextRow,
-            total: '...',
-            accepted: '...',
-            pending: '...',
-            waitlisted: '...',
-            declined: '...',
-          }
-        }
-      }
-
-      return nextRow
-    })
-  }, [districtCountsByRiding, enrichmentByProfileId, isFederalDistrictTable, isWorkshopEnrollmentTable, rows])
 
   const filterDataRevision = useMemo(
     () =>

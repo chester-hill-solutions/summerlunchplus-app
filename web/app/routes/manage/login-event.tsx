@@ -46,6 +46,7 @@ export async function loader(args: Route.LoaderArgs) {
       ...row,
       ip_geo_summary: geoSummary,
       ip_geo_country: countryCode ?? '-',
+      ip_geo_org: geo?.org ?? '-',
       ip_geo_timezone: geo?.timezone ?? '-',
       ip_geo_source: geo?.source ?? '-',
       ip_geo_coordinates:
@@ -69,6 +70,7 @@ export async function loader(args: Route.LoaderArgs) {
           titleFallback: 'Unknown location',
           fields: [
             { label: 'Country', field: 'ip_geo_country', fallback: '-' },
+            { label: 'Org', field: 'ip_geo_org', fallback: '-' },
             { label: 'Timezone', field: 'ip_geo_timezone', fallback: '-' },
             { label: 'Coordinates', field: 'ip_geo_coordinates', fallback: '-' },
             { label: 'Provider', field: 'ip_geo_source', fallback: '-' },

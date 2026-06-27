@@ -2,13 +2,16 @@ import { Form, useActionData, useLoaderData, useNavigation } from 'react-router'
 
 import { requireAuth } from '@/lib/auth.server'
 import { previewGeoipBackfill, runGeoipBackfill } from '@/lib/geoip.server'
+import { previewIpEvidenceRecompute, runIpEvidenceRecompute } from '@/lib/ip-evidence-recompute.server'
 import { isRoleAtLeast } from '@/lib/roles'
 
 import type { Route } from './+types/geoip-backfill'
 
 type ActionData = {
   error?: string
+  intent?: 'geoip' | 'ip_evidence_recompute'
   result?: Awaited<ReturnType<typeof runGeoipBackfill>>
+  recomputeResult?: Awaited<ReturnType<typeof runIpEvidenceRecompute>>
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -17,8 +20,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Response('Unauthorized', { status: 403, headers: auth.headers })
   }
 
-  const preview = await previewGeoipBackfill()
-  return { preview }
+  const [preview, recomputePreview] = await Promise.all([
+    previewGeoipBackfill(),
+    previewIpEvidenceRecompute(),
+  ])
+  return { preview, recomputePreview }
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -28,17 +34,31 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const formData = await request.formData()
+  const intent = String(formData.get('intent') ?? 'geoip')
+
+  if (intent === 'ip_evidence_recompute') {
+    const maxRowsRaw = Number(formData.get('max_rows_per_source') ?? 300)
+    const maxRowsPerSource =
+      Number.isFinite(maxRowsRaw) && maxRowsRaw > 0
+        ? Math.min(2000, Math.floor(maxRowsRaw))
+        : 300
+    const refreshSignals = String(formData.get('refresh_signals') ?? '') === 'on'
+
+    const recomputeResult = await runIpEvidenceRecompute({ maxRowsPerSource, refreshSignals })
+    return { intent: 'ip_evidence_recompute', recomputeResult } satisfies ActionData
+  }
+
   const maxLookupsRaw = Number(formData.get('max_lookups') ?? 200)
   const maxLookups = Number.isFinite(maxLookupsRaw) && maxLookupsRaw > 0
     ? Math.min(1000, Math.floor(maxLookupsRaw))
     : 200
 
   const result = await runGeoipBackfill({ maxLookups })
-  return { result } satisfies ActionData
+  return { intent: 'geoip', result } satisfies ActionData
 }
 
 export default function GeoipBackfillPage() {
-  const { preview } = useLoaderData<typeof loader>()
+  const { preview, recomputePreview } = useLoaderData<typeof loader>()
   const actionData = useActionData<typeof action>() as ActionData | undefined
   const navigation = useNavigation()
   const isSubmitting = navigation.state === 'submitting'
@@ -75,6 +95,7 @@ export default function GeoipBackfillPage() {
       </section>
 
       <Form method="post" className="rounded-lg border bg-card p-4 space-y-3">
+        <input type="hidden" name="intent" value="geoip" />
         <label className="grid gap-1 text-sm md:max-w-xs">
           <span className="text-muted-foreground">Max lookups this run (1-1000)</span>
           <input
@@ -95,13 +116,49 @@ export default function GeoipBackfillPage() {
         </button>
       </Form>
 
+      <section className="rounded-lg border bg-card p-4 space-y-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">IP evidence recompute</h2>
+        <div className="grid gap-2 text-sm md:grid-cols-2">
+          <p><span className="font-medium">Scanned form submissions:</span> {recomputePreview.scannedRows.formSubmission}</p>
+          <p><span className="font-medium">Scanned login events:</span> {recomputePreview.scannedRows.loginEvent}</p>
+          <p><span className="font-medium">Rows with any IP evidence:</span> {recomputePreview.rowsWithAnyIpEvidence}</p>
+          <p><span className="font-medium">Rows with unknown classification:</span> {recomputePreview.rowsWithUnknownClassification}</p>
+        </div>
+
+        <Form method="post" className="space-y-3">
+          <input type="hidden" name="intent" value="ip_evidence_recompute" />
+          <label className="grid gap-1 text-sm md:max-w-xs">
+            <span className="text-muted-foreground">Max rows per source (1-2000)</span>
+            <input
+              name="max_rows_per_source"
+              type="number"
+              min={1}
+              max={2000}
+              defaultValue={300}
+              className="h-10 rounded border border-input bg-background px-3"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input name="refresh_signals" type="checkbox" className="h-4 w-4" />
+            Refresh suspicious signals for touched profiles
+          </label>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+          >
+            {isSubmitting ? 'Running recompute...' : 'Run IP evidence recompute'}
+          </button>
+        </Form>
+      </section>
+
       {actionData?.error ? (
         <section className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
           {actionData.error}
         </section>
       ) : null}
 
-      {actionData?.result ? (
+      {actionData?.intent === 'geoip' && actionData?.result ? (
         <section className="rounded-lg border bg-card p-4 space-y-2">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Last run result</h2>
           <div className="grid gap-2 text-sm md:grid-cols-2">
@@ -136,6 +193,19 @@ export default function GeoipBackfillPage() {
               </pre>
             </div>
           ) : null}
+        </section>
+      ) : null}
+
+      {actionData?.intent === 'ip_evidence_recompute' && actionData?.recomputeResult ? (
+        <section className="rounded-lg border bg-card p-4 space-y-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Last recompute result</h2>
+          <div className="grid gap-2 text-sm md:grid-cols-2">
+            <p><span className="font-medium">Updated form submissions:</span> {actionData.recomputeResult.updatedRows.formSubmission}</p>
+            <p><span className="font-medium">Updated login events:</span> {actionData.recomputeResult.updatedRows.loginEvent}</p>
+            <p><span className="font-medium">Rows with IP evidence:</span> {actionData.recomputeResult.rowsWithAnyIpEvidence}</p>
+            <p><span className="font-medium">Unknown before run:</span> {actionData.recomputeResult.rowsWithUnknownClassification}</p>
+            <p><span className="font-medium">Signals refreshed:</span> {actionData.recomputeResult.refreshedSignalProfiles}</p>
+          </div>
         </section>
       ) : null}
     </div>
