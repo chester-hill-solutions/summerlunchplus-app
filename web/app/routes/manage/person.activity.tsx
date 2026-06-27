@@ -1,17 +1,9 @@
 import { useMemo } from 'react'
 import { useOutletContext } from 'react-router'
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import TableDisplay from './table-display'
 
 import type { PersonLoaderData } from './person.shared'
-import { formatDateTime } from './person.shared'
 
 const geoStatusLabel: Record<PersonLoaderData['activityEvents'][number]['geo_status'], string> = {
   geo_available: 'Geo available',
@@ -56,105 +48,90 @@ export default function ManagePersonActivityPage() {
         const geoLabel = [event.city, event.region, event.country_code].filter(Boolean).join(', ') || '-'
         const reasonCodes = Array.isArray(event.ip_reason_codes)
           ? event.ip_reason_codes.filter(code => typeof code === 'string').join(', ')
-          : '-'
+          : ''
 
         return {
-          ...event,
-          sourceLabel,
-          sourceDetail,
-          successLabel,
-          geoLabel,
-          reasonCodes,
-          classificationLabel:
+          occurred_at: event.occurred_at,
+          source: sourceLabel,
+          source_detail: sourceDetail,
+          success: successLabel,
+          email: event.login_email ?? '-',
+          ip_selected: event.ip_selected ?? '-',
+          source_confidence: [event.ip_selected_source, event.ip_parse_confidence].filter(Boolean).join(' / ') || '-',
+          classification:
             classificationLabel[event.ip_classification ?? 'unknown'] ?? event.ip_classification ?? 'Unknown',
+          confidence: event.ip_confidence_level ?? '-',
+          why: event.ip_reason_text ?? '-',
+          reason_codes: reasonCodes || '-',
+          proxy_match:
+            event.proxy_provider_match && event.proxy_match_cidr
+              ? `${event.proxy_provider_match} ${event.proxy_match_cidr}`
+              : '-',
+          classifier_version: event.ip_classifier_version ?? '-',
+          ip_legacy: event.ip_legacy ?? '-',
+          ip_candidate: event.ip_candidate ?? '-',
+          parsed_ip: event.ip_address ?? '-',
+          geo_status: geoStatusLabel[event.geo_status],
+          geo: geoLabel,
+          geo_reason: event.geo_reason,
+          forwarded_chain: event.forwarded_for ?? '-',
+          event_id: event.event_id,
         }
       }),
     [activityEvents, formNameById]
   )
 
-  return (
-    <section className="rounded-lg border bg-card p-4 space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Latest submission and login events</h2>
-        <p className="text-xs text-muted-foreground">
-          Shows raw IP capture fields, parsed IP, geolocation status, and explicit reason when location is unknown.
-        </p>
-      </div>
+  const columns = [
+    'occurred_at',
+    'source',
+    'source_detail',
+    'success',
+    'email',
+    'ip_selected',
+    'source_confidence',
+    'classification',
+    'confidence',
+    'why',
+    'reason_codes',
+    'proxy_match',
+    'classifier_version',
+    'ip_legacy',
+    'ip_candidate',
+    'parsed_ip',
+    'geo_status',
+    'geo',
+    'geo_reason',
+    'forwarded_chain',
+    'event_id',
+  ]
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>When</TableHead>
-            <TableHead>Source</TableHead>
-            <TableHead>Source detail</TableHead>
-            <TableHead>Success</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>IP selected (v2)</TableHead>
-            <TableHead>Source/confidence</TableHead>
-            <TableHead>Classification</TableHead>
-            <TableHead>Confidence</TableHead>
-            <TableHead>Why</TableHead>
-            <TableHead>Reason codes</TableHead>
-            <TableHead>Proxy match</TableHead>
-            <TableHead>Classifier</TableHead>
-            <TableHead>IP legacy</TableHead>
-            <TableHead>IP candidate</TableHead>
-            <TableHead>Parsed IP</TableHead>
-            <TableHead>Geo status</TableHead>
-            <TableHead>Geo</TableHead>
-            <TableHead>Reason</TableHead>
-            <TableHead>Forwarded chain</TableHead>
-            <TableHead>Event ID</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={21} className="text-center text-sm text-muted-foreground">
-                No recent submission or login events for this person.
-              </TableCell>
-            </TableRow>
-          ) : (
-            rows.map(row => (
-              <TableRow key={`${row.source}-${row.event_id}-${row.occurred_at}`}>
-                <TableCell>{formatDateTime(row.occurred_at)}</TableCell>
-                <TableCell>{row.sourceLabel}</TableCell>
-                <TableCell>{row.sourceDetail}</TableCell>
-                <TableCell>{row.successLabel}</TableCell>
-                <TableCell>{row.login_email ?? '-'}</TableCell>
-                <TableCell className="font-mono text-xs">{row.ip_selected ?? '-'}</TableCell>
-                <TableCell className="font-mono text-xs">
-                  {[row.ip_selected_source, row.ip_parse_confidence].filter(Boolean).join(' / ') || '-'}
-                </TableCell>
-                <TableCell>{row.classificationLabel}</TableCell>
-                <TableCell>{row.ip_confidence_level ?? '-'}</TableCell>
-                <TableCell className="max-w-[24rem]" title={row.ip_reason_text ?? undefined}>
-                  {row.ip_reason_text ?? '-'}
-                </TableCell>
-                <TableCell className="max-w-[16rem] truncate" title={row.reasonCodes}>
-                  {row.reasonCodes}
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {row.proxy_provider_match && row.proxy_match_cidr
-                    ? `${row.proxy_provider_match} ${row.proxy_match_cidr}`
-                    : '-'}
-                </TableCell>
-                <TableCell className="font-mono text-xs">{row.ip_classifier_version ?? '-'}</TableCell>
-                <TableCell className="font-mono text-xs">{row.ip_legacy ?? '-'}</TableCell>
-                <TableCell className="font-mono text-xs">{row.ip_candidate ?? '-'}</TableCell>
-                <TableCell className="font-mono text-xs">{row.ip_address ?? '-'}</TableCell>
-                <TableCell>{geoStatusLabel[row.geo_status]}</TableCell>
-                <TableCell>{row.geoLabel}</TableCell>
-                <TableCell className="max-w-[22rem]">{row.geo_reason}</TableCell>
-                <TableCell className="max-w-[18rem] truncate" title={row.forwarded_for ?? undefined}>
-                  {row.forwarded_for ?? '-'}
-                </TableCell>
-                <TableCell className="font-mono text-xs">{row.event_id.slice(0, 8)}</TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
-    </section>
-  )
+  return <TableDisplay data={{
+    columns,
+    rows,
+    label: 'Activity events',
+    tableName: 'person-activity',
+    columnMeta: {
+      occurred_at: { label: 'When', preferredWidth: 190 },
+      source: { label: 'Source', preferredWidth: 150 },
+      source_detail: { label: 'Source detail', preferredWidth: 200 },
+      success: { label: 'Success', preferredWidth: 110 },
+      email: { label: 'Email', preferredWidth: 220 },
+      ip_selected: { label: 'IP selected (v2)', preferredWidth: 180 },
+      source_confidence: { label: 'Source/confidence', preferredWidth: 220 },
+      classification: { label: 'Classification', preferredWidth: 180 },
+      confidence: { label: 'Confidence', preferredWidth: 130 },
+      why: { label: 'Why', preferredWidth: 360, truncate: true },
+      reason_codes: { label: 'Reason codes', preferredWidth: 300, truncate: true },
+      proxy_match: { label: 'Proxy match', preferredWidth: 220 },
+      classifier_version: { label: 'Classifier', preferredWidth: 120 },
+      ip_legacy: { label: 'IP legacy', preferredWidth: 180 },
+      ip_candidate: { label: 'IP candidate', preferredWidth: 180 },
+      parsed_ip: { label: 'Parsed IP', preferredWidth: 170 },
+      geo_status: { label: 'Geo status', preferredWidth: 180 },
+      geo: { label: 'Geo', preferredWidth: 220 },
+      geo_reason: { label: 'Reason', preferredWidth: 320, truncate: true },
+      forwarded_chain: { label: 'Forwarded chain', preferredWidth: 300, truncate: true },
+      event_id: { label: 'Event ID', preferredWidth: 250, truncate: true },
+    },
+  }} />
 }
