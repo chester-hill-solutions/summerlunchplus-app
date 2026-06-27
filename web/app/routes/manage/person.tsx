@@ -495,9 +495,6 @@ export async function action({ request }: LoaderFunctionArgs) {
     .from('profile')
     .update({
       federal_electoral_district_name: ridingName,
-      riding_lookup_status: ridingName ? 'matched' : 'skipped',
-      riding_lookup_error: null,
-      riding_lookup_last_attempt_at: new Date().toISOString(),
     })
     .eq('id', profileId)
 

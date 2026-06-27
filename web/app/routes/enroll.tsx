@@ -56,6 +56,14 @@ type ActionData = {
   error?: string
 }
 
+type EnrollmentRequestResult = {
+  ok: boolean
+  enrollment_id: string | null
+  enrollment_status: 'pending' | 'waitlisted' | 'approved' | 'rejected' | 'revoked' | null
+  error_code: string | null
+  error_message: string | null
+}
+
 const ENROLLMENT_SUCCESS_MESSAGE =
   "Thank you for registering for summerlunch+! We're excited to welcome your family this summer. Your registration has been received and is currently pending approval. Our team will review your information and send you a confirmation email shortly with your program details, class schedule, and next steps."
 
@@ -183,7 +191,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const workshopIds = workshops.map(workshop => workshop.id)
   const [workshopEnrollmentResult, upcomingClassesResult] = await Promise.all([
     workshopIds.length
-      ? supabase
+      ? adminClient
           .from('workshop_enrollment')
           .select('workshop_id, status')
           .in('workshop_id', workshopIds)
@@ -302,26 +310,6 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: 'Workshop not found' } satisfies ActionData
   }
 
-  const nowIso = new Date().toISOString()
-  const enrollmentOpenAt = workshopRow.enrollment_open_at
-  const enrollmentCloseAt = workshopRow.enrollment_close_at
-  const isOpen = (!enrollmentOpenAt || nowIso >= enrollmentOpenAt) && (!enrollmentCloseAt || nowIso <= enrollmentCloseAt)
-  if (!isOpen) {
-    return { error: 'Enrollment is closed for this workshop' } satisfies ActionData
-  }
-
-  const { data: existingEnrollment } = await supabase
-    .from('workshop_enrollment')
-    .select('id')
-    .eq('semester_id', workshopRow.semester_id)
-    .in('profile_id', family.familyProfileIds)
-    .limit(1)
-    .maybeSingle()
-
-  if (existingEnrollment?.id) {
-    return { error: 'Your family is already enrolled in one workshop for this semester.' } satisfies ActionData
-  }
-
   const targetProfileId = getFamilyEnrollmentProfileId(family)
   if (!targetProfileId) {
     return { error: 'Family enrollment profile not found.' } satisfies ActionData
@@ -348,46 +336,27 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: 'Please complete the pre-program survey before enrolling.' } satisfies ActionData
   }
 
-  const { data: workshopEnrollments } = await supabase
-    .from('workshop_enrollment')
-    .select('workshop_id, status')
-    .eq('workshop_id', workshop_id)
-
-  const capacitySnapshot = buildWorkshopCapacityMap(
-    [
-      {
-        id: workshop_id,
-        capacity: workshopRow.capacity,
-        wait_list_capacity: workshopRow.wait_list_capacity,
-      },
-    ],
-    workshopEnrollments ?? []
-  ).get(workshop_id)
-
-  if (!capacitySnapshot) {
-    return { error: 'Unable to evaluate workshop capacity' } satisfies ActionData
-  }
-
-  const enrollmentAction = getWorkshopEnrollmentAction(capacitySnapshot)
-  if (enrollmentAction === 'full') {
-    return { error: 'This workshop and its waitlist are full' } satisfies ActionData
-  }
-
-  const status = enrollmentAction === 'waitlist' ? 'waitlisted' : 'pending'
-
-  const { data: enrollmentRow, error: enrollmentError } = await supabase
-    .from('workshop_enrollment')
-    .insert({
-      workshop_id,
-      profile_id: targetProfileId,
-      status,
+  const { data: enrollmentResult, error: enrollmentRequestError } = await adminClient
+    .rpc('request_family_workshop_enrollment', {
+      p_workshop_id: workshop_id,
+      p_profile_id: targetProfileId,
+      p_family_profile_ids: family.familyProfileIds,
     })
-    .select('id')
     .single()
 
-  if (enrollmentError || !enrollmentRow?.id) {
-    return { error: enrollmentError?.message ?? 'Unable to create enrollment' } satisfies ActionData
+  const enrollmentRequest = enrollmentResult as EnrollmentRequestResult | null
+
+  if (enrollmentRequestError) {
+    return { error: enrollmentRequestError.message ?? 'Unable to create enrollment' } satisfies ActionData
   }
+
+  if (!enrollmentRequest?.ok || !enrollmentRequest.enrollment_id) {
+    return {
+      error: enrollmentRequest?.error_message ?? 'Unable to create enrollment',
+    } satisfies ActionData
+  }
+
+  const enrollmentId = enrollmentRequest.enrollment_id
 
   const { data: familyProfilesData } = await adminClient
     .from('profile')
@@ -424,7 +393,7 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
-  const notificationEventKey = `workshop_enrollment:${enrollmentRow.id}:family_requested:v1`
+  const notificationEventKey = `workshop_enrollment:${enrollmentId}:family_requested:v1`
   setTimeout(() => {
     void Promise.all(
       Array.from(emailByLowercase.entries()).map(async ([normalizedEmail, recipient]) => {
@@ -441,7 +410,7 @@ export async function action({ request }: Route.ActionArgs) {
           recipientUserId: recipient.userId,
           profileId: recipient.profileId,
           familyProfileId: targetProfileId,
-          workshopEnrollmentId: enrollmentRow.id,
+          workshopEnrollmentId: enrollmentId,
         })
       })
     )
@@ -449,14 +418,14 @@ export async function action({ request }: Route.ActionArgs) {
         const failedNotifications = notificationResults.filter(result => result.status === 'failed')
         if (failedNotifications.length > 0) {
           console.error('[enroll] failed to send some family enrollment notifications', {
-            workshopEnrollmentId: enrollmentRow.id,
+            workshopEnrollmentId: enrollmentId,
             failures: failedNotifications,
           })
         }
       })
       .catch(error => {
         console.error('[enroll] notification dispatch failed', {
-          workshopEnrollmentId: enrollmentRow.id,
+          workshopEnrollmentId: enrollmentId,
           error,
         })
       })

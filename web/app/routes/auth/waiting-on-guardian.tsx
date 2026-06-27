@@ -119,10 +119,10 @@ const sendGuardianInvite = async ({
     )
 
   if (inviteTableError) {
-    return { error: inviteTableError.message }
+    return { error: inviteTableError.message, inviteeUserId }
   }
 
-  return { error: null }
+  return { error: null, inviteeUserId }
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -257,6 +257,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (inviteResult.error) {
     return { error: inviteResult.error }
+  }
+
+  if (inviteResult.inviteeUserId) {
+    const { error: roleSeedError } = await adminClient
+      .from('user_roles')
+      .upsert(
+        {
+          user_id: inviteResult.inviteeUserId,
+          role: 'guardian',
+          assigned_by: inviteResult.inviteeUserId,
+        },
+        { onConflict: 'user_id' }
+      )
+
+    if (roleSeedError) {
+      return { error: roleSeedError.message }
+    }
+
+    const { error: profileLinkError } = await adminClient
+      .from('profile')
+      .update({ user_id: inviteResult.inviteeUserId })
+      .eq('id', guardianId)
+      .eq('role', 'guardian')
+
+    if (profileLinkError) {
+      return { error: profileLinkError.message }
+    }
   }
 
   return { ok: true, message: `Invite resent to ${guardianProfile.email}` }
