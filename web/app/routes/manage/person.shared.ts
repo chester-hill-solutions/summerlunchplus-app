@@ -70,6 +70,7 @@ export type PersonLoaderData = {
     country_code: string | null
     region: string | null
     city: string | null
+    org: string | null
     timezone: string | null
     latitude: number | null
     longitude: number | null
@@ -90,6 +91,7 @@ export type PersonLoaderData = {
     country_code: string | null
     region: string | null
     city: string | null
+    org: string | null
     timezone: string | null
     latitude: number | null
     longitude: number | null

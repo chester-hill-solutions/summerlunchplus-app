@@ -150,6 +150,7 @@ export default function ManagePersonOverviewPage() {
                   <span className="font-medium">Geo:</span>{' '}
                   {[entry.city, entry.region, entry.country_code].filter(Boolean).join(', ') || '-'}
                 </p>
+                <p><span className="font-medium">Org:</span> {entry.org ?? '-'}</p>
                 <p><span className="font-medium">Geo status:</span> {geoStatusLabel[entry.geo_status]}</p>
                 <p><span className="font-medium">Reason:</span> {entry.geo_reason}</p>
                 <p>

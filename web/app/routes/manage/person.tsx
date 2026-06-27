@@ -218,6 +218,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       country_code: string | null
       region: string | null
       city: string | null
+      org: string | null
       timezone: string | null
       latitude: number | null
       longitude: number | null
@@ -229,7 +230,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (uniqueIps.length) {
     const { data: geoRows } = await (adminClient.from('ip_geolocation_cache' as any) as any)
-      .select('ip, country_code, region, city, timezone, latitude, longitude')
+      .select('ip, country_code, region, city, org, timezone, latitude, longitude')
       .in('ip', uniqueIps)
 
     for (const row of geoRows ?? []) {
@@ -238,6 +239,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         country_code: typeof row.country_code === 'string' ? row.country_code : null,
         region: typeof row.region === 'string' ? row.region : null,
         city: typeof row.city === 'string' ? row.city : null,
+        org: typeof row.org === 'string' ? row.org : null,
         timezone: typeof row.timezone === 'string' ? row.timezone : null,
         latitude: typeof row.latitude === 'number' ? row.latitude : null,
         longitude: typeof row.longitude === 'number' ? row.longitude : null,
@@ -255,6 +257,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           country_code: location.countryCode,
           region: location.region,
           city: location.city,
+          org: location.org,
           timezone: location.timezone,
           latitude: location.latitude,
           longitude: location.longitude,
@@ -301,6 +304,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         country_code: geo?.country_code ?? null,
         region: geo?.region ?? null,
         city: geo?.city ?? null,
+        org: geo?.org ?? null,
         timezone: geo?.timezone ?? null,
         latitude: geo?.latitude ?? null,
         longitude: geo?.longitude ?? null,
