@@ -58,7 +58,10 @@ const firstForwardedToken = (value: unknown) => {
   )
 }
 
-const ipCandidateFromRow = (row: { ip_address?: unknown; forwarded_for?: unknown }) => {
+const ipCandidateFromRow = (row: { ip_selected?: unknown; ip_address?: unknown; forwarded_for?: unknown }) => {
+  if (typeof row.ip_selected === 'string' && row.ip_selected.trim()) {
+    return row.ip_selected.trim()
+  }
   if (typeof row.ip_address === 'string' && row.ip_address.trim()) {
     return row.ip_address.trim()
   }
@@ -109,11 +112,11 @@ const collectGeoipBackfillCandidates = async (
 
   const [formSubmissionResult, loginEventResult] = await Promise.all([
     (adminClient.from('form_submission' as any) as any)
-      .select('ip_address, forwarded_for')
+      .select('ip_selected, ip_address, forwarded_for')
       .order('submitted_at', { ascending: false })
       .limit(recentLimitPerSource),
     (adminClient.from('login_event' as any) as any)
-      .select('ip_address, forwarded_for')
+      .select('ip_selected, ip_address, forwarded_for')
       .order('event_at', { ascending: false })
       .limit(recentLimitPerSource),
   ])
@@ -126,6 +129,7 @@ const collectGeoipBackfillCandidates = async (
   const uniqueIps = new Set<string>()
   for (const row of (formSubmissionResult.data ?? []) as Array<Record<string, unknown>>) {
     const candidate = ipCandidateFromRow({
+      ip_selected: row.ip_selected,
       ip_address: row.ip_address,
       forwarded_for: row.forwarded_for,
     })
@@ -134,6 +138,7 @@ const collectGeoipBackfillCandidates = async (
   }
   for (const row of (loginEventResult.data ?? []) as Array<Record<string, unknown>>) {
     const candidate = ipCandidateFromRow({
+      ip_selected: row.ip_selected,
       ip_address: row.ip_address,
       forwarded_for: row.forwarded_for,
     })

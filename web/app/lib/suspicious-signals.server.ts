@@ -26,6 +26,7 @@ type LoginEventRow = {
   id: string
   event_at: string
   ip_address: unknown
+  ip_selected: unknown
   forwarded_for: string | null
   metadata: Json
 }
@@ -87,7 +88,7 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
       .in('id', familyProfileIds),
     adminClient
       .from('form_submission')
-      .select('id, profile_id, submitted_at, ip_address, forwarded_for, metadata')
+      .select('id, profile_id, submitted_at, ip_address, ip_selected, forwarded_for, metadata')
       .in('profile_id', familyProfileIds)
       .order('submitted_at', { ascending: false })
       .limit(40),
@@ -120,7 +121,9 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
       id: submission.id,
       profile_id: submission.profile_id,
       submitted_at: submission.submitted_at,
-      ip_address: typeof submission.ip_address === 'string' ? submission.ip_address : null,
+      ip_address:
+        (typeof submission.ip_selected === 'string' && submission.ip_selected) ||
+        (typeof submission.ip_address === 'string' ? submission.ip_address : null),
       metadata: (submission.metadata ?? {}) as Json,
     }))
   )
@@ -196,7 +199,7 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
     const { data: loginEvents } = subjectUserId
       ? await adminClient
           .from('login_event')
-          .select('id, event_at, ip_address, forwarded_for, metadata')
+          .select('id, event_at, ip_address, ip_selected, forwarded_for, metadata')
           .eq('user_id', subjectUserId)
           .order('event_at', { ascending: false })
           .limit(20)
@@ -206,6 +209,7 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
 
     for (const submission of subjectSubmissions) {
       const ipAddress =
+        (typeof submission.ip_selected === 'string' && submission.ip_selected) ||
         (typeof submission.ip_address === 'string' && submission.ip_address) ||
         parseForwardedFirstIp(typeof submission.forwarded_for === 'string' ? submission.forwarded_for : null)
       if (!ipAddress || !submission.id || !submission.submitted_at) continue
@@ -219,6 +223,7 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
 
     for (const event of (loginEvents ?? []) as LoginEventRow[]) {
       const ipAddress =
+        (typeof event.ip_selected === 'string' && event.ip_selected) ||
         (typeof event.ip_address === 'string' && event.ip_address) || parseForwardedFirstIp(event.forwarded_for)
       if (!ipAddress || !event.id || !event.event_at) continue
       eventCandidates.push({

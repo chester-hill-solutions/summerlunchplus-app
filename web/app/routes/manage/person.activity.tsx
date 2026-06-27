@@ -22,6 +22,15 @@ const geoStatusLabel: Record<PersonLoaderData['activityEvents'][number]['geo_sta
   cached_no_geo: 'Lookup cached, no geo result',
 }
 
+const classificationLabel: Record<string, string> = {
+  client_confirmed: 'Client confirmed',
+  likely_client: 'Likely client',
+  ambiguous: 'Spectrum / ambiguous',
+  likely_proxy: 'Likely proxy',
+  proxy_confirmed: 'Proxy confirmed',
+  unknown: 'Unknown',
+}
+
 export default function ManagePersonActivityPage() {
   const { activityEvents, formNameById } = useOutletContext<PersonLoaderData>()
 
@@ -45,6 +54,9 @@ export default function ManagePersonActivityPage() {
           : '-'
 
         const geoLabel = [event.city, event.region, event.country_code].filter(Boolean).join(', ') || '-'
+        const reasonCodes = Array.isArray(event.ip_reason_codes)
+          ? event.ip_reason_codes.filter(code => typeof code === 'string').join(', ')
+          : '-'
 
         return {
           ...event,
@@ -52,6 +64,9 @@ export default function ManagePersonActivityPage() {
           sourceDetail,
           successLabel,
           geoLabel,
+          reasonCodes,
+          classificationLabel:
+            classificationLabel[event.ip_classification ?? 'unknown'] ?? event.ip_classification ?? 'Unknown',
         }
       }),
     [activityEvents, formNameById]
@@ -74,6 +89,15 @@ export default function ManagePersonActivityPage() {
             <TableHead>Source detail</TableHead>
             <TableHead>Success</TableHead>
             <TableHead>Email</TableHead>
+            <TableHead>IP selected (v2)</TableHead>
+            <TableHead>Source/confidence</TableHead>
+            <TableHead>Classification</TableHead>
+            <TableHead>Confidence</TableHead>
+            <TableHead>Why</TableHead>
+            <TableHead>Reason codes</TableHead>
+            <TableHead>Proxy match</TableHead>
+            <TableHead>Classifier</TableHead>
+            <TableHead>IP legacy</TableHead>
             <TableHead>IP candidate</TableHead>
             <TableHead>Parsed IP</TableHead>
             <TableHead>Geo status</TableHead>
@@ -86,7 +110,7 @@ export default function ManagePersonActivityPage() {
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={12} className="text-center text-sm text-muted-foreground">
+              <TableCell colSpan={21} className="text-center text-sm text-muted-foreground">
                 No recent submission or login events for this person.
               </TableCell>
             </TableRow>
@@ -98,6 +122,25 @@ export default function ManagePersonActivityPage() {
                 <TableCell>{row.sourceDetail}</TableCell>
                 <TableCell>{row.successLabel}</TableCell>
                 <TableCell>{row.login_email ?? '-'}</TableCell>
+                <TableCell className="font-mono text-xs">{row.ip_selected ?? '-'}</TableCell>
+                <TableCell className="font-mono text-xs">
+                  {[row.ip_selected_source, row.ip_parse_confidence].filter(Boolean).join(' / ') || '-'}
+                </TableCell>
+                <TableCell>{row.classificationLabel}</TableCell>
+                <TableCell>{row.ip_confidence_level ?? '-'}</TableCell>
+                <TableCell className="max-w-[24rem]" title={row.ip_reason_text ?? undefined}>
+                  {row.ip_reason_text ?? '-'}
+                </TableCell>
+                <TableCell className="max-w-[16rem] truncate" title={row.reasonCodes}>
+                  {row.reasonCodes}
+                </TableCell>
+                <TableCell className="font-mono text-xs">
+                  {row.proxy_provider_match && row.proxy_match_cidr
+                    ? `${row.proxy_provider_match} ${row.proxy_match_cidr}`
+                    : '-'}
+                </TableCell>
+                <TableCell className="font-mono text-xs">{row.ip_classifier_version ?? '-'}</TableCell>
+                <TableCell className="font-mono text-xs">{row.ip_legacy ?? '-'}</TableCell>
                 <TableCell className="font-mono text-xs">{row.ip_candidate ?? '-'}</TableCell>
                 <TableCell className="font-mono text-xs">{row.ip_address ?? '-'}</TableCell>
                 <TableCell>{geoStatusLabel[row.geo_status]}</TableCell>
