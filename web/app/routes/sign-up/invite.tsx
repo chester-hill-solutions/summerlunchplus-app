@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { adminClient } from '@/lib/supabase/adminClient'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -78,24 +79,109 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { error: 'Session unavailable' }
   }
 
+  const authUser = userData.user
+
+  const ensureLinkedProfile = async () => {
+    const { data: directProfile, error: directProfileError } = await supabase
+      .from('profile')
+      .select('id')
+      .eq('user_id', authUser.id)
+      .maybeSingle()
+
+    if (directProfileError) {
+      return { profileId: null, error: directProfileError.message }
+    }
+
+    if (directProfile?.id) {
+      return { profileId: directProfile.id, error: null }
+    }
+
+    const normalizedEmail = authUser.email?.trim().toLowerCase()
+    if (!normalizedEmail) {
+      return { profileId: null, error: 'Unable to find your profile. Please contact support.' }
+    }
+
+    const { data: inviteRoleRow } = inviteId
+      ? await adminClient.from('invites').select('role').eq('id', inviteId).maybeSingle()
+      : { data: null }
+    const inviteRole = inviteRoleRow?.role
+
+    const profileLookup = adminClient
+      .from('profile')
+      .select('id, user_id, role')
+      .eq('email', normalizedEmail)
+      .limit(1)
+
+    const { data: profileByEmail, error: profileByEmailError } =
+      inviteRole === 'guardian' || inviteRole === 'student'
+        ? await profileLookup.eq('role', inviteRole).maybeSingle()
+        : await profileLookup.maybeSingle()
+
+    if (profileByEmailError || !profileByEmail?.id) {
+      return {
+        profileId: null,
+        error: profileByEmailError?.message ?? 'Unable to find your profile. Please contact support.',
+      }
+    }
+
+    if (profileByEmail.user_id && profileByEmail.user_id !== authUser.id) {
+      return { profileId: null, error: 'This invite is already linked to another account.' }
+    }
+
+    const { error: roleSeedError } = await adminClient
+      .from('user_roles')
+      .upsert(
+        {
+          user_id: authUser.id,
+          role: profileByEmail.role,
+          assigned_by: authUser.id,
+        },
+        { onConflict: 'user_id' }
+      )
+
+    if (roleSeedError) {
+      return { profileId: null, error: roleSeedError.message }
+    }
+
+    const { error: relinkError } = await adminClient
+      .from('profile')
+      .update({ user_id: authUser.id })
+      .eq('id', profileByEmail.id)
+
+    if (relinkError) {
+      return { profileId: null, error: relinkError.message }
+    }
+
+    return { profileId: profileByEmail.id, error: null }
+  }
+
+  const { profileId, error: ensureProfileError } = await ensureLinkedProfile()
+  if (ensureProfileError || !profileId) {
+    return { error: ensureProfileError ?? 'Unable to prepare your profile. Please contact support.' }
+  }
+
   const { error: updatePasswordError } = await supabase.auth.updateUser({ password })
   if (updatePasswordError) {
     return { error: updatePasswordError.message }
   }
 
-  await supabase
+  const { error: passwordSetError } = await adminClient
     .from('profile')
     .update({ password_set: true })
-    .eq('user_id', userData.user.id)
+    .eq('id', profileId)
 
-  await supabase.rpc('sync_auto_assigned_forms_for_user', { p_user_id: userData.user.id })
+  if (passwordSetError) {
+    return { error: passwordSetError.message }
+  }
+
+  await supabase.rpc('sync_auto_assigned_forms_for_user', { p_user_id: authUser.id })
 
   if (inviteId) {
     await supabase
       .from('invites')
       .update({
         status: 'confirmed',
-        invitee_user_id: userData.user.id,
+        invitee_user_id: authUser.id,
         confirmed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
