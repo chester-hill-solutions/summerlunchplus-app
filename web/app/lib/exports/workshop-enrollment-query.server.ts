@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from 'react-router'
 
 import { requireAuth } from '@/lib/auth.server'
+import { concernBandForScore, concernBandForSignals, concernRowClass, scoreConcernSignals } from '@/lib/concern-scoring'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { type Database } from '@/lib/database.types'
 import { isRoleAtLeast } from '@/lib/roles'
@@ -66,12 +67,12 @@ export async function loadWorkshopEnrollmentData(request: Request) {
     }
   }
 
-  let openSignalsByProfileId = new Map<string, Array<{ severity: string; summary: string }>>()
+  let openSignalsByProfileId = new Map<string, Array<{ signal_type: string; severity: string; summary: string }>>()
 
   if (profileIds.length) {
     const { data: openSignals, error: openSignalsError } = await adminClient
       .from('suspicious_signal')
-      .select('family_profile_ids, severity, summary, priority_score')
+      .select('family_profile_ids, signal_type, severity, summary, priority_score')
       .eq('status', 'open')
       .order('priority_score', { ascending: false })
       .order('created_at', { ascending: false })
@@ -82,12 +83,12 @@ export async function loadWorkshopEnrollmentData(request: Request) {
           for (const profileId of signal.family_profile_ids ?? []) {
             if (!profileIds.includes(profileId)) continue
             const existing = acc.get(profileId) ?? []
-            existing.push({ severity: signal.severity, summary: signal.summary })
+            existing.push({ signal_type: signal.signal_type, severity: signal.severity, summary: signal.summary })
             acc.set(profileId, existing)
           }
           return acc
         },
-        new Map<string, Array<{ severity: string; summary: string }>>()
+        new Map<string, Array<{ signal_type: string; severity: string; summary: string }>>()
       )
     }
   }
@@ -125,14 +126,18 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       return baseRow
     }
 
-    const hasHigh = profileSignals.some(signal => signal.severity === 'high')
+    const concernScore = scoreConcernSignals(profileSignals)
+    const concernBand = concernBandForSignals(profileSignals, concernScore)
+    const rowClass = concernRowClass(concernBand)
     const primarySignal = profileSignals[0]
     const countLabel = profileSignals.length === 1 ? '1 open signal' : `${profileSignals.length} open signals`
 
     return {
       ...baseRow,
-      _row_class: hasHigh ? 'bg-amber-50' : 'bg-amber-50/70',
-      _row_signal_summary: `${countLabel}: ${primarySignal.summary}`,
+      _row_class: rowClass ?? undefined,
+      _row_concern_score: concernScore,
+      _row_concern_band: concernBand,
+      _row_signal_summary: `Concern ${concernScore} (${concernBand}) · ${countLabel}: ${primarySignal.summary}`,
     }
   })
 

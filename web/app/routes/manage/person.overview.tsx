@@ -140,22 +140,29 @@ export default function ManagePersonOverviewPage() {
           <ul className="mt-2 space-y-2 text-sm">
             {ipEvidence.slice(0, 4).map((entry, index) => (
               <li key={`${entry.source}-${entry.occurred_at}-${index}`} className="rounded border bg-muted/20 p-2">
+                {(() => {
+                  const geoValue = [entry.city, entry.region, entry.country_code].filter(Boolean).join(', ') || '-'
+                  const geoText =
+                    entry.geo_status === 'geo_available'
+                      ? geoValue
+                      : `${geoStatusLabel[entry.geo_status]} - ${entry.geo_reason}`
+                  const ipValue = entry.ip_address ?? entry.ip_candidate ?? '-'
+
+                  return (
+                    <>
                 <p>
                   <span className="font-medium">Source:</span> {entry.source === 'form_submission' ? 'Form submission' : 'Login event'}
                 </p>
                 <p><span className="font-medium">When:</span> {formatDateTime(entry.occurred_at)}</p>
-                <p><span className="font-medium">IP candidate:</span> {entry.ip_candidate ?? '-'}</p>
-                <p><span className="font-medium">Parsed IP:</span> {entry.ip_address ?? '-'}</p>
-                <p>
-                  <span className="font-medium">Geo:</span>{' '}
-                  {[entry.city, entry.region, entry.country_code].filter(Boolean).join(', ') || '-'}
-                </p>
+                <p><span className="font-medium">IP:</span> {ipValue}</p>
+                <p><span className="font-medium">Geo:</span> {geoText}</p>
                 <p><span className="font-medium">Org:</span> {entry.org ?? '-'}</p>
-                <p><span className="font-medium">Geo status:</span> {geoStatusLabel[entry.geo_status]}</p>
-                <p><span className="font-medium">Reason:</span> {entry.geo_reason}</p>
                 <p>
                   <span className="font-medium">Timezone:</span> {entry.timezone ?? '-'}
                 </p>
+                    </>
+                  )
+                })()}
               </li>
             ))}
           </ul>
