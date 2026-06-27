@@ -110,6 +110,7 @@ export default function ManagePersonActivityPage() {
     rows,
     label: 'Activity events',
     tableName: 'person-activity',
+    enableCellClickFilter: false,
     columnMeta: {
       occurred_at: { label: 'When', preferredWidth: 190 },
       source: { label: 'Source', preferredWidth: 150 },

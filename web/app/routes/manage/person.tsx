@@ -569,7 +569,8 @@ export default function ManagePersonLayoutPage() {
         </Button>
       </div>
 
-      <nav className="flex flex-wrap gap-2 border-b pb-2">
+      <nav className="sticky left-0 top-0 z-30 -mx-2 overflow-x-auto border-b bg-background/95 px-2 pb-2 pt-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex min-w-max gap-2">
         {personTabs.map(tab => (
           <NavLink
             key={tab.to}
@@ -585,6 +586,7 @@ export default function ManagePersonLayoutPage() {
             {tab.label}
           </NavLink>
         ))}
+        </div>
       </nav>
 
       <Outlet context={data} />

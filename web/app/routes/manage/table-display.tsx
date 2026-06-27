@@ -122,6 +122,7 @@ type LoaderData = {
   label: string
   tableName: string
   tableVariant?: 'default' | 'pivot'
+  enableCellClickFilter?: boolean
   columnMeta?: Record<string, {
     label?: string
     truncate?: boolean
@@ -603,6 +604,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     label = 'Table',
     tableName = '',
     tableVariant = 'default',
+    enableCellClickFilter = true,
     columnMeta = {},
     canEditStatus,
     editorConfig,
@@ -630,6 +632,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [columnMinWidths, setColumnMinWidths] = useState<Record<string, number>>({})
   const [resizeState, setResizeState] = useState<ResizeState | null>(null)
+  const [pinnedHoverCardCellId, setPinnedHoverCardCellId] = useState<string | null>(null)
   const loadingEnrichmentProfileIdsRef = useRef<Set<string>>(new Set())
   const loadingDistrictRidingsRef = useRef<Set<string>>(new Set())
   const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -747,6 +750,31 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       window.removeEventListener('mouseup', onMouseUp)
     }
   }, [columnMinWidths, resizeState])
+
+  useEffect(() => {
+    if (!pinnedHoverCardCellId) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      const hovercardRoot = target?.closest('[data-hovercard-cell-id]') as HTMLElement | null
+      if (hovercardRoot?.dataset.hovercardCellId === pinnedHoverCardCellId) return
+      setPinnedHoverCardCellId(null)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPinnedHoverCardCellId(null)
+      }
+    }
+
+    document.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [pinnedHoverCardCellId])
 
   const syncSearch = (
     nextFilters: Record<string, string[]>,
@@ -1850,7 +1878,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         </div>
       </div>
 
-      <div className="min-w-0 border-y">
+      <div className="min-w-0 overflow-x-auto border-y">
         <table className="w-max table-fixed text-sm" style={{ width: `${tableWidth}px`, minWidth: `${tableWidth}px` }}>
           <colgroup>
             {columns.map(column => (
@@ -2051,6 +2079,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                       const personLink = personLinkForCell(tableName, column, row, `${location.pathname}${location.search}`)
                       const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
                       const filterable = columnMeta[column]?.filterable ?? true
+                      const canClickFilter = enableCellClickFilter && filterable
                       const cellValue = getCellValue(column, row, tableName)
                       const maxChars = columnMeta[column]?.maxChars
                       const displayValue =
@@ -2058,6 +2087,8 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           ? `${cellValue.slice(0, maxChars)}...`
                           : cellValue
                       const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard)
+                      const hoverCardCellId = `row-${absoluteRowIndex}-col-${column}`
+                      const isHoverCardPinned = pinnedHoverCardCellId === hoverCardCellId
 
                       const content = isFormNameLink ? (
                         <Link
@@ -2111,11 +2142,24 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           title={cellValue || '(empty)'}
                           className={
                             isNumericColumn(column)
-                              ? 'w-24 cursor-pointer whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums hover:bg-muted/30'
-                              : 'cursor-pointer px-4 py-2 font-mono hover:bg-muted/30'
+                              ? `w-24 whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''}`
+                              : `px-4 py-2 font-mono select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''}`
                           }
-                          onClick={() => {
-                            if (!filterable) return
+                          onClick={event => {
+                            const interactiveTarget = (event.target as HTMLElement | null)?.closest(
+                              'a,button,input,select,textarea,label'
+                            )
+                            if (interactiveTarget) return
+
+                            const selectedText = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() : ''
+                            if (selectedText) return
+
+                            if (hoverCardData) {
+                              setPinnedHoverCardCellId(prev => (prev === hoverCardCellId ? null : hoverCardCellId))
+                              return
+                            }
+
+                            if (!canClickFilter) return
                             appendFilter(column, cellValue)
                           }}
                           onMouseEnter={() => {
@@ -2126,12 +2170,15 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           }}
                         >
                           {hoverCardData ? (
-                            <div className="group/hovercard relative inline-block max-w-full">
+                            <div className="group/hovercard relative inline-block max-w-full" data-hovercard-cell-id={hoverCardCellId}>
                               {content}
                               <div
-                                className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:pointer-events-auto group-hover/hovercard:visible group-hover/hovercard:opacity-100 group-focus-within/hovercard:pointer-events-auto group-focus-within/hovercard:visible group-focus-within/hovercard:opacity-100 select-text"
+                                className={`absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground shadow-lg transition-opacity select-text ${
+                                  isHoverCardPinned
+                                    ? 'pointer-events-auto visible opacity-100'
+                                    : 'pointer-events-none invisible opacity-0 group-hover/hovercard:pointer-events-auto group-hover/hovercard:visible group-hover/hovercard:opacity-100 group-focus-within/hovercard:pointer-events-auto group-focus-within/hovercard:visible group-focus-within/hovercard:opacity-100'
+                                }`}
                                 onClick={event => event.stopPropagation()}
-                                onMouseDown={event => event.stopPropagation()}
                               >
                                 {hoverCardData.title || hoverCardData.columns?.rightTitle ? (
                                   <div className="mb-1 grid grid-cols-2 gap-3">
