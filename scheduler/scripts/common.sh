@@ -20,12 +20,23 @@ post_json() {
   local secret_value="$3"
   local run_id_value="$4"
 
+  local secret_header_name_lc
+  secret_header_name_lc="$(printf '%s' "$secret_header_name" | tr '[:upper:]' '[:lower:]')"
+
+  local -a header_args
+  header_args=(
+    -H "x-internal-runner-secret: ${secret_value}"
+    -H "x-cron-run-id: ${run_id_value}"
+  )
+
+  if [[ -n "$secret_header_name" && "$secret_header_name_lc" != "x-internal-runner-secret" ]]; then
+    header_args+=( -H "${secret_header_name}: ${secret_value}" )
+  fi
+
   curl --fail --silent --show-error \
     --max-time 60 \
     --retry 2 \
     --retry-delay 3 \
     -X POST "$url" \
-    -H "${secret_header_name}: ${secret_value}" \
-    -H "x-cron-run-id: ${run_id_value}" \
-    -H "x-internal-runner-secret: ${secret_value}"
+    "${header_args[@]}"
 }
