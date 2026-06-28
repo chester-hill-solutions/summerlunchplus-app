@@ -1,3 +1,5 @@
+import { normalizeZoomApiEndpoint } from '@/lib/zoom-jobs/endpoint.server'
+
 type ZoomRegistrantRequest = {
   first_name: string
   last_name: string
@@ -18,14 +20,11 @@ type ZoomCreateMeetingResponse = {
   join_url: string
 }
 
-const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '')
-
 const getConfig = () => {
   const endpoint = (process.env.ZOOM_API_ENDPOINT ?? '').trim()
   const apiKey = (process.env.ZOOM_API_KEY ?? '').trim()
-  if (!endpoint) throw new Error('Missing ZOOM_API_ENDPOINT')
   if (!apiKey) throw new Error('Missing ZOOM_API_KEY')
-  return { endpoint: trimTrailingSlash(endpoint), apiKey }
+  return { endpoint: normalizeZoomApiEndpoint(endpoint), apiKey }
 }
 
 const parsePayload = async (response: Response) => {
