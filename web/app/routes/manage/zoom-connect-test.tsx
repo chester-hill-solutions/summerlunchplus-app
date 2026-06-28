@@ -3,6 +3,7 @@ import { Form, useActionData, useNavigation } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
+import { normalizeZoomApiEndpoint } from '@/lib/zoom-jobs/endpoint.server'
 
 import type { Route } from './+types/zoom-connect-test'
 
@@ -19,8 +20,6 @@ type ActionData =
       payload?: unknown
     }
 
-const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '')
-
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   if (!isRoleAtLeast(auth.claims.role, 'staff')) {
@@ -35,17 +34,24 @@ export async function action({ request }: Route.ActionArgs): Promise<ActionData>
     return { ok: false, error: 'Unauthorized' }
   }
 
-  const endpoint = (process.env.ZOOM_API_ENDPOINT ?? '').trim()
+  const endpointRaw = (process.env.ZOOM_API_ENDPOINT ?? '').trim()
   const apiKey = (process.env.ZOOM_API_KEY ?? '').trim()
 
-  if (!endpoint) {
-    return { ok: false, error: 'Missing ZOOM_API_ENDPOINT.' }
-  }
   if (!apiKey) {
     return { ok: false, error: 'Missing ZOOM_API_KEY.' }
   }
 
-  const targetUrl = `${trimTrailingSlash(endpoint)}/zoom/connect`
+  let endpoint: string
+  try {
+    endpoint = normalizeZoomApiEndpoint(endpointRaw)
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Missing ZOOM_API_ENDPOINT.',
+    }
+  }
+
+  const targetUrl = `${endpoint}/zoom/connect`
 
   try {
     const response = await fetch(targetUrl, {
