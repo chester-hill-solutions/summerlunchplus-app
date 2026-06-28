@@ -1,11 +1,11 @@
-from fastapi import Depends, FastAPI, Query
-from pydantic import BaseModel
+from fastapi import Depends, FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.auth import get_api_key
 from app.cache import _participants_cache, _past_meetings_cache, get_cached, set_cached
 from app.config import settings
 from app.transforms import transform_meetings, transform_participants
-from app.zoom import ZoomClient
+from app.zoom import MeetingInProgressError, ZoomClient
 
 app = FastAPI(title="Zoom API Service")
 
@@ -19,33 +19,49 @@ def _zoom() -> ZoomClient:
 
 
 class CreateMeetingRequest(BaseModel):
-    topic: str
-    start_time: str  # ISO 8601, e.g. "2026-06-15T10:00:00"
-    duration: int    # minutes
+    topic: str = Field(description="Meeting title.", examples=["Summer Lunch Program - Week 3"])
+    start_time: str = Field(
+        description="Meeting start time in ISO 8601 format. Include a timezone offset or 'Z' for UTC — "
+        "e.g. '2026-06-15T10:00:00Z' (for UTC) or '2026-06-15T10:00:00-04:00' (for EDT). "
+        "Bare datetimes with no offset are interpreted as UTC by Zoom.",
+        examples=["2026-06-15T10:00:00Z"],
+    )
+    duration: int = Field(description="Meeting duration in minutes.", examples=[60])
+
+
+class CreateMeetingResponse(BaseModel):
+    id: int = Field(description="Numeric meeting ID used for registration.")
+    uuid: str = Field(description="Unique meeting UUID used for participant reports.")
+    join_url: str = Field(description="URL participants use to join the meeting.")
 
 
 class Registrant(BaseModel):
-    first_name: str
-    last_name: str
-    email: str
+    first_name: str = Field(description="Registrant's first name.", examples=["Jane"])
+    last_name: str = Field(description="Registrant's last name.", examples=["Doe"])
+    email: str = Field(description="Registrant's email address.", examples=["jane.doe@example.com"])
 
 
 # --- Liveness / auth checks ---
 
 @app.get("/health")
-def health():
+def health() -> dict[str, str]:
+    """Unauthenticated liveness check. Returns `{"status": "ok"}` if the server is running."""
     return {"status": "ok"}
 
 
 @app.get("/healthz", dependencies=[Depends(get_api_key)])
-def healthz():
+def healthz() -> dict[str, str]:
+    """Authenticated readiness check. Returns `{"status": "ok"}` if the server is running and the API key is valid."""
     return {"status": "ok"}
 
 
 # --- Zoom credential check ---
 
 @app.post("/zoom/connect", dependencies=[Depends(get_api_key)])
-def zoom_connect():
+def zoom_connect() -> dict:
+    """Validates the configured Zoom Server-to-Server OAuth credentials by calling the Zoom /users/me endpoint.
+    Returns the full Zoom user profile on success, or raises an HTTP error if credentials are invalid.
+    """
     return _zoom().validate_credentials()
 
 
@@ -53,9 +69,13 @@ def zoom_connect():
 
 @app.get("/meetings/past", dependencies=[Depends(get_api_key)])
 def list_past_meetings(
-    days: int = Query(default=30, ge=1, le=365),
-    force_refresh: bool = Query(default=False),
-):
+    days: int = Query(default=30, ge=1, le=365, description="Number of days to look back for past meetings."),
+    force_refresh: bool = Query(default=False, description="Bypass the in-memory cache and fetch fresh data from Zoom."),
+) -> dict:
+    """Returns a list of past meetings for the authenticated Zoom user within the specified date range.
+    Results are cached in memory; use `force_refresh=true` to bypass the cache.
+    Response shape mirrors the Zoom Reports API: a `meetings` array with id, uuid, topic, start_time, and duration per meeting.
+    """
     cache_key = f"past_meetings:{days}"
     if not force_refresh:
         cached = get_cached(_past_meetings_cache, cache_key)
@@ -69,20 +89,32 @@ def list_past_meetings(
 @app.get("/meetings/{uuid}/participants", dependencies=[Depends(get_api_key)])
 def get_participants(
     uuid: str,
-    force_refresh: bool = Query(default=False),
-):
+    force_refresh: bool = Query(default=False, description="Bypass the in-memory cache and fetch fresh data from Zoom."),
+) -> dict:
+    """Returns the participant attendance report for a completed meeting.
+    The `uuid` must be double-URL-encoded if it contains special characters (handled automatically by this service).
+    Results are cached in memory; use `force_refresh=true` to bypass the cache.
+    Response shape mirrors the Zoom Reports API: a `participants` array with name, user_email, join_time, and leave_time per attendee.
+    Returns 409 if the meeting is still in progress or the report has not yet been generated.
+    """
     cache_key = f"participants:{uuid}"
     if not force_refresh:
         cached = get_cached(_participants_cache, cache_key)
         if cached is not None:
             return cached
-    result = _zoom().get_participants(uuid)
+    try:
+        result = _zoom().get_participants(uuid)
+    except MeetingInProgressError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     set_cached(_participants_cache, cache_key, result)
     return transform_participants(result)
 
 
 @app.post("/meetings", dependencies=[Depends(get_api_key)])
-def create_meeting(body: CreateMeetingRequest):
+def create_meeting(body: CreateMeetingRequest) -> CreateMeetingResponse:
+    """Creates a scheduled Zoom meeting for the authenticated user.
+    Returns the numeric meeting `id` (used for registration), the `uuid` (used for participant reports), and the `join_url`.
+    """
     result = _zoom().create_meeting(
         topic=body.topic,
         start_time=body.start_time,
@@ -92,7 +124,11 @@ def create_meeting(body: CreateMeetingRequest):
 
 
 @app.post("/meetings/{meeting_id}/registrants", dependencies=[Depends(get_api_key)])
-def register_participants(meeting_id: str, registrants: list[Registrant]):
+def register_participants(meeting_id: str, registrants: list[Registrant]) -> list[dict]:
+    """Bulk-registers a list of participants for a scheduled meeting.
+    Use the numeric meeting `id` (not the uuid) from `POST /meetings` as `meeting_id`.
+    Each registrant is registered individually; results are returned as a list of Zoom registrant response objects.
+    """
     return _zoom().register_participants(
         meeting_id=meeting_id,
         registrants=[r.model_dump() for r in registrants],
