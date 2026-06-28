@@ -13,6 +13,24 @@ This service runs cron schedules and triggers internal job routes on the `web` s
 - `APP_BASE_URL` - base URL of the web service, for example `https://summerlunchplus.up.railway.app`
 - `INTERNAL_RUNNER_SECRET` - must match `web` service `INTERNAL_RUNNER_SECRET`
 
+## Local run
+
+From `scheduler/`:
+
+1. Copy `.env.template` to `.env.local` and set values.
+2. Run cron in foreground:
+
+   ```bash
+   make cron
+   ```
+
+Useful local commands:
+
+- `make cron-bg` - run scheduler container in background
+- `make logs` - follow background cron logs
+- `make down` - stop background container
+- `make smoke-all` - run all three jobs once immediately
+
 ## Schedule source of truth
 
 Schedules are declared in `scheduler/crontab`.

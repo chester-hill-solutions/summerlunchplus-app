@@ -1,17 +1,12 @@
-import { createHash, randomBytes } from 'node:crypto'
-
 import { sendTransactionalEmail } from '@/lib/email/send-email.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { getClassesInWindow, provisionClassById } from '@/lib/zoom-jobs/provision.server'
 import { zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
+import { hashZlrToken, newZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
 
 const toIso = (date: Date) => date.toISOString()
 
 const addMinutes = (date: Date, minutes: number) => new Date(date.getTime() + minutes * 60_000)
-
-const hashToken = (token: string) => createHash('sha256').update(token).digest('hex')
-
-const newToken = () => randomBytes(24).toString('base64url')
 
 const normalizeEmail = (value: string | null) => (value ?? '').trim().toLowerCase()
 
@@ -108,8 +103,8 @@ const send2hReminders = async ({ now, appOrigin }: { now: Date; appOrigin: strin
         continue
       }
 
-      const token = newToken()
-      const tokenHash = hashToken(token)
+      const token = newZlrToken()
+      const tokenHash = hashZlrToken(token)
       const expiresAt = addMinutes(new Date(classRow.starts_at), 240).toISOString()
 
       const { error: tokenUpdateError } = await adminClient
