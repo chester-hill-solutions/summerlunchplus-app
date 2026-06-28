@@ -139,10 +139,35 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     label: 'Classes',
     table: 'class',
     select: 'id, workshop_id, starts_at, ends_at',
-    columns: ['workshop_description', 'starts_at', 'ends_at'],
+    columns: [
+      'id',
+      'workshop_description',
+      'starts_at',
+      'ends_at',
+      'zoom_host_email',
+      'zoom_join_url',
+      'step_meeting',
+      'step_registrants',
+      'step_reminder',
+      'step_attendance',
+    ],
     order: 'starts_at',
     lookupMappings: [
       { keyColumn: 'workshop_id', table: 'workshop', valueColumn: 'description', resultColumn: 'workshop_description' },
+      {
+        keyColumn: 'id',
+        keyColumnInTable: 'class_id',
+        table: 'class_zoom_meeting',
+        valueColumn: 'host_zoom_user_email',
+        resultColumn: 'zoom_host_email',
+      },
+      {
+        keyColumn: 'id',
+        keyColumnInTable: 'class_id',
+        table: 'class_zoom_meeting',
+        valueColumn: 'join_url',
+        resultColumn: 'zoom_join_url',
+      },
     ],
     editor: {
       primaryKey: ['id'],
@@ -206,7 +231,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     label: 'Class Attendance',
     table: 'class_attendance',
     select: 'id, class_id, profile_id, status, photo_status, camera_on, recorded_by, created_at',
-    columns: ['class_display', 'profile_display', 'status', 'photo_status', 'camera_on', 'recorded_by_email', 'created_at'],
+    columns: ['class_id', 'class_display', 'profile_display', 'status', 'photo_status', 'camera_on', 'recorded_by_email', 'created_at'],
     order: 'created_at',
     lookupMappings: [
       {
