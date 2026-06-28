@@ -18,7 +18,25 @@ type ActionData =
       status?: number
       error: string
       payload?: unknown
+      diagnostics?: Record<string, unknown>
     }
+
+const formatError = (error: unknown) => {
+  if (!(error instanceof Error)) {
+    return { message: 'Unknown error type', value: String(error) }
+  }
+
+  const cause = error.cause
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    cause:
+      cause instanceof Error
+        ? { name: cause.name, message: cause.message, stack: cause.stack }
+        : cause ?? null,
+  }
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
@@ -45,13 +63,34 @@ export async function action({ request }: Route.ActionArgs): Promise<ActionData>
   try {
     endpoint = normalizeZoomApiEndpoint(endpointRaw)
   } catch (error) {
+    console.error('[zoom-connect-test] endpoint normalization failed', {
+      endpointRaw,
+      hasApiKey: Boolean(apiKey),
+      apiKeyLength: apiKey.length,
+      error: formatError(error),
+    })
     return {
       ok: false,
       error: error instanceof Error ? error.message : 'Missing ZOOM_API_ENDPOINT.',
+      diagnostics: {
+        endpointRaw,
+        hasApiKey: Boolean(apiKey),
+        apiKeyLength: apiKey.length,
+      },
     }
   }
 
   const targetUrl = `${endpoint}/zoom/connect`
+  const traceId = `zct-${Date.now().toString(36)}`
+
+  console.info('[zoom-connect-test] request starting', {
+    traceId,
+    endpointRaw,
+    endpoint,
+    targetUrl,
+    hasApiKey: Boolean(apiKey),
+    apiKeyLength: apiKey.length,
+  })
 
   try {
     const response = await fetch(targetUrl, {
@@ -72,8 +111,23 @@ export async function action({ request }: Route.ActionArgs): Promise<ActionData>
         status: response.status,
         error: `Zoom connect test failed with HTTP ${response.status}.`,
         payload,
+        diagnostics: {
+          traceId,
+          endpointRaw,
+          endpoint,
+          targetUrl,
+          responseStatus: response.status,
+          responseContentType: contentType,
+        },
       }
     }
+
+    console.info('[zoom-connect-test] request succeeded', {
+      traceId,
+      targetUrl,
+      status: response.status,
+      contentType,
+    })
 
     return {
       ok: true,
@@ -81,9 +135,28 @@ export async function action({ request }: Route.ActionArgs): Promise<ActionData>
       payload,
     }
   } catch (error) {
+    console.error('[zoom-connect-test] fetch failed', {
+      traceId,
+      endpointRaw,
+      endpoint,
+      targetUrl,
+      hasApiKey: Boolean(apiKey),
+      apiKeyLength: apiKey.length,
+      error: formatError(error),
+    })
+
     return {
       ok: false,
       error: error instanceof Error ? error.message : 'Unexpected zoom connect error.',
+      diagnostics: {
+        traceId,
+        endpointRaw,
+        endpoint,
+        targetUrl,
+        hasApiKey: Boolean(apiKey),
+        apiKeyLength: apiKey.length,
+        error: formatError(error),
+      },
     }
   }
 }
@@ -117,6 +190,9 @@ export default function ZoomConnectTestPage() {
           </p>
           {'payload' in actionData && actionData.payload !== undefined ? (
             <pre className="mt-3 overflow-auto rounded bg-muted p-3 text-xs">{JSON.stringify(actionData.payload, null, 2)}</pre>
+          ) : null}
+          {'diagnostics' in actionData && actionData.diagnostics ? (
+            <pre className="mt-3 overflow-auto rounded bg-muted p-3 text-xs">{JSON.stringify(actionData.diagnostics, null, 2)}</pre>
           ) : null}
         </div>
       ) : null}
