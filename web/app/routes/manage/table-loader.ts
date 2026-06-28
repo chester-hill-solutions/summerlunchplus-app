@@ -297,6 +297,180 @@ const foreignKeyOptions = async (
     }
   }
 
+  if (tableName === 'class-zoom-meeting') {
+    const [{ data: classes }, { data: zoomHosts }] = await Promise.all([
+      supabase
+        .from('class')
+        .select('id, starts_at, workshop:workshop_id ( description )')
+        .order('starts_at', { ascending: true }),
+      supabase
+        .from('zoom_host')
+        .select('id, display_name, zoom_user_email, zoom_user_id')
+        .order('priority', { ascending: true }),
+    ])
+
+    const classOptions = ((classes ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      const workshop = normalizeLookupRow(row.workshop)
+      const label =
+        typeof workshop?.description === 'string' && workshop.description.trim()
+          ? workshop.description.trim()
+          : `Class ${id}`
+      return { value: id, label }
+    })
+
+    const hostOptions = ((zoomHosts ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      const displayName = typeof row.display_name === 'string' ? row.display_name.trim() : ''
+      const email = typeof row.zoom_user_email === 'string' ? row.zoom_user_email.trim() : ''
+      const userId = typeof row.zoom_user_id === 'string' ? row.zoom_user_id.trim() : ''
+      return { value: id, label: displayName || email || userId || `Host ${id}` }
+    })
+
+    return {
+      class_id: classOptions.filter(option => option.value),
+      zoom_host_id: hostOptions.filter(option => option.value),
+    }
+  }
+
+  if (tableName === 'class-zoom-registrant') {
+    const [{ data: classes }, { data: profiles }, { data: meetings }] = await Promise.all([
+      supabase
+        .from('class')
+        .select('id, starts_at, workshop:workshop_id ( description )')
+        .order('starts_at', { ascending: true }),
+      supabase
+        .from('profile')
+        .select('id, email, firstname, surname')
+        .order('email', { ascending: true }),
+      supabase
+        .from('class_zoom_meeting')
+        .select('id, zoom_meeting_id, topic')
+        .order('created_at', { ascending: false }),
+    ])
+
+    const classOptions = ((classes ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      const workshop = normalizeLookupRow(row.workshop)
+      const label =
+        typeof workshop?.description === 'string' && workshop.description.trim()
+          ? workshop.description.trim()
+          : `Class ${id}`
+      return { value: id, label }
+    })
+
+    const profileOptions = ((profiles ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: profileDisplay(row, id) }
+    })
+
+    const meetingOptions = ((meetings ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      const meetingId = typeof row.zoom_meeting_id === 'string' ? row.zoom_meeting_id.trim() : ''
+      const topic = typeof row.topic === 'string' ? row.topic.trim() : ''
+      return { value: id, label: meetingId || topic || id }
+    })
+
+    return {
+      class_id: classOptions.filter(option => option.value),
+      profile_id: profileOptions.filter(option => option.value),
+      class_zoom_meeting_id: meetingOptions.filter(option => option.value),
+    }
+  }
+
+  if (tableName === 'class-zoom-participant-sync') {
+    const { data: meetings } = await supabase
+      .from('class_zoom_meeting')
+      .select('id, zoom_meeting_id, topic')
+      .order('created_at', { ascending: false })
+
+    const meetingOptions = ((meetings ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      const meetingId = typeof row.zoom_meeting_id === 'string' ? row.zoom_meeting_id.trim() : ''
+      const topic = typeof row.topic === 'string' ? row.topic.trim() : ''
+      return { value: id, label: meetingId || topic || id }
+    })
+
+    return {
+      class_zoom_meeting_id: meetingOptions.filter(option => option.value),
+    }
+  }
+
+  if (tableName === 'class-zoom-participant') {
+    const [{ data: classes }, { data: profiles }, { data: meetings }] = await Promise.all([
+      supabase
+        .from('class')
+        .select('id, starts_at, workshop:workshop_id ( description )')
+        .order('starts_at', { ascending: true }),
+      supabase
+        .from('profile')
+        .select('id, email, firstname, surname')
+        .order('email', { ascending: true }),
+      supabase
+        .from('class_zoom_meeting')
+        .select('id, zoom_meeting_id, topic')
+        .order('created_at', { ascending: false }),
+    ])
+
+    const classOptions = ((classes ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      const workshop = normalizeLookupRow(row.workshop)
+      const label =
+        typeof workshop?.description === 'string' && workshop.description.trim()
+          ? workshop.description.trim()
+          : `Class ${id}`
+      return { value: id, label }
+    })
+
+    const profileOptions = ((profiles ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: profileDisplay(row, id) }
+    })
+
+    const meetingOptions = ((meetings ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      const meetingId = typeof row.zoom_meeting_id === 'string' ? row.zoom_meeting_id.trim() : ''
+      const topic = typeof row.topic === 'string' ? row.topic.trim() : ''
+      return { value: id, label: meetingId || topic || id }
+    })
+
+    return {
+      class_id: classOptions.filter(option => option.value),
+      profile_id: profileOptions.filter(option => option.value),
+      class_zoom_meeting_id: meetingOptions.filter(option => option.value),
+    }
+  }
+
+  if (tableName === 'zlr-click-event') {
+    const [{ data: registrants }, { data: profiles }] = await Promise.all([
+      supabase
+        .from('class_zoom_registrant')
+        .select('id, zoom_registrant_id, zlr_token_hash')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('profile')
+        .select('id, email, firstname, surname')
+        .order('email', { ascending: true }),
+    ])
+
+    const registrantOptions = ((registrants ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      const registrantId = typeof row.zoom_registrant_id === 'string' ? row.zoom_registrant_id.trim() : ''
+      const tokenHash = typeof row.zlr_token_hash === 'string' ? row.zlr_token_hash.slice(0, 8) : ''
+      return { value: id, label: registrantId || (tokenHash ? `token:${tokenHash}` : id) }
+    })
+
+    const profileOptions = ((profiles ?? []) as unknown as Record<string, unknown>[]).map(row => {
+      const id = typeof row.id === 'string' ? row.id : ''
+      return { value: id, label: profileDisplay(row, id) }
+    })
+
+    return {
+      class_zoom_registrant_id: registrantOptions.filter(option => option.value),
+      profile_id: profileOptions.filter(option => option.value),
+    }
+  }
+
   return {}
 }
 

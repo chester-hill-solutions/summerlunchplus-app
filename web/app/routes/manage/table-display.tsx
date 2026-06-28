@@ -1572,6 +1572,19 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     statusFetcher.submit(formData, { method: 'post' })
   }
 
+  const updateAttendancePhotoStatus = (row: Record<string, unknown>, value: string) => {
+    if (!isClassAttendance || !canEditStatus) return
+    const classId = typeof row.class_id === 'string' ? row.class_id : ''
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!classId || !profileId) return
+    const formData = new FormData()
+    formData.set('intent', 'update-photo-status')
+    formData.set('class_id', classId)
+    formData.set('profile_id', profileId)
+    formData.set('photo_status', value)
+    statusFetcher.submit(formData, { method: 'post' })
+  }
+
   const updateAttendanceCameraOn = (row: Record<string, unknown>, value: string) => {
     if (!isClassAttendance || !canEditStatus) return
     const classId = typeof row.class_id === 'string' ? row.class_id : ''
@@ -2011,11 +2024,35 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                               className={TABLE_SELECT_CLASS_NAME}
                             >
                               <option value="">(none)</option>
-                              <option value="unknown">unknown</option>
-                              <option value="present">present</option>
-                              <option value="absent">absent</option>
-                              <option value="uploaded">uploaded</option>
-                              <option value="accepted">accepted</option>
+                              {Constants.public.Enums.class_attendance_status.map(
+                                (status: Database['public']['Enums']['class_attendance_status']) => (
+                                  <option key={status} value={status}>
+                                    {status}
+                                  </option>
+                                )
+                              )}
+                            </select>
+                          </td>
+                        )
+                      }
+
+                      if (isClassAttendance && column === 'photo_status' && canEditStatus) {
+                        const photoStatusValue = typeof row.photo_status === 'string' ? row.photo_status : ''
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="overflow-hidden px-4 py-2 font-mono" title={photoStatusValue || '(empty)'}>
+                            <select
+                              value={photoStatusValue}
+                              onChange={event => updateAttendancePhotoStatus(row, event.target.value)}
+                              className={TABLE_SELECT_CLASS_NAME}
+                            >
+                              <option value="">(none)</option>
+                              {Constants.public.Enums.class_attendance_photo_status.map(
+                                (photoStatus: Database['public']['Enums']['class_attendance_photo_status']) => (
+                                  <option key={photoStatus} value={photoStatus}>
+                                    {photoStatus}
+                                  </option>
+                                )
+                              )}
                             </select>
                           </td>
                         )

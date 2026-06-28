@@ -1,4 +1,6 @@
 from base64 import b64encode
+from time import monotonic
+from urllib.parse import quote
 
 import httpx
 
@@ -15,8 +17,13 @@ class ZoomClient:
         self.account_id = account_id
         self.client_id = client_id
         self.client_secret = client_secret
+        self._token: str | None = None
+        self._token_expires_at: float = 0.0
 
     def _get_token(self) -> str:
+        if self._token and monotonic() < self._token_expires_at:
+            return self._token
+
         credentials = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
         response = httpx.post(
             ZOOM_OAUTH_URL,
@@ -24,7 +31,11 @@ class ZoomClient:
             headers={"Authorization": f"Basic {credentials}"},
         )
         response.raise_for_status()
-        return response.json()["access_token"]
+        payload = response.json()
+        self._token = payload["access_token"]
+        expires_in = int(payload.get("expires_in", 3600))
+        self._token_expires_at = monotonic() + max(0, expires_in - 60)
+        return self._token
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._get_token()}"}
@@ -34,7 +45,14 @@ class ZoomClient:
         r.raise_for_status()
         return r.json()
 
-    def create_meeting(self, topic: str, start_time: str, duration: int) -> dict:
+    def create_meeting(
+        self,
+        topic: str,
+        start_time: str,
+        duration: int,
+        host_zoom_user_id: str | None = None,
+        host_zoom_user_email: str | None = None,
+    ) -> dict:
         payload = {
             "topic": topic,
             "type": 2,  # scheduled
@@ -42,7 +60,23 @@ class ZoomClient:
             "duration": duration,
             "settings": {"approval_type": 0, "registration_type": 1},
         }
-        r = httpx.post(f"{ZOOM_API_BASE}/users/me/meetings", json=payload, headers=self._headers())
+        user_id = "me"
+        if isinstance(host_zoom_user_id, str) and host_zoom_user_id.strip():
+            user_id = host_zoom_user_id.strip()
+        elif isinstance(host_zoom_user_email, str) and host_zoom_user_email.strip():
+            user_id = host_zoom_user_email.strip()
+
+        encoded_user_id = quote(user_id, safe="")
+        r = httpx.post(f"{ZOOM_API_BASE}/users/{encoded_user_id}/meetings", json=payload, headers=self._headers())
+        r.raise_for_status()
+        return r.json()
+
+    def list_hosts(self) -> dict:
+        r = httpx.get(
+            f"{ZOOM_API_BASE}/users",
+            params={"page_size": 300, "status": "active"},
+            headers=self._headers(),
+        )
         r.raise_for_status()
         return r.json()
 
@@ -72,8 +106,7 @@ class ZoomClient:
         return r.json()
 
     def get_participants(self, meeting_uuid: str) -> dict:
-        import urllib.parse
-        encoded = urllib.parse.quote(urllib.parse.quote(meeting_uuid, safe=""), safe="")
+        encoded = quote(quote(meeting_uuid, safe=""), safe="")
         r = httpx.get(
             f"{ZOOM_API_BASE}/report/meetings/{encoded}/participants",
             params={"page_size": 300},

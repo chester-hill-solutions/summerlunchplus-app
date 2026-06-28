@@ -25,7 +25,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   const formData = await request.formData()
   const intent = formData.get('intent') as string | null
-  if (intent !== 'update-status' && intent !== 'update-camera-on') {
+  if (intent !== 'update-status' && intent !== 'update-photo-status' && intent !== 'update-camera-on') {
     return new Response('Unsupported action', { status: 400, headers: auth.headers })
   }
 
@@ -35,7 +35,12 @@ export async function action({ request }: Route.ActionArgs) {
     return new Response('Missing identifiers', { status: 400, headers: auth.headers })
   }
 
-  const updates: { status?: string | null; camera_on?: boolean | null; recorded_by: string } = {
+  const updates: {
+    status?: string | null
+    photo_status?: string | null
+    camera_on?: boolean | null
+    recorded_by: string
+  } = {
     recorded_by: auth.user.id,
   }
 
@@ -46,6 +51,16 @@ export async function action({ request }: Route.ActionArgs) {
       return new Response('Invalid status', { status: 400, headers: auth.headers })
     }
     updates.status = status || null
+  }
+
+  if (intent === 'update-photo-status') {
+    const photoStatus = (formData.get('photo_status') as string | null) ?? null
+    const allowedPhotoStatuses =
+      Constants.public.Enums.class_attendance_photo_status as readonly Database['public']['Enums']['class_attendance_photo_status'][]
+    if (photoStatus && !allowedPhotoStatuses.includes(photoStatus as Database['public']['Enums']['class_attendance_photo_status'])) {
+      return new Response('Invalid photo status', { status: 400, headers: auth.headers })
+    }
+    updates.photo_status = photoStatus || null
   }
 
   if (intent === 'update-camera-on') {

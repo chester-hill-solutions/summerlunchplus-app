@@ -75,9 +75,10 @@ All endpoints except `/health` require `Authorization: Bearer <api_key>`.
 | `GET` | `/health` | Unauthenticated liveness check |
 | `GET` | `/healthz` | Authenticated readiness check |
 | `POST` | `/zoom/connect` | Validate Zoom credentials |
+| `GET` | `/hosts` | List active Zoom users for host assignment |
 | `GET` | `/meetings/past` | List past meetings (`?days=30&force_refresh=false`) |
 | `GET` | `/meetings/{uuid}/participants` | Attendance report for a meeting (`?force_refresh=false`) |
-| `POST` | `/meetings` | Create a scheduled meeting |
+| `POST` | `/meetings` | Create a scheduled meeting (`host_zoom_user_id` or `host_zoom_user_email` optional) |
 | `POST` | `/meetings/{id}/registrants` | Bulk register participants |
 
 Full request/response schemas are documented in Swagger UI at `/docs`.

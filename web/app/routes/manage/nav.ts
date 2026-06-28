@@ -5,7 +5,7 @@ export type ManageNavItem = {
 }
 
 export type ManageNavSection = {
-  key: 'class-management' | 'form-management' | 'analytics' | 'user-management' | 'email' | 'system'
+  key: 'class-management' | 'zoom' | 'form-management' | 'analytics' | 'user-management' | 'email' | 'system'
   label: string
   stickerSrc: string
   defaultCollapsed: boolean
@@ -31,6 +31,21 @@ export const manageSections: ManageNavSection[] = [
       { to: '/manage/workshop', label: 'Workshops', description: 'Current workshop sections and limits.' },
       { to: '/manage/class', label: 'Classes', description: 'Individual class schedule entries.' },
       { to: '/manage/discrepancies', label: 'Discrepancies', description: 'Suspicious signals from address and network inconsistencies.' },
+    ],
+  },
+  {
+    key: 'zoom',
+    label: 'Zoom',
+    stickerSrc: '/stickers/radish.png',
+    defaultCollapsed: false,
+    items: [
+      { to: '/manage/zoom-connect-test', label: 'Zoom connect test', description: 'Test the configured zoom-api /zoom/connect endpoint.' },
+      { to: '/manage/zoom-host', label: 'Zoom hosts', description: 'Zoom host roster and assignment priority.' },
+      { to: '/manage/class-zoom-meeting', label: 'Class Zoom meetings', description: 'Zoom meeting records mapped to classes.' },
+      { to: '/manage/class-zoom-registrant', label: 'Class Zoom registrants', description: 'Per-student registrant records and join link metadata.' },
+      { to: '/manage/class-zoom-participant-sync', label: 'Zoom participant sync runs', description: 'Sync job history for meeting participant ingestion.' },
+      { to: '/manage/class-zoom-participant', label: 'Zoom participants', description: 'Participant snapshots captured from Zoom reports.' },
+      { to: '/manage/zlr-click-event', label: 'ZLR click events', description: 'Redirect click audit events for /zlr links.' },
     ],
   },
   {
