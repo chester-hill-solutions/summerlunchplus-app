@@ -64,11 +64,25 @@ create table public.form_submission (
   profile_id uuid not null references public.profile (id) on delete cascade,
   user_id uuid references auth.users (id) on delete set null,
   ip_address inet,
+  ip_selected inet,
+  ip_selected_source text,
+  ip_chain jsonb not null default '[]'::jsonb,
+  ip_parse_version integer not null default 1,
+  ip_parse_confidence text not null default 'unknown',
+  ip_parse_notes jsonb not null default '{}'::jsonb,
+  ip_classification text not null default 'unknown',
+  ip_confidence_level text not null default 'unknown',
+  ip_reason_codes jsonb not null default '[]'::jsonb,
+  ip_reason_text text,
+  ip_classifier_version integer not null default 1,
+  proxy_provider_match text,
+  proxy_match_cidr cidr,
   forwarded_for text,
   user_agent text,
   accept_language text,
   referer text,
   origin text,
+  request_headers jsonb not null default '{}'::jsonb,
   submitted_at timestamptz not null default now(),
   metadata jsonb not null default '{}'::jsonb
 );
@@ -78,6 +92,12 @@ create index form_submission_profile_form_submitted_idx
 
 create index form_submission_user_submitted_idx
   on public.form_submission (user_id, submitted_at desc);
+
+create index form_submission_ip_selected_idx
+  on public.form_submission (ip_selected);
+
+create index form_submission_ip_classification_idx
+  on public.form_submission (ip_classification, ip_confidence_level);
 
 create table public.form_answer (
   id uuid primary key default gen_random_uuid(),

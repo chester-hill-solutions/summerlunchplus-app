@@ -86,8 +86,15 @@ export const ensureReusableAdminAccount = async () => {
       user_metadata: { role: 'admin' },
     })
 
-    if (error) throw new Error(`Unable to create admin user: ${error.message}`)
-    user = data.user
+    if (error) {
+      const existing = await findAuthUserByEmail(adminSupabase, ADMIN_EMAIL)
+      if (!existing) {
+        throw new Error(`Unable to create admin user: ${error.message}`)
+      }
+      user = existing
+    } else {
+      user = data.user
+    }
   }
 
   if (!user) {

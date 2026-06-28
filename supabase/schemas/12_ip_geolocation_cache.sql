@@ -7,6 +7,7 @@ create table if not exists public.ip_geolocation_cache (
   longitude double precision,
   timezone text,
   source text not null,
+  org text,
   confidence text,
   raw jsonb not null default '{}'::jsonb,
   looked_up_at timestamptz not null default now(),
@@ -20,6 +21,9 @@ create index if not exists ip_geolocation_cache_expires_at_idx
 
 create index if not exists ip_geolocation_cache_looked_up_at_idx
   on public.ip_geolocation_cache (looked_up_at desc);
+
+create index if not exists ip_geolocation_cache_org_idx
+  on public.ip_geolocation_cache (org);
 
 create or replace function public.touch_ip_geolocation_cache_updated_at()
 returns trigger

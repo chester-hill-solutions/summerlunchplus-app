@@ -6,6 +6,7 @@ export type SuspiciousSignalType =
   | 'non_whitelisted_riding'
   | 'cross_family_exact_address'
   | 'ip_profile_location_mismatch'
+  | 'ip_org_greylist'
 
 export type SignalSeverity = 'low' | 'medium' | 'high'
 
@@ -56,6 +57,7 @@ const SIGNAL_PRIORITY_BONUS: Record<SuspiciousSignalType, number> = {
   non_whitelisted_riding: 5,
   cross_family_exact_address: 30,
   ip_profile_location_mismatch: 40,
+  ip_org_greylist: 25,
 }
 
 const PROVINCE_CANONICAL_BY_INPUT: Record<string, string> = {

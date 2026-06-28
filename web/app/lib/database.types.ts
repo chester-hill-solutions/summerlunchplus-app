@@ -541,11 +541,25 @@ export type Database = {
           form_id: string
           forwarded_for: string | null
           id: string
+          ip_chain: Json
           ip_address: unknown
+          ip_classification: string
+          ip_classifier_version: number
+          ip_confidence_level: string
+          ip_parse_confidence: string
+          ip_parse_notes: Json
+          ip_parse_version: number
+          ip_reason_codes: Json
+          ip_reason_text: string | null
+          ip_selected: unknown
+          ip_selected_source: string | null
           metadata: Json
           origin: string | null
           profile_id: string
+          proxy_match_cidr: unknown
+          proxy_provider_match: string | null
           referer: string | null
+          request_headers: Json
           submitted_at: string
           user_agent: string | null
           user_id: string | null
@@ -555,11 +569,25 @@ export type Database = {
           form_id: string
           forwarded_for?: string | null
           id?: string
+          ip_chain?: Json
           ip_address?: unknown
+          ip_classification?: string
+          ip_classifier_version?: number
+          ip_confidence_level?: string
+          ip_parse_confidence?: string
+          ip_parse_notes?: Json
+          ip_parse_version?: number
+          ip_reason_codes?: Json
+          ip_reason_text?: string | null
+          ip_selected?: unknown
+          ip_selected_source?: string | null
           metadata?: Json
           origin?: string | null
           profile_id: string
+          proxy_match_cidr?: unknown
+          proxy_provider_match?: string | null
           referer?: string | null
+          request_headers?: Json
           submitted_at?: string
           user_agent?: string | null
           user_id?: string | null
@@ -569,11 +597,25 @@ export type Database = {
           form_id?: string
           forwarded_for?: string | null
           id?: string
+          ip_chain?: Json
           ip_address?: unknown
+          ip_classification?: string
+          ip_classifier_version?: number
+          ip_confidence_level?: string
+          ip_parse_confidence?: string
+          ip_parse_notes?: Json
+          ip_parse_version?: number
+          ip_reason_codes?: Json
+          ip_reason_text?: string | null
+          ip_selected?: unknown
+          ip_selected_source?: string | null
           metadata?: Json
           origin?: string | null
           profile_id?: string
+          proxy_match_cidr?: unknown
+          proxy_provider_match?: string | null
           referer?: string | null
+          request_headers?: Json
           submitted_at?: string
           user_agent?: string | null
           user_id?: string | null
@@ -749,11 +791,25 @@ export type Database = {
           event_at: string
           forwarded_for: string | null
           id: string
+          ip_chain: Json
           ip_address: unknown
+          ip_classification: string
+          ip_classifier_version: number
+          ip_confidence_level: string
+          ip_parse_confidence: string
+          ip_parse_notes: Json
+          ip_parse_version: number
+          ip_reason_codes: Json
+          ip_reason_text: string | null
+          ip_selected: unknown
+          ip_selected_source: string | null
           login_method: string
           metadata: Json
           origin: string | null
+          proxy_match_cidr: unknown
+          proxy_provider_match: string | null
           referer: string | null
+          request_headers: Json
           success: boolean
           user_agent: string | null
           user_id: string | null
@@ -764,11 +820,25 @@ export type Database = {
           event_at?: string
           forwarded_for?: string | null
           id?: string
+          ip_chain?: Json
           ip_address?: unknown
+          ip_classification?: string
+          ip_classifier_version?: number
+          ip_confidence_level?: string
+          ip_parse_confidence?: string
+          ip_parse_notes?: Json
+          ip_parse_version?: number
+          ip_reason_codes?: Json
+          ip_reason_text?: string | null
+          ip_selected?: unknown
+          ip_selected_source?: string | null
           login_method: string
           metadata?: Json
           origin?: string | null
+          proxy_match_cidr?: unknown
+          proxy_provider_match?: string | null
           referer?: string | null
+          request_headers?: Json
           success?: boolean
           user_agent?: string | null
           user_id?: string | null
@@ -779,11 +849,25 @@ export type Database = {
           event_at?: string
           forwarded_for?: string | null
           id?: string
+          ip_chain?: Json
           ip_address?: unknown
+          ip_classification?: string
+          ip_classifier_version?: number
+          ip_confidence_level?: string
+          ip_parse_confidence?: string
+          ip_parse_notes?: Json
+          ip_parse_version?: number
+          ip_reason_codes?: Json
+          ip_reason_text?: string | null
+          ip_selected?: unknown
+          ip_selected_source?: string | null
           login_method?: string
           metadata?: Json
           origin?: string | null
+          proxy_match_cidr?: unknown
+          proxy_provider_match?: string | null
           referer?: string | null
+          request_headers?: Json
           success?: boolean
           user_agent?: string | null
           user_id?: string | null

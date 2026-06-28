@@ -13,6 +13,7 @@ type IpGeoCacheRow = {
   longitude: number | null
   timezone: string | null
   source: string
+  org: string | null
   confidence: string | null
   raw: Json
   looked_up_at: string
@@ -28,6 +29,7 @@ export type IpGeoLocation = {
   longitude: number | null
   timezone: string | null
   source: string
+  org: string | null
   confidence: string | null
   raw: Json
 }
@@ -58,7 +60,10 @@ const firstForwardedToken = (value: unknown) => {
   )
 }
 
-const ipCandidateFromRow = (row: { ip_address?: unknown; forwarded_for?: unknown }) => {
+const ipCandidateFromRow = (row: { ip_selected?: unknown; ip_address?: unknown; forwarded_for?: unknown }) => {
+  if (typeof row.ip_selected === 'string' && row.ip_selected.trim()) {
+    return row.ip_selected.trim()
+  }
   if (typeof row.ip_address === 'string' && row.ip_address.trim()) {
     return row.ip_address.trim()
   }
@@ -109,11 +114,11 @@ const collectGeoipBackfillCandidates = async (
 
   const [formSubmissionResult, loginEventResult] = await Promise.all([
     (adminClient.from('form_submission' as any) as any)
-      .select('ip_address, forwarded_for')
+      .select('ip_selected, ip_address, forwarded_for')
       .order('submitted_at', { ascending: false })
       .limit(recentLimitPerSource),
     (adminClient.from('login_event' as any) as any)
-      .select('ip_address, forwarded_for')
+      .select('ip_selected, ip_address, forwarded_for')
       .order('event_at', { ascending: false })
       .limit(recentLimitPerSource),
   ])
@@ -126,6 +131,7 @@ const collectGeoipBackfillCandidates = async (
   const uniqueIps = new Set<string>()
   for (const row of (formSubmissionResult.data ?? []) as Array<Record<string, unknown>>) {
     const candidate = ipCandidateFromRow({
+      ip_selected: row.ip_selected,
       ip_address: row.ip_address,
       forwarded_for: row.forwarded_for,
     })
@@ -134,6 +140,7 @@ const collectGeoipBackfillCandidates = async (
   }
   for (const row of (loginEventResult.data ?? []) as Array<Record<string, unknown>>) {
     const candidate = ipCandidateFromRow({
+      ip_selected: row.ip_selected,
       ip_address: row.ip_address,
       forwarded_for: row.forwarded_for,
     })
@@ -269,6 +276,11 @@ const lookupFromProviderDetailed = async (
         longitude: parseNumber(payload.longitude),
         timezone: parseText(payload.timezone),
         source: 'ipapi',
+        org:
+          parseText(payload.org) ??
+          parseText(payload.organization) ??
+          parseText(payload.asn_org) ??
+          parseText(payload.as_name),
         confidence: 'medium',
         raw: payload as Json,
       }
@@ -288,6 +300,7 @@ const lookupFromProviderDetailed = async (
       longitude: parseNumber(longitudeRaw),
       timezone: parseText(payload.timezone),
       source: 'ipinfo',
+      org: parseText(payload.org),
       confidence: 'medium',
       raw: payload as Json,
     }
@@ -436,6 +449,7 @@ const cacheToLocation = (row: IpGeoCacheRow): IpGeoLocation => ({
   longitude: row.longitude,
   timezone: row.timezone,
   source: row.source,
+  org: row.org,
   confidence: row.confidence,
   raw: row.raw,
 })
@@ -453,6 +467,7 @@ const providerLocationToCache = (ip: string, location: ProviderLocation) => {
     longitude: location.longitude,
     timezone: location.timezone,
     source: location.source,
+    org: location.org,
     confidence: location.confidence,
     raw: location.raw,
     looked_up_at: now.toISOString(),
@@ -483,6 +498,11 @@ const lookupViaIpapi = async (ip: string): Promise<ProviderLocation | null> => {
       longitude: parseNumber(payload.longitude),
       timezone: parseText(payload.timezone),
       source: 'ipapi',
+      org:
+        parseText(payload.org) ??
+        parseText(payload.organization) ??
+        parseText(payload.asn_org) ??
+        parseText(payload.as_name),
       confidence: 'medium',
       raw: payload as Json,
     }
@@ -522,6 +542,7 @@ const lookupViaIpinfo = async (ip: string): Promise<ProviderLocation | null> => 
       longitude: parseNumber(longitudeRaw),
       timezone: parseText(payload.timezone),
       source: 'ipinfo',
+      org: parseText(payload.org),
       confidence: 'medium',
       raw: payload as Json,
     }
@@ -548,7 +569,7 @@ export const resolveIpGeolocation = async (ip: string): Promise<IpGeoLocation | 
 
   const nowIso = new Date().toISOString()
   const { data: cachedRow } = await (adminClient.from('ip_geolocation_cache' as any) as any)
-    .select('ip, country_code, region, city, latitude, longitude, timezone, source, confidence, raw, looked_up_at, expires_at')
+    .select('ip, country_code, region, city, latitude, longitude, timezone, source, org, confidence, raw, looked_up_at, expires_at')
     .eq('ip', normalizedIp)
     .maybeSingle()
 

@@ -45,7 +45,18 @@ export type PersonLoaderData = {
     login_method: string | null
     login_success: boolean | null
     login_email: string | null
+    ip_selected: string | null
+    ip_selected_source: string | null
+    ip_parse_confidence: string | null
+    ip_classification: string | null
+    ip_confidence_level: string | null
+    ip_reason_codes: Json
+    ip_reason_text: string | null
+    ip_classifier_version: number | null
+    proxy_provider_match: string | null
+    proxy_match_cidr: string | null
     forwarded_for: string | null
+    ip_legacy: string | null
     ip_candidate: string | null
     ip_address: string | null
     geo_status:
@@ -59,6 +70,7 @@ export type PersonLoaderData = {
     country_code: string | null
     region: string | null
     city: string | null
+    org: string | null
     timezone: string | null
     latitude: number | null
     longitude: number | null
@@ -79,6 +91,7 @@ export type PersonLoaderData = {
     country_code: string | null
     region: string | null
     city: string | null
+    org: string | null
     timezone: string | null
     latitude: number | null
     longitude: number | null

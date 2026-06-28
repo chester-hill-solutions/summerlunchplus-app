@@ -138,14 +138,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const [latestFormSubmissionResult, latestLoginEventResult] = await Promise.all([
     adminClient
       .from('form_submission')
-      .select('id, form_id, submitted_at, ip_address, forwarded_for')
+      .select('id, form_id, submitted_at, ip_address, ip_selected, ip_selected_source, ip_parse_confidence, ip_classification, ip_confidence_level, ip_reason_codes, ip_reason_text, ip_classifier_version, proxy_provider_match, proxy_match_cidr, forwarded_for')
       .eq('profile_id', profileRow.id)
       .order('submitted_at', { ascending: false })
       .limit(25),
     profileRow.user_id
       ? adminClient
           .from('login_event')
-          .select('id, event_at, email, login_method, success, ip_address, forwarded_for')
+          .select('id, event_at, email, login_method, success, ip_address, ip_selected, ip_selected_source, ip_parse_confidence, ip_classification, ip_confidence_level, ip_reason_codes, ip_reason_text, ip_classifier_version, proxy_provider_match, proxy_match_cidr, forwarded_for')
           .eq('user_id', profileRow.user_id)
           .order('event_at', { ascending: false })
           .limit(25)
@@ -161,8 +161,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       login_method: null,
       login_success: null,
       login_email: null,
+      ip_selected: typeof row.ip_selected === 'string' ? row.ip_selected : null,
+      ip_selected_source: typeof row.ip_selected_source === 'string' ? row.ip_selected_source : null,
+      ip_parse_confidence: typeof row.ip_parse_confidence === 'string' ? row.ip_parse_confidence : null,
+      ip_classification: typeof row.ip_classification === 'string' ? row.ip_classification : null,
+      ip_confidence_level: typeof row.ip_confidence_level === 'string' ? row.ip_confidence_level : null,
+      ip_reason_codes: Array.isArray(row.ip_reason_codes) ? row.ip_reason_codes : [],
+      ip_reason_text: typeof row.ip_reason_text === 'string' ? row.ip_reason_text : null,
+      ip_classifier_version: typeof row.ip_classifier_version === 'number' ? row.ip_classifier_version : null,
+      proxy_provider_match: typeof row.proxy_provider_match === 'string' ? row.proxy_provider_match : null,
+      proxy_match_cidr: typeof row.proxy_match_cidr === 'string' ? row.proxy_match_cidr : null,
       forwarded_for: typeof row.forwarded_for === 'string' ? row.forwarded_for : null,
-      ip_candidate: resolveIpCandidate(row.ip_address, typeof row.forwarded_for === 'string' ? row.forwarded_for : null),
+      ip_legacy: typeof row.ip_address === 'string' ? row.ip_address : null,
+      ip_candidate: resolveIpCandidate(
+        typeof row.ip_selected === 'string' ? row.ip_selected : row.ip_address,
+        typeof row.forwarded_for === 'string' ? row.forwarded_for : null
+      ),
     })),
     ...((latestLoginEventResult.data ?? []) as Array<Record<string, unknown>>).map(row => ({
       source: 'login_event' as const,
@@ -172,8 +186,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       login_method: typeof row.login_method === 'string' ? row.login_method : null,
       login_success: typeof row.success === 'boolean' ? row.success : null,
       login_email: typeof row.email === 'string' ? row.email : null,
+      ip_selected: typeof row.ip_selected === 'string' ? row.ip_selected : null,
+      ip_selected_source: typeof row.ip_selected_source === 'string' ? row.ip_selected_source : null,
+      ip_parse_confidence: typeof row.ip_parse_confidence === 'string' ? row.ip_parse_confidence : null,
+      ip_classification: typeof row.ip_classification === 'string' ? row.ip_classification : null,
+      ip_confidence_level: typeof row.ip_confidence_level === 'string' ? row.ip_confidence_level : null,
+      ip_reason_codes: Array.isArray(row.ip_reason_codes) ? row.ip_reason_codes : [],
+      ip_reason_text: typeof row.ip_reason_text === 'string' ? row.ip_reason_text : null,
+      ip_classifier_version: typeof row.ip_classifier_version === 'number' ? row.ip_classifier_version : null,
+      proxy_provider_match: typeof row.proxy_provider_match === 'string' ? row.proxy_provider_match : null,
+      proxy_match_cidr: typeof row.proxy_match_cidr === 'string' ? row.proxy_match_cidr : null,
       forwarded_for: typeof row.forwarded_for === 'string' ? row.forwarded_for : null,
-      ip_candidate: resolveIpCandidate(row.ip_address, typeof row.forwarded_for === 'string' ? row.forwarded_for : null),
+      ip_legacy: typeof row.ip_address === 'string' ? row.ip_address : null,
+      ip_candidate: resolveIpCandidate(
+        typeof row.ip_selected === 'string' ? row.ip_selected : row.ip_address,
+        typeof row.forwarded_for === 'string' ? row.forwarded_for : null
+      ),
     })),
   ].filter(row => row.occurred_at)
 
@@ -190,6 +218,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       country_code: string | null
       region: string | null
       city: string | null
+      org: string | null
       timezone: string | null
       latitude: number | null
       longitude: number | null
@@ -201,7 +230,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (uniqueIps.length) {
     const { data: geoRows } = await (adminClient.from('ip_geolocation_cache' as any) as any)
-      .select('ip, country_code, region, city, timezone, latitude, longitude')
+      .select('ip, country_code, region, city, org, timezone, latitude, longitude')
       .in('ip', uniqueIps)
 
     for (const row of geoRows ?? []) {
@@ -210,6 +239,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         country_code: typeof row.country_code === 'string' ? row.country_code : null,
         region: typeof row.region === 'string' ? row.region : null,
         city: typeof row.city === 'string' ? row.city : null,
+        org: typeof row.org === 'string' ? row.org : null,
         timezone: typeof row.timezone === 'string' ? row.timezone : null,
         latitude: typeof row.latitude === 'number' ? row.latitude : null,
         longitude: typeof row.longitude === 'number' ? row.longitude : null,
@@ -227,6 +257,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           country_code: location.countryCode,
           region: location.region,
           city: location.city,
+          org: location.org,
           timezone: location.timezone,
           latitude: location.latitude,
           longitude: location.longitude,
@@ -254,7 +285,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         login_method: row.login_method,
         login_success: row.login_success,
         login_email: row.login_email,
+        ip_selected: row.ip_selected,
+        ip_selected_source: row.ip_selected_source,
+        ip_parse_confidence: row.ip_parse_confidence,
+        ip_classification: row.ip_classification,
+        ip_confidence_level: row.ip_confidence_level,
+        ip_reason_codes: row.ip_reason_codes,
+        ip_reason_text: row.ip_reason_text,
+        ip_classifier_version: row.ip_classifier_version,
+        proxy_provider_match: row.proxy_provider_match,
+        proxy_match_cidr: row.proxy_match_cidr,
         forwarded_for: row.forwarded_for,
+        ip_legacy: row.ip_legacy,
         ip_candidate: row.ip_candidate,
         ip_address: normalizedIp,
         geo_status: status,
@@ -262,6 +304,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         country_code: geo?.country_code ?? null,
         region: geo?.region ?? null,
         city: geo?.city ?? null,
+        org: geo?.org ?? null,
         timezone: geo?.timezone ?? null,
         latitude: geo?.latitude ?? null,
         longitude: geo?.longitude ?? null,
@@ -530,7 +573,8 @@ export default function ManagePersonLayoutPage() {
         </Button>
       </div>
 
-      <nav className="flex flex-wrap gap-2 border-b pb-2">
+      <nav className="sticky left-0 top-0 z-30 -mx-2 overflow-x-auto border-b bg-background/95 px-2 pb-2 pt-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex min-w-max gap-2">
         {personTabs.map(tab => (
           <NavLink
             key={tab.to}
@@ -546,6 +590,7 @@ export default function ManagePersonLayoutPage() {
             {tab.label}
           </NavLink>
         ))}
+        </div>
       </nav>
 
       <Outlet context={data} />

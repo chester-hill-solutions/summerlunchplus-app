@@ -122,6 +122,7 @@ type LoaderData = {
   label: string
   tableName: string
   tableVariant?: 'default' | 'pivot'
+  enableCellClickFilter?: boolean
   columnMeta?: Record<string, {
     label?: string
     truncate?: boolean
@@ -130,6 +131,7 @@ type LoaderData = {
     maxChars?: number
     minWidth?: number
     preferredWidth?: number
+    fitContentOnLoad?: boolean
     hoverCard?: HoverCardConfig
   }>
   canEditStatus?: boolean
@@ -571,6 +573,7 @@ const buildAutoColumnWidths = ({
   const widths = columns.reduce<Record<string, number>>((acc, column) => {
     const label = (columnMeta?.[column]?.label ?? column).replace(/_/g, ' ')
     const minWidth = minWidths[column] ?? MIN_COLUMN_WIDTH
+    const fitContentOnLoad = Boolean(columnMeta?.[column]?.fitContentOnLoad)
     const estimated = estimateContentWidth({
       column,
       label,
@@ -580,7 +583,7 @@ const buildAutoColumnWidths = ({
     })
     const preferredWidth = columnMeta?.[column]?.preferredWidth
     const targetWidth =
-      typeof preferredWidth === 'number' && Number.isFinite(preferredWidth)
+      !fitContentOnLoad && typeof preferredWidth === 'number' && Number.isFinite(preferredWidth)
         ? Math.round(preferredWidth)
         : estimated
     const cappedWidth = Math.min(clampColumnWidthWithMin(targetWidth, minWidth), Math.max(perColumnViewportCap, minWidth))
@@ -603,6 +606,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     label = 'Table',
     tableName = '',
     tableVariant = 'default',
+    enableCellClickFilter = true,
     columnMeta = {},
     canEditStatus,
     editorConfig,
@@ -630,6 +634,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [columnMinWidths, setColumnMinWidths] = useState<Record<string, number>>({})
   const [resizeState, setResizeState] = useState<ResizeState | null>(null)
+  const [pinnedHoverCardCellId, setPinnedHoverCardCellId] = useState<string | null>(null)
   const loadingEnrichmentProfileIdsRef = useRef<Set<string>>(new Set())
   const loadingDistrictRidingsRef = useRef<Set<string>>(new Set())
   const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -643,6 +648,39 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
   const debugPerf = searchParams.get('debugPerf') === '1'
+
+  const rowsWithEnrichment = useMemo(() => {
+    return rows.map(row => {
+      let nextRow = row
+
+      if (isWorkshopEnrollmentTable) {
+        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+        const enrichment = profileId ? enrichmentByProfileId[profileId] : null
+        if (enrichment) {
+          nextRow = { ...nextRow, ...enrichment }
+        }
+      }
+
+      if (isFederalDistrictTable) {
+        const ridingName = typeof row.name === 'string' ? row.name.trim() : ''
+        const counts = ridingName ? districtCountsByRiding[ridingName] : null
+        if (counts) {
+          nextRow = { ...nextRow, ...counts }
+        } else {
+          nextRow = {
+            ...nextRow,
+            total: '...',
+            accepted: '...',
+            pending: '...',
+            waitlisted: '...',
+            declined: '...',
+          }
+        }
+      }
+
+      return nextRow
+    })
+  }, [districtCountsByRiding, enrichmentByProfileId, isFederalDistrictTable, isWorkshopEnrollmentTable, rows])
 
   useEffect(() => {
     const nextSort = searchParams.get('sort')
@@ -728,6 +766,43 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   }, [columnWidths, tableName])
 
   useEffect(() => {
+    const fitColumns = columns.filter(column => Boolean(columnMeta[column]?.fitContentOnLoad))
+    if (!fitColumns.length) return
+    if (!Object.keys(columnWidths).length) return
+
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440
+    const perColumnViewportCap = Math.max(MIN_COLUMN_WIDTH, Math.floor(viewportWidth * MAX_COLUMN_WIDTH_VW_RATIO))
+
+    setColumnWidths(prev => {
+      let changed = false
+      const next = { ...prev }
+
+      for (const column of fitColumns) {
+        const label = (columnMeta[column]?.label ?? column).replace(/_/g, ' ')
+        const minWidth = columnMinWidths[column] ?? estimateHeaderMinWidth(label, Boolean(columnMeta[column]?.numeric))
+        const estimated = estimateContentWidth({
+          column,
+          label,
+          rows: rowsWithEnrichment,
+          tableName,
+          numeric: Boolean(columnMeta[column]?.numeric),
+        })
+        const cappedWidth = Math.min(
+          clampColumnWidthWithMin(estimated, minWidth),
+          Math.max(perColumnViewportCap, minWidth)
+        )
+        const currentWidth = next[column] ?? minWidth
+        if (cappedWidth > currentWidth) {
+          next[column] = cappedWidth
+          changed = true
+        }
+      }
+
+      return changed ? next : prev
+    })
+  }, [columnMeta, columnMinWidths, columnWidths, columns, rowsWithEnrichment, tableName])
+
+  useEffect(() => {
     if (!resizeState) return
 
     const onMouseMove = (event: MouseEvent) => {
@@ -747,6 +822,31 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       window.removeEventListener('mouseup', onMouseUp)
     }
   }, [columnMinWidths, resizeState])
+
+  useEffect(() => {
+    if (!pinnedHoverCardCellId) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      const hovercardRoot = target?.closest('[data-hovercard-cell-id]') as HTMLElement | null
+      if (hovercardRoot?.dataset.hovercardCellId === pinnedHoverCardCellId) return
+      setPinnedHoverCardCellId(null)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPinnedHoverCardCellId(null)
+      }
+    }
+
+    document.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [pinnedHoverCardCellId])
 
   const syncSearch = (
     nextFilters: Record<string, string[]>,
@@ -793,39 +893,6 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       const cellValue = getCellValue(column, row, tableName)
       return selectedValues.includes(cellValue)
     })
-
-  const rowsWithEnrichment = useMemo(() => {
-    return rows.map(row => {
-      let nextRow = row
-
-      if (isWorkshopEnrollmentTable) {
-        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
-        const enrichment = profileId ? enrichmentByProfileId[profileId] : null
-        if (enrichment) {
-          nextRow = { ...nextRow, ...enrichment }
-        }
-      }
-
-      if (isFederalDistrictTable) {
-        const ridingName = typeof row.name === 'string' ? row.name.trim() : ''
-        const counts = ridingName ? districtCountsByRiding[ridingName] : null
-        if (counts) {
-          nextRow = { ...nextRow, ...counts }
-        } else {
-          nextRow = {
-            ...nextRow,
-            total: '...',
-            accepted: '...',
-            pending: '...',
-            waitlisted: '...',
-            declined: '...',
-          }
-        }
-      }
-
-      return nextRow
-    })
-  }, [districtCountsByRiding, enrichmentByProfileId, isFederalDistrictTable, isWorkshopEnrollmentTable, rows])
 
   const filterDataRevision = useMemo(
     () =>
@@ -1850,7 +1917,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         </div>
       </div>
 
-      <div className="min-w-0 border-y">
+      <div className="min-w-0 overflow-x-auto border-y">
         <table className="w-max table-fixed text-sm" style={{ width: `${tableWidth}px`, minWidth: `${tableWidth}px` }}>
           <colgroup>
             {columns.map(column => (
@@ -2051,13 +2118,24 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                       const personLink = personLinkForCell(tableName, column, row, `${location.pathname}${location.search}`)
                       const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
                       const filterable = columnMeta[column]?.filterable ?? true
+                      const canClickFilter = enableCellClickFilter && filterable
                       const cellValue = getCellValue(column, row, tableName)
+                      const rowCellClassByColumn =
+                        row._cell_class_by_column && typeof row._cell_class_by_column === 'object' && !Array.isArray(row._cell_class_by_column)
+                          ? (row._cell_class_by_column as Record<string, unknown>)
+                          : null
+                      const extraCellClass =
+                        rowCellClassByColumn && typeof rowCellClassByColumn[column] === 'string'
+                          ? rowCellClassByColumn[column]
+                          : ''
                       const maxChars = columnMeta[column]?.maxChars
                       const displayValue =
                         typeof maxChars === 'number' && maxChars > 0 && cellValue.length > maxChars
                           ? `${cellValue.slice(0, maxChars)}...`
                           : cellValue
                       const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard)
+                      const hoverCardCellId = `row-${absoluteRowIndex}-col-${column}`
+                      const isHoverCardPinned = pinnedHoverCardCellId === hoverCardCellId
 
                       const content = isFormNameLink ? (
                         <Link
@@ -2111,11 +2189,24 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           title={cellValue || '(empty)'}
                           className={
                             isNumericColumn(column)
-                              ? 'w-24 cursor-pointer whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums hover:bg-muted/30'
-                              : 'cursor-pointer px-4 py-2 font-mono hover:bg-muted/30'
+                              ? `w-24 whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''} ${extraCellClass}`
+                              : `px-4 py-2 font-mono select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''} ${extraCellClass}`
                           }
-                          onClick={() => {
-                            if (!filterable) return
+                          onClick={event => {
+                            const interactiveTarget = (event.target as HTMLElement | null)?.closest(
+                              'a,button,input,select,textarea,label'
+                            )
+                            if (interactiveTarget) return
+
+                            const selectedText = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() : ''
+                            if (selectedText) return
+
+                            if (hoverCardData) {
+                              setPinnedHoverCardCellId(prev => (prev === hoverCardCellId ? null : hoverCardCellId))
+                              return
+                            }
+
+                            if (!canClickFilter) return
                             appendFilter(column, cellValue)
                           }}
                           onMouseEnter={() => {
@@ -2126,12 +2217,15 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           }}
                         >
                           {hoverCardData ? (
-                            <div className="group/hovercard relative inline-block max-w-full">
+                            <div className="group/hovercard relative inline-block max-w-full" data-hovercard-cell-id={hoverCardCellId}>
                               {content}
                               <div
-                                className="pointer-events-none invisible absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/hovercard:pointer-events-auto group-hover/hovercard:visible group-hover/hovercard:opacity-100 group-focus-within/hovercard:pointer-events-auto group-focus-within/hovercard:visible group-focus-within/hovercard:opacity-100 select-text"
+                                className={`absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground shadow-lg transition-opacity select-text ${
+                                  isHoverCardPinned
+                                    ? 'pointer-events-auto visible opacity-100'
+                                    : 'pointer-events-none invisible opacity-0 group-hover/hovercard:pointer-events-auto group-hover/hovercard:visible group-hover/hovercard:opacity-100 group-focus-within/hovercard:pointer-events-auto group-focus-within/hovercard:visible group-focus-within/hovercard:opacity-100'
+                                }`}
                                 onClick={event => event.stopPropagation()}
-                                onMouseDown={event => event.stopPropagation()}
                               >
                                 {hoverCardData.title || hoverCardData.columns?.rightTitle ? (
                                   <div className="mb-1 grid grid-cols-2 gap-3">

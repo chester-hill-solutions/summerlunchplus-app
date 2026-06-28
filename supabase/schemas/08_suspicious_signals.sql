@@ -20,7 +20,8 @@ create table if not exists public.suspicious_signal (
       'network_distance_anomaly',
       'non_whitelisted_riding',
       'cross_family_exact_address',
-      'ip_profile_location_mismatch'
+      'ip_profile_location_mismatch',
+      'ip_org_greylist'
     )
   ),
   constraint suspicious_signal_severity_chk check (severity in ('low', 'medium', 'high')),
