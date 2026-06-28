@@ -335,6 +335,8 @@ const getDirectionIndicator = (stage: 0 | 1 | 2) => {
   return ''
 }
 
+const isHttpUrl = (value: string) => /^https?:\/\//i.test(value)
+
 const FORM_SELECT_CLASS_NAME = 'h-9 rounded border border-input bg-background px-2 pr-8'
 const TABLE_SELECT_CLASS_NAME =
   'block h-8 w-full min-w-0 max-w-full rounded border border-input bg-background px-2 pr-8 text-xs'
@@ -403,6 +405,17 @@ const personLinkForCell = (
 
   if (column === 'profile_display' && profileId) {
     return withReturnTo('/manage/person', { profileId })
+  }
+  if (tableName === 'class-attendance' && column === 'class_display' && typeof row.class_id === 'string' && row.class_id) {
+    return withReturnTo('/manage/class', { f_id: row.class_id })
+  }
+  if (
+    tableName === 'class' &&
+    ['id', 'workshop_description', 'starts_at', 'ends_at', 'zoom_host_email'].includes(column) &&
+    typeof row.id === 'string' &&
+    row.id
+  ) {
+    return withReturnTo('/manage/class-attendance', { f_class_id: row.id })
   }
   if (column === 'subject_profile_display' && typeof row.subject_profile_id === 'string') {
     return withReturnTo('/manage/person', { profileId: row.subject_profile_id })
@@ -2153,6 +2166,9 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                       const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
                       const isFormAnswersLink = tableName === 'form' && column === 'answers' && typeof row.id === 'string'
                       const personLink = personLinkForCell(tableName, column, row, `${location.pathname}${location.search}`)
+                      const rawCellValue = row[column]
+                      const externalLink =
+                        column.includes('join_url') && typeof rawCellValue === 'string' && isHttpUrl(rawCellValue)
                       const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
                       const filterable = columnMeta[column]?.filterable ?? true
                       const canClickFilter = enableCellClickFilter && filterable
@@ -2214,6 +2230,18 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                             {displayValue}
                           </span>
                         </Link>
+                      ) : externalLink ? (
+                        <a
+                          href={rawCellValue as string}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={event => event.stopPropagation()}
+                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                        >
+                          <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
+                            {displayValue}
+                          </span>
+                        </a>
                       ) : (
                         <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                           {displayValue}
