@@ -2,11 +2,7 @@ import { expect, test } from '@playwright/test'
 
 import { generateInviteLinkForEmail } from './helpers/invite-links'
 import { getAdminSupabaseClient, hasAdminServiceEnv } from './helpers/admin-account'
-
-const uniqueSuffix = () => {
-  const now = new Date()
-  return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}${String(now.getMilliseconds()).padStart(3, '0')}`
-}
+import { uniqueSuffix } from './helpers/ids'
 
 const fillRequiredFields = async (page: import('@playwright/test').Page) => {
   const form = page.locator('form').first()
