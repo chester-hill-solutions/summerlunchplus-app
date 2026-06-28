@@ -21,6 +21,6 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const appOrigin = new URL(request.url).origin
   console.info('[internal][zoom-jobs.run] starting', { runId: authCheck.runId })
-  const result = await runZoomJobs({ appOrigin })
-  return Response.json({ runId: authCheck.runId, ...result })
+  const result = await runZoomJobs({ appOrigin, runId: authCheck.runId })
+  return Response.json(result)
 }

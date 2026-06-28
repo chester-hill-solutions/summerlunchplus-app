@@ -20,6 +20,20 @@ type ZoomCreateMeetingResponse = {
   join_url: string
 }
 
+export class ZoomApiError extends Error {
+  status: number
+  path: string
+  payload: unknown
+
+  constructor({ status, path, payload }: { status: number; path: string; payload: unknown }) {
+    super(`zoom-api ${path} failed (${status})`)
+    this.name = 'ZoomApiError'
+    this.status = status
+    this.path = path
+    this.payload = payload
+  }
+}
+
 const getConfig = () => {
   const endpoint = (process.env.ZOOM_API_ENDPOINT ?? '').trim()
   const apiKey = (process.env.ZOOM_API_KEY ?? '').trim()
@@ -48,7 +62,7 @@ const requestJson = async <T>({ method, path, body }: { method: 'GET' | 'POST'; 
 
   const payload = await parsePayload(response)
   if (!response.ok) {
-    throw new Error(`zoom-api ${path} failed (${response.status}): ${typeof payload === 'string' ? payload : JSON.stringify(payload)}`)
+    throw new ZoomApiError({ status: response.status, path, payload })
   }
   return payload as T
 }
