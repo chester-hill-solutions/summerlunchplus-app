@@ -570,6 +570,10 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
     })
   }
 
+  if (!signals.length) {
+    return
+  }
+
   await adminClient
     .from('suspicious_signal')
     .delete()
@@ -583,8 +587,6 @@ const refreshSuspiciousSignalsForProfileWithOptions = async (
       'ip_profile_location_mismatch',
       'ip_org_greylist',
     ])
-
-  if (!signals.length) return
 
   const payload = signals.map(signal => ({
     subject_profile_id: profileId,
