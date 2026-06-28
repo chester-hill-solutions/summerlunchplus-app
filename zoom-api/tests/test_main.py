@@ -57,6 +57,17 @@ REGISTRANTS = [
     {"first_name": "Bob",   "last_name": "B", "email": "bob@example.com"},
 ]
 
+HOSTS_RESP = {
+    "users": [
+        {
+            "id": "host-1",
+            "email": "host1@example.com",
+            "first_name": "Host",
+            "last_name": "One",
+        }
+    ]
+}
+
 
 def ok(data):
     m = Mock()
@@ -118,6 +129,18 @@ def test_zoom_connect_success(client, headers):
 
 def test_zoom_connect_missing_auth(client):
     assert client.post("/zoom/connect").status_code == 401
+
+
+def test_list_hosts_success(client, headers):
+    with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
+         patch("app.zoom.httpx.get", return_value=ok(HOSTS_RESP)):
+        resp = client.get("/hosts", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["users"][0]["email"] == "host1@example.com"
+
+
+def test_list_hosts_missing_auth(client):
+    assert client.get("/hosts").status_code == 401
 
 
 # ── GET /meetings/past ────────────────────────────────────────────────────────
@@ -210,6 +233,30 @@ def test_create_meeting_success(client, headers):
     assert data["id"] == 99999
     assert data["uuid"] == "meeting-uuid-123"
     assert data["join_url"] == "https://zoom.us/j/99999"
+
+
+def test_create_meeting_with_host_success(client, headers):
+    with patch("app.zoom.httpx.post", side_effect=[ok(TOKEN_RESP), ok(CREATE_RESP)]) as mock_post:
+        resp = client.post("/meetings", headers=headers, json={
+            "topic": "Q2 Review",
+            "start_time": "2026-06-01T14:00:00",
+            "duration": 60,
+            "host_zoom_user_email": "host1@example.com",
+        })
+    assert resp.status_code == 200
+    meeting_create_url = mock_post.call_args_list[1].args[0]
+    assert "/users/host1%40example.com/meetings" in meeting_create_url
+
+
+def test_create_meeting_rejects_multiple_host_selectors(client, headers):
+    resp = client.post("/meetings", headers=headers, json={
+        "topic": "Q2 Review",
+        "start_time": "2026-06-01T14:00:00",
+        "duration": 60,
+        "host_zoom_user_id": "host-123",
+        "host_zoom_user_email": "host1@example.com",
+    })
+    assert resp.status_code == 422
 
 
 def test_create_meeting_missing_fields(client, headers):

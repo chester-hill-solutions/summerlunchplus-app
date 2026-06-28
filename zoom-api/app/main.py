@@ -1,5 +1,6 @@
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.auth import get_api_key
 from app.cache import _participants_cache, _past_meetings_cache, get_cached, set_cached
@@ -27,6 +28,24 @@ class CreateMeetingRequest(BaseModel):
         examples=["2026-06-15T10:00:00Z"],
     )
     duration: int = Field(description="Meeting duration in minutes.", examples=[60])
+    host_zoom_user_id: str | None = Field(
+        default=None,
+        description="Optional Zoom host user ID. If omitted, `host_zoom_user_email` can be used."
+        " If both are omitted, Zoom API defaults to `me`.",
+        examples=["fA1b2C3d4E5f6G7h8I9j"],
+    )
+    host_zoom_user_email: str | None = Field(
+        default=None,
+        description="Optional Zoom host user email. If omitted, `host_zoom_user_id` can be used."
+        " If both are omitted, Zoom API defaults to `me`.",
+        examples=["host1@example.com"],
+    )
+
+    @model_validator(mode="after")
+    def validate_host_selector(self):
+        if self.host_zoom_user_id and self.host_zoom_user_email:
+            raise ValueError("Provide only one of host_zoom_user_id or host_zoom_user_email.")
+        return self
 
 
 class CreateMeetingResponse(BaseModel):
@@ -57,12 +76,37 @@ def healthz() -> dict[str, str]:
 
 # --- Zoom credential check ---
 
+
+def _as_http_exception(exc: httpx.HTTPStatusError) -> HTTPException:
+    status = exc.response.status_code
+    if status == 404:
+        detail = "Zoom resource not found. Check meeting/user identifiers."
+    elif status == 403:
+        detail = "Zoom access forbidden for this operation."
+    elif status == 429:
+        detail = "Zoom rate limit exceeded. Retry shortly."
+    else:
+        detail = f"Zoom API request failed with status {status}."
+    return HTTPException(status_code=status, detail=detail)
+
 @app.post("/zoom/connect", dependencies=[Depends(get_api_key)])
 def zoom_connect() -> dict:
     """Validates the configured Zoom Server-to-Server OAuth credentials by calling the Zoom /users/me endpoint.
     Returns the full Zoom user profile on success, or raises an HTTP error if credentials are invalid.
     """
-    return _zoom().validate_credentials()
+    try:
+        return _zoom().validate_credentials()
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
+
+
+@app.get("/hosts", dependencies=[Depends(get_api_key)])
+def list_hosts() -> dict:
+    """Lists active users in the connected Zoom account for host selection."""
+    try:
+        return _zoom().list_hosts()
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
 
 
 # --- Meetings ---
@@ -81,7 +125,10 @@ def list_past_meetings(
         cached = get_cached(_past_meetings_cache, cache_key)
         if cached is not None:
             return cached
-    result = _zoom().list_past_meetings(days=days)
+    try:
+        result = _zoom().list_past_meetings(days=days)
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
     set_cached(_past_meetings_cache, cache_key, result)
     return transform_meetings(result)
 
@@ -104,8 +151,10 @@ def get_participants(
             return cached
     try:
         result = _zoom().get_participants(uuid)
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
     except MeetingInProgressError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     set_cached(_participants_cache, cache_key, result)
     return transform_participants(result)
 
@@ -115,11 +164,16 @@ def create_meeting(body: CreateMeetingRequest) -> CreateMeetingResponse:
     """Creates a scheduled Zoom meeting for the authenticated user.
     Returns the numeric meeting `id` (used for registration), the `uuid` (used for participant reports), and the `join_url`.
     """
-    result = _zoom().create_meeting(
-        topic=body.topic,
-        start_time=body.start_time,
-        duration=body.duration,
-    )
+    try:
+        result = _zoom().create_meeting(
+            topic=body.topic,
+            start_time=body.start_time,
+            duration=body.duration,
+            host_zoom_user_id=body.host_zoom_user_id,
+            host_zoom_user_email=body.host_zoom_user_email,
+        )
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
     return {"id": result["id"], "uuid": result["uuid"], "join_url": result["join_url"]}
 
 
@@ -129,7 +183,10 @@ def register_participants(meeting_id: str, registrants: list[Registrant]) -> lis
     Use the numeric meeting `id` (not the uuid) from `POST /meetings` as `meeting_id`.
     Each registrant is registered individually; results are returned as a list of Zoom registrant response objects.
     """
-    return _zoom().register_participants(
-        meeting_id=meeting_id,
-        registrants=[r.model_dump() for r in registrants],
-    )
+    try:
+        return _zoom().register_participants(
+            meeting_id=meeting_id,
+            registrants=[r.model_dump() for r in registrants],
+        )
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc

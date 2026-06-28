@@ -7,31 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       class: {
@@ -76,6 +51,9 @@ export type Database = {
           created_at: string
           id: string
           notes: string | null
+          photo_status:
+            | Database["public"]["Enums"]["class_attendance_photo_status"]
+            | null
           profile_id: string
           recorded_by: string | null
           status: Database["public"]["Enums"]["class_attendance_status"] | null
@@ -87,6 +65,9 @@ export type Database = {
           created_at?: string
           id?: string
           notes?: string | null
+          photo_status?:
+            | Database["public"]["Enums"]["class_attendance_photo_status"]
+            | null
           profile_id: string
           recorded_by?: string | null
           status?: Database["public"]["Enums"]["class_attendance_status"] | null
@@ -98,6 +79,9 @@ export type Database = {
           created_at?: string
           id?: string
           notes?: string | null
+          photo_status?:
+            | Database["public"]["Enums"]["class_attendance_photo_status"]
+            | null
           profile_id?: string
           recorded_by?: string | null
           status?: Database["public"]["Enums"]["class_attendance_status"] | null
@@ -113,6 +97,256 @@ export type Database = {
           },
           {
             foreignKeyName: "class_attendance_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      class_zoom_meeting: {
+        Row: {
+          class_id: string
+          created_at: string
+          duration_minutes: number | null
+          error_message: string | null
+          host_zoom_user_email: string | null
+          host_zoom_user_id: string | null
+          id: string
+          join_url: string | null
+          last_synced_at: string | null
+          start_time: string | null
+          status: Database["public"]["Enums"]["zoom_meeting_status"]
+          topic: string | null
+          updated_at: string
+          zoom_host_id: string
+          zoom_meeting_id: string | null
+          zoom_meeting_uuid: string | null
+        }
+        Insert: {
+          class_id: string
+          created_at?: string
+          duration_minutes?: number | null
+          error_message?: string | null
+          host_zoom_user_email?: string | null
+          host_zoom_user_id?: string | null
+          id?: string
+          join_url?: string | null
+          last_synced_at?: string | null
+          start_time?: string | null
+          status?: Database["public"]["Enums"]["zoom_meeting_status"]
+          topic?: string | null
+          updated_at?: string
+          zoom_host_id: string
+          zoom_meeting_id?: string | null
+          zoom_meeting_uuid?: string | null
+        }
+        Update: {
+          class_id?: string
+          created_at?: string
+          duration_minutes?: number | null
+          error_message?: string | null
+          host_zoom_user_email?: string | null
+          host_zoom_user_id?: string | null
+          id?: string
+          join_url?: string | null
+          last_synced_at?: string | null
+          start_time?: string | null
+          status?: Database["public"]["Enums"]["zoom_meeting_status"]
+          topic?: string | null
+          updated_at?: string
+          zoom_host_id?: string
+          zoom_meeting_id?: string | null
+          zoom_meeting_uuid?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_zoom_meeting_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: true
+            referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_zoom_meeting_zoom_host_id_fkey"
+            columns: ["zoom_host_id"]
+            isOneToOne: false
+            referencedRelation: "zoom_host"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      class_zoom_participant: {
+        Row: {
+          attentiveness_score: number | null
+          camera_on: boolean | null
+          class_id: string
+          class_zoom_meeting_id: string
+          created_at: string
+          duration_seconds: number | null
+          id: string
+          join_time: string | null
+          leave_time: string | null
+          profile_id: string | null
+          raw: Json
+          user_email: string | null
+          user_name: string | null
+          zoom_user_id: string | null
+        }
+        Insert: {
+          attentiveness_score?: number | null
+          camera_on?: boolean | null
+          class_id: string
+          class_zoom_meeting_id: string
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          join_time?: string | null
+          leave_time?: string | null
+          profile_id?: string | null
+          raw?: Json
+          user_email?: string | null
+          user_name?: string | null
+          zoom_user_id?: string | null
+        }
+        Update: {
+          attentiveness_score?: number | null
+          camera_on?: boolean | null
+          class_id?: string
+          class_zoom_meeting_id?: string
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          join_time?: string | null
+          leave_time?: string | null
+          profile_id?: string | null
+          raw?: Json
+          user_email?: string | null
+          user_name?: string | null
+          zoom_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_zoom_participant_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_zoom_participant_class_zoom_meeting_id_fkey"
+            columns: ["class_zoom_meeting_id"]
+            isOneToOne: false
+            referencedRelation: "class_zoom_meeting"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_zoom_participant_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      class_zoom_participant_sync: {
+        Row: {
+          class_zoom_meeting_id: string
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          payload: Json
+          started_at: string | null
+          status: Database["public"]["Enums"]["zoom_sync_status"]
+        }
+        Insert: {
+          class_zoom_meeting_id: string
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          payload?: Json
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["zoom_sync_status"]
+        }
+        Update: {
+          class_zoom_meeting_id?: string
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          payload?: Json
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["zoom_sync_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_zoom_participant_sync_class_zoom_meeting_id_fkey"
+            columns: ["class_zoom_meeting_id"]
+            isOneToOne: false
+            referencedRelation: "class_zoom_meeting"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      class_zoom_registrant: {
+        Row: {
+          class_id: string
+          class_zoom_meeting_id: string
+          created_at: string
+          id: string
+          last_sent_at: string | null
+          profile_id: string
+          updated_at: string
+          zlr_expires_at: string | null
+          zlr_token_hash: string
+          zoom_join_url: string | null
+          zoom_registrant_id: string | null
+        }
+        Insert: {
+          class_id: string
+          class_zoom_meeting_id: string
+          created_at?: string
+          id?: string
+          last_sent_at?: string | null
+          profile_id: string
+          updated_at?: string
+          zlr_expires_at?: string | null
+          zlr_token_hash: string
+          zoom_join_url?: string | null
+          zoom_registrant_id?: string | null
+        }
+        Update: {
+          class_id?: string
+          class_zoom_meeting_id?: string
+          created_at?: string
+          id?: string
+          last_sent_at?: string | null
+          profile_id?: string
+          updated_at?: string
+          zlr_expires_at?: string | null
+          zlr_token_hash?: string
+          zoom_join_url?: string | null
+          zoom_registrant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_zoom_registrant_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_zoom_registrant_class_zoom_meeting_id_fkey"
+            columns: ["class_zoom_meeting_id"]
+            isOneToOne: false
+            referencedRelation: "class_zoom_meeting"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_zoom_registrant_profile_id_fkey"
             columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profile"
@@ -338,6 +572,107 @@ export type Database = {
           },
         ]
       }
+      export_job: {
+        Row: {
+          attempt_count: number
+          column_order: string[]
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          expires_at: string | null
+          export_type: string
+          file_size_bytes: number | null
+          filters: Json
+          id: string
+          query_params: Json
+          requested_by: string
+          row_count: number | null
+          sort: Json
+          source_table: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["export_job_status"]
+          storage_bucket: string | null
+          storage_path: string | null
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          column_order?: string[]
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          expires_at?: string | null
+          export_type: string
+          file_size_bytes?: number | null
+          filters?: Json
+          id?: string
+          query_params?: Json
+          requested_by: string
+          row_count?: number | null
+          sort?: Json
+          source_table: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["export_job_status"]
+          storage_bucket?: string | null
+          storage_path?: string | null
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          column_order?: string[]
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          expires_at?: string | null
+          export_type?: string
+          file_size_bytes?: number | null
+          filters?: Json
+          id?: string
+          query_params?: Json
+          requested_by?: string
+          row_count?: number | null
+          sort?: Json
+          source_table?: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["export_job_status"]
+          storage_bucket?: string | null
+          storage_path?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      export_job_row: {
+        Row: {
+          created_at: string
+          id: number
+          job_id: string
+          row_data: Json
+          row_index: number
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          job_id: string
+          row_data: Json
+          row_index: number
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          job_id?: string
+          row_data?: Json
+          row_index?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "export_job_row_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "export_job"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       federal_electoral_district: {
         Row: {
           code: number
@@ -541,8 +876,8 @@ export type Database = {
           form_id: string
           forwarded_for: string | null
           id: string
-          ip_chain: Json
           ip_address: unknown
+          ip_chain: Json
           ip_classification: string
           ip_classifier_version: number
           ip_confidence_level: string
@@ -569,8 +904,8 @@ export type Database = {
           form_id: string
           forwarded_for?: string | null
           id?: string
-          ip_chain?: Json
           ip_address?: unknown
+          ip_chain?: Json
           ip_classification?: string
           ip_classifier_version?: number
           ip_confidence_level?: string
@@ -597,8 +932,8 @@ export type Database = {
           form_id?: string
           forwarded_for?: string | null
           id?: string
-          ip_chain?: Json
           ip_address?: unknown
+          ip_chain?: Json
           ip_classification?: string
           ip_classifier_version?: number
           ip_confidence_level?: string
@@ -784,6 +1119,96 @@ export type Database = {
         }
         Relationships: []
       }
+      ip_geolocation_cache: {
+        Row: {
+          city: string | null
+          confidence: string | null
+          country_code: string | null
+          created_at: string
+          expires_at: string
+          ip: unknown
+          latitude: number | null
+          longitude: number | null
+          looked_up_at: string
+          org: string | null
+          raw: Json
+          region: string | null
+          source: string
+          timezone: string | null
+          updated_at: string
+        }
+        Insert: {
+          city?: string | null
+          confidence?: string | null
+          country_code?: string | null
+          created_at?: string
+          expires_at: string
+          ip: unknown
+          latitude?: number | null
+          longitude?: number | null
+          looked_up_at?: string
+          org?: string | null
+          raw?: Json
+          region?: string | null
+          source: string
+          timezone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          city?: string | null
+          confidence?: string | null
+          country_code?: string | null
+          created_at?: string
+          expires_at?: string
+          ip?: unknown
+          latitude?: number | null
+          longitude?: number | null
+          looked_up_at?: string
+          org?: string | null
+          raw?: Json
+          region?: string | null
+          source?: string
+          timezone?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ip_org_policy: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          match_mode: string
+          note: string | null
+          org_pattern: string
+          policy_class: string
+          priority: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          match_mode?: string
+          note?: string | null
+          org_pattern: string
+          policy_class?: string
+          priority?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          match_mode?: string
+          note?: string | null
+          org_pattern?: string
+          policy_class?: string
+          priority?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       login_event: {
         Row: {
           accept_language: string | null
@@ -791,8 +1216,8 @@ export type Database = {
           event_at: string
           forwarded_for: string | null
           id: string
-          ip_chain: Json
           ip_address: unknown
+          ip_chain: Json
           ip_classification: string
           ip_classifier_version: number
           ip_confidence_level: string
@@ -820,8 +1245,8 @@ export type Database = {
           event_at?: string
           forwarded_for?: string | null
           id?: string
-          ip_chain?: Json
           ip_address?: unknown
+          ip_chain?: Json
           ip_classification?: string
           ip_classifier_version?: number
           ip_confidence_level?: string
@@ -849,8 +1274,8 @@ export type Database = {
           event_at?: string
           forwarded_for?: string | null
           id?: string
-          ip_chain?: Json
           ip_address?: unknown
+          ip_chain?: Json
           ip_classification?: string
           ip_classifier_version?: number
           ip_confidence_level?: string
@@ -871,6 +1296,36 @@ export type Database = {
           success?: boolean
           user_agent?: string | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      network_proxy_range: {
+        Row: {
+          cidr: unknown
+          created_at: string
+          id: string
+          ip_family: number
+          provider: string
+          updated_at: string
+          version_tag: string | null
+        }
+        Insert: {
+          cidr: unknown
+          created_at?: string
+          id?: string
+          ip_family: number
+          provider: string
+          updated_at?: string
+          version_tag?: string | null
+        }
+        Update: {
+          cidr?: unknown
+          created_at?: string
+          id?: string
+          ip_family?: number
+          provider?: string
+          updated_at?: string
+          version_tag?: string | null
         }
         Relationships: []
       }
@@ -912,6 +1367,7 @@ export type Database = {
       }
       profile: {
         Row: {
+          address_fingerprint: string | null
           city: string | null
           created_at: string
           date_of_birth: string | null
@@ -936,6 +1392,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          address_fingerprint?: string | null
           city?: string | null
           created_at?: string
           date_of_birth?: string | null
@@ -960,6 +1417,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          address_fingerprint?: string | null
           city?: string | null
           created_at?: string
           date_of_birth?: string | null
@@ -1226,6 +1684,8 @@ export type Database = {
           details: Json
           family_profile_ids: string[]
           id: string
+          priority_reason: string | null
+          priority_score: number
           resolution_note: string | null
           resolved_at: string | null
           resolved_by: string | null
@@ -1241,6 +1701,8 @@ export type Database = {
           details?: Json
           family_profile_ids?: string[]
           id?: string
+          priority_reason?: string | null
+          priority_score?: number
           resolution_note?: string | null
           resolved_at?: string | null
           resolved_by?: string | null
@@ -1256,6 +1718,8 @@ export type Database = {
           details?: Json
           family_profile_ids?: string[]
           id?: string
+          priority_reason?: string | null
+          priority_score?: number
           resolution_note?: string | null
           resolved_at?: string | null
           resolved_by?: string | null
@@ -1402,6 +1866,87 @@ export type Database = {
           },
         ]
       }
+      zlr_click_event: {
+        Row: {
+          class_zoom_registrant_id: string
+          clicked_at: string
+          id: string
+          ip_address: unknown
+          metadata: Json
+          profile_id: string | null
+          user_agent: string | null
+        }
+        Insert: {
+          class_zoom_registrant_id: string
+          clicked_at?: string
+          id?: string
+          ip_address?: unknown
+          metadata?: Json
+          profile_id?: string | null
+          user_agent?: string | null
+        }
+        Update: {
+          class_zoom_registrant_id?: string
+          clicked_at?: string
+          id?: string
+          ip_address?: unknown
+          metadata?: Json
+          profile_id?: string | null
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "zlr_click_event_class_zoom_registrant_id_fkey"
+            columns: ["class_zoom_registrant_id"]
+            isOneToOne: false
+            referencedRelation: "class_zoom_registrant"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zlr_click_event_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      zoom_host: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          id: string
+          is_active: boolean
+          notes: string | null
+          priority: number
+          updated_at: string
+          zoom_user_email: string | null
+          zoom_user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          priority?: number
+          updated_at?: string
+          zoom_user_email?: string | null
+          zoom_user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          priority?: number
+          updated_at?: string
+          zoom_user_email?: string | null
+          zoom_user_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -1414,6 +1959,37 @@ export type Database = {
         }
         Returns: boolean
       }
+      claim_next_export_job: {
+        Args: never
+        Returns: {
+          attempt_count: number
+          column_order: string[]
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          expires_at: string | null
+          export_type: string
+          file_size_bytes: number | null
+          filters: Json
+          id: string
+          query_params: Json
+          requested_by: string
+          row_count: number | null
+          sort: Json
+          source_table: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["export_job_status"]
+          storage_bucket: string | null
+          storage_path: string | null
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "export_job"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       current_profile_id: { Args: never; Returns: string }
       current_user_role: {
         Args: never
@@ -1425,9 +2001,32 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: boolean
       }
+      normalize_address_fingerprint: {
+        Args: {
+          city: string
+          postcode: string
+          province: string
+          street_address: string
+        }
+        Returns: string
+      }
       profile_in_same_family: {
         Args: { target_profile_id: string }
         Returns: boolean
+      }
+      request_family_workshop_enrollment: {
+        Args: {
+          p_family_profile_ids: string[]
+          p_profile_id: string
+          p_workshop_id: string
+        }
+        Returns: {
+          enrollment_id: string
+          enrollment_status: Database["public"]["Enums"]["workshop_enrollment_status"]
+          error_code: string
+          error_message: string
+          ok: boolean
+        }[]
       }
       should_auto_promote_onboarding: { Args: never; Returns: boolean }
       sync_auto_assigned_forms_for_form: {
@@ -1486,6 +2085,30 @@ export type Database = {
         | "role_permission.manage"
         | "profiles.read"
         | "profiles.update"
+        | "zoom_host.create"
+        | "zoom_host.read"
+        | "zoom_host.update"
+        | "zoom_host.delete"
+        | "class_zoom_meeting.create"
+        | "class_zoom_meeting.read"
+        | "class_zoom_meeting.update"
+        | "class_zoom_meeting.delete"
+        | "class_zoom_registrant.create"
+        | "class_zoom_registrant.read"
+        | "class_zoom_registrant.update"
+        | "class_zoom_registrant.delete"
+        | "class_zoom_participant_sync.create"
+        | "class_zoom_participant_sync.read"
+        | "class_zoom_participant_sync.update"
+        | "class_zoom_participant_sync.delete"
+        | "class_zoom_participant.create"
+        | "class_zoom_participant.read"
+        | "class_zoom_participant.update"
+        | "class_zoom_participant.delete"
+        | "zlr_click_event.create"
+        | "zlr_click_event.read"
+        | "zlr_click_event.update"
+        | "zlr_click_event.delete"
       app_role:
         | "unassigned"
         | "admin"
@@ -1494,10 +2117,18 @@ export type Database = {
         | "instructor"
         | "student"
         | "guardian"
-      class_attendance_status: "unknown" | "present" | "absent" | "uploaded" | "accepted"
+      class_attendance_photo_status: "uploaded" | "accepted" | "rejected"
+      class_attendance_status: "unknown" | "present" | "absent"
       email_draft_channel: "transactional" | "auth"
       email_draft_status: "draft" | "published" | "archived"
       email_message_status: "queued" | "sent" | "failed" | "skipped"
+      export_job_status:
+        | "queued"
+        | "running"
+        | "completed"
+        | "failed"
+        | "expired"
+        | "cancelled"
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
@@ -1524,6 +2155,8 @@ export type Database = {
         | "approved"
         | "rejected"
         | "revoked"
+      zoom_meeting_status: "pending" | "created" | "failed" | "cancelled"
+      zoom_sync_status: "pending" | "running" | "completed" | "failed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1649,9 +2282,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       app_permissions: [
@@ -1700,6 +2330,30 @@ export const Constants = {
         "role_permission.manage",
         "profiles.read",
         "profiles.update",
+        "zoom_host.create",
+        "zoom_host.read",
+        "zoom_host.update",
+        "zoom_host.delete",
+        "class_zoom_meeting.create",
+        "class_zoom_meeting.read",
+        "class_zoom_meeting.update",
+        "class_zoom_meeting.delete",
+        "class_zoom_registrant.create",
+        "class_zoom_registrant.read",
+        "class_zoom_registrant.update",
+        "class_zoom_registrant.delete",
+        "class_zoom_participant_sync.create",
+        "class_zoom_participant_sync.read",
+        "class_zoom_participant_sync.update",
+        "class_zoom_participant_sync.delete",
+        "class_zoom_participant.create",
+        "class_zoom_participant.read",
+        "class_zoom_participant.update",
+        "class_zoom_participant.delete",
+        "zlr_click_event.create",
+        "zlr_click_event.read",
+        "zlr_click_event.update",
+        "zlr_click_event.delete",
       ],
       app_role: [
         "unassigned",
@@ -1710,10 +2364,19 @@ export const Constants = {
         "student",
         "guardian",
       ],
-      class_attendance_status: ["unknown", "present", "absent", "uploaded", "accepted"],
+      class_attendance_photo_status: ["uploaded", "accepted", "rejected"],
+      class_attendance_status: ["unknown", "present", "absent"],
       email_draft_channel: ["transactional", "auth"],
       email_draft_status: ["draft", "published", "archived"],
       email_message_status: ["queued", "sent", "failed", "skipped"],
+      export_job_status: [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "expired",
+        "cancelled",
+      ],
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
@@ -1743,6 +2406,9 @@ export const Constants = {
         "rejected",
         "revoked",
       ],
+      zoom_meeting_status: ["pending", "created", "failed", "cancelled"],
+      zoom_sync_status: ["pending", "running", "completed", "failed"],
     },
   },
 } as const
+

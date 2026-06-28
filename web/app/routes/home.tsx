@@ -60,7 +60,7 @@ type ClassRow = {
 type AttendanceRow = {
   class_id: string
   profile_id: string
-  status: 'unknown' | 'present' | 'absent' | 'uploaded' | 'accepted' | null
+  status: 'unknown' | 'present' | 'absent' | null
 }
 
 type LoaderData = {
