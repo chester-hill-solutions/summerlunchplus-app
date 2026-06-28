@@ -1,7 +1,6 @@
-import { createHash, randomBytes } from 'node:crypto'
-
 import { adminClient } from '@/lib/supabase/adminClient'
 import { zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
+import { hashZlrToken, newZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
 
 type ClassRow = {
   id: string
@@ -56,10 +55,6 @@ const toDisplayName = (profile: ProfileRow) => {
   const last = (profile.surname ?? '').trim()
   return [first, last].filter(Boolean).join(' ').trim()
 }
-
-const randomToken = () => randomBytes(24).toString('base64url')
-
-const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
 
 const buildTopic = (classRow: ClassRow) => {
   const workshopName = classRow.workshop?.description?.trim() || 'SummerLunch+ Class'
@@ -247,7 +242,7 @@ const ensureRegistrantsForClass = async ({
       email,
     })
 
-    const tokenHash = sha256(randomToken())
+    const tokenHash = hashZlrToken(newZlrToken())
     const { error: upsertError } = await adminClient.from('class_zoom_registrant').upsert(
       {
         class_id: classRow.id,
