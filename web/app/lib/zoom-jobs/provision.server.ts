@@ -1,4 +1,5 @@
 import { adminClient } from '@/lib/supabase/adminClient'
+import { releaseZoomClassLock, tryAcquireZoomClassLock } from '@/lib/zoom-jobs/lock.server'
 import { zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
 import { hashZlrToken, newZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
 
@@ -39,6 +40,8 @@ type ProvisionClassResult = {
   meetingCreated: boolean
   registrantsCreated: number
   registrantsSkipped: number
+  skipped?: boolean
+  skipReason?: string
   error?: string
 }
 
@@ -264,6 +267,19 @@ const ensureRegistrantsForClass = async ({
 }
 
 export const provisionClassById = async (classId: string): Promise<ProvisionClassResult> => {
+  const lockAcquired = await tryAcquireZoomClassLock(classId)
+  if (!lockAcquired) {
+    return {
+      classId,
+      attendanceRowsEnsured: 0,
+      meetingCreated: false,
+      registrantsCreated: 0,
+      registrantsSkipped: 0,
+      skipped: true,
+      skipReason: 'lock_not_acquired',
+    }
+  }
+
   const { data: classRowRaw, error: classError } = await adminClient
     .from('class')
     .select('id, workshop_id, starts_at, ends_at, workshop:workshop_id ( description )')
@@ -271,6 +287,7 @@ export const provisionClassById = async (classId: string): Promise<ProvisionClas
     .single()
 
   if (classError || !classRowRaw) {
+    await releaseZoomClassLock(classId)
     return { classId, attendanceRowsEnsured: 0, meetingCreated: false, registrantsCreated: 0, registrantsSkipped: 0, error: classError?.message ?? 'Class not found' }
   }
 
@@ -303,6 +320,8 @@ export const provisionClassById = async (classId: string): Promise<ProvisionClas
       registrantsSkipped: 0,
       error: error instanceof Error ? error.message : 'Unknown provisioning error',
     }
+  } finally {
+    await releaseZoomClassLock(classId)
   }
 }
 
