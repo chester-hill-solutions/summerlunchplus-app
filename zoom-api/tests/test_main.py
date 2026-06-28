@@ -222,7 +222,7 @@ def test_get_participants_meeting_in_progress(client, headers):
 # ── POST /meetings ────────────────────────────────────────────────────────────
 
 def test_create_meeting_success(client, headers):
-    with patch("app.zoom.httpx.post", side_effect=[ok(TOKEN_RESP), ok(CREATE_RESP)]):
+    with patch("app.zoom.httpx.post", side_effect=[ok(TOKEN_RESP), ok(CREATE_RESP)]) as mock_post:
         resp = client.post("/meetings", headers=headers, json={
             "topic": "Q2 Review",
             "start_time": "2026-06-01T14:00:00",
@@ -233,6 +233,10 @@ def test_create_meeting_success(client, headers):
     assert data["id"] == 99999
     assert data["uuid"] == "meeting-uuid-123"
     assert data["join_url"] == "https://zoom.us/j/99999"
+    payload = mock_post.call_args_list[1].kwargs["json"]
+    settings = payload["settings"]
+    assert settings["registrants_email_notification"] is False
+    assert settings["registrants_confirmation_email"] is False
 
 
 def test_create_meeting_with_host_success(client, headers):

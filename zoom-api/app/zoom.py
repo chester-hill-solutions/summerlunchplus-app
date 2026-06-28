@@ -58,7 +58,12 @@ class ZoomClient:
             "type": 2,  # scheduled
             "start_time": start_time,
             "duration": duration,
-            "settings": {"approval_type": 0, "registration_type": 1},
+            "settings": {
+                "approval_type": 0,
+                "registration_type": 1,
+                "registrants_email_notification": False,
+                "registrants_confirmation_email": False,
+            },
         }
         user_id = "me"
         if isinstance(host_zoom_user_id, str) and host_zoom_user_id.strip():
