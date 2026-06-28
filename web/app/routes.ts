@@ -34,6 +34,7 @@ export default [
   route("auth/error", "routes/auth/error.tsx"),
   route("internal/export-jobs/run", "routes/internal/export-jobs.run.ts"),
   route("internal/export-jobs/cleanup", "routes/internal/export-jobs.cleanup.ts"),
+  route("internal/zoom-jobs/run", "routes/internal/zoom-jobs.run.ts"),
   route("manage", "routes/manage/team.tsx", [
     index("routes/manage/index.tsx"),
     route("participants", "routes/manage/participants.tsx"),
