@@ -1,6 +1,6 @@
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.auth import get_api_key
 from app.cache import _participants_cache, _past_meetings_cache, get_cached, set_cached
@@ -54,6 +54,60 @@ class CreateMeetingResponse(BaseModel):
     join_url: str = Field(description="URL participants use to join the meeting.")
 
 
+class ZoomUserSummary(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str | None = Field(default=None, description="Zoom user ID.")
+    email: str | None = Field(default=None, description="Zoom user email.")
+    first_name: str | None = Field(default=None, description="User first name.")
+    last_name: str | None = Field(default=None, description="User last name.")
+
+
+class HostsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    users: list[ZoomUserSummary] = Field(
+        default_factory=list,
+        description="Active users available in the connected Zoom account.",
+    )
+
+
+class PastMeeting(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: int | str | None = Field(default=None, description="Zoom meeting ID.")
+    uuid: str | None = Field(default=None, description="Zoom meeting UUID.")
+    topic: str | None = Field(default=None, description="Meeting topic.")
+    start_time: str | None = Field(default=None, description="Meeting start time.")
+    duration: int | None = Field(default=None, description="Meeting duration in minutes.")
+    participants_count: int | None = Field(default=None, description="Number of participants.")
+
+
+class PastMeetingsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    meetings: list[PastMeeting] = Field(default_factory=list, description="List of past meetings.")
+
+
+class ParticipantReportRow(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    name: str | None = Field(default=None, description="Participant display name.")
+    user_email: str | None = Field(default=None, description="Participant email, when available.")
+    join_time: str | None = Field(default=None, description="Participant join timestamp.")
+    leave_time: str | None = Field(default=None, description="Participant leave timestamp.")
+    duration: int | None = Field(default=None, description="Session duration in seconds.")
+
+
+class ParticipantsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    participants: list[ParticipantReportRow] = Field(
+        default_factory=list,
+        description="Participant rows for the meeting report.",
+    )
+
+
 class Registrant(BaseModel):
     first_name: str = Field(description="Registrant's first name.", examples=["Jane"])
     last_name: str = Field(description="Registrant's last name.", examples=["Doe"])
@@ -90,7 +144,7 @@ def _as_http_exception(exc: httpx.HTTPStatusError) -> HTTPException:
     return HTTPException(status_code=status, detail=detail)
 
 @app.post("/zoom/connect", dependencies=[Depends(get_api_key)])
-def zoom_connect() -> dict:
+def zoom_connect() -> ZoomUserSummary:
     """Validates the configured Zoom Server-to-Server OAuth credentials by calling the Zoom /users/me endpoint.
     Returns the full Zoom user profile on success, or raises an HTTP error if credentials are invalid.
     """
@@ -100,8 +154,8 @@ def zoom_connect() -> dict:
         raise _as_http_exception(exc) from exc
 
 
-@app.get("/hosts", dependencies=[Depends(get_api_key)])
-def list_hosts() -> dict:
+@app.get("/hosts", dependencies=[Depends(get_api_key)], response_model=HostsResponse)
+def list_hosts() -> HostsResponse:
     """Lists active users in the connected Zoom account for host selection."""
     try:
         return _zoom().list_hosts()
@@ -115,7 +169,7 @@ def list_hosts() -> dict:
 def list_past_meetings(
     days: int = Query(default=30, ge=1, le=365, description="Number of days to look back for past meetings."),
     force_refresh: bool = Query(default=False, description="Bypass the in-memory cache and fetch fresh data from Zoom."),
-) -> dict:
+) -> PastMeetingsResponse:
     """Returns a list of past meetings for the authenticated Zoom user within the specified date range.
     Results are cached in memory; use `force_refresh=true` to bypass the cache.
     Response shape mirrors the Zoom Reports API: a `meetings` array with id, uuid, topic, start_time, and duration per meeting.
@@ -133,11 +187,11 @@ def list_past_meetings(
     return transform_meetings(result)
 
 
-@app.get("/meetings/{uuid}/participants", dependencies=[Depends(get_api_key)])
+@app.get("/meetings/{uuid}/participants", dependencies=[Depends(get_api_key)], response_model=ParticipantsResponse)
 def get_participants(
     uuid: str,
     force_refresh: bool = Query(default=False, description="Bypass the in-memory cache and fetch fresh data from Zoom."),
-) -> dict:
+) -> ParticipantsResponse:
     """Returns the participant attendance report for a completed meeting.
     The `uuid` must be double-URL-encoded if it contains special characters (handled automatically by this service).
     Results are cached in memory; use `force_refresh=true` to bypass the cache.

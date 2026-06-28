@@ -53,6 +53,7 @@ export default [
     route("class", "routes/manage/class.tsx"),
     route("class-attendance", "routes/manage/class-attendance.tsx"),
     route("zoom-host", "routes/manage/zoom-host.tsx"),
+    route("zoom-connect-test", "routes/manage/zoom-connect-test.tsx"),
     route("class-zoom-meeting", "routes/manage/class-zoom-meeting.tsx"),
     route("class-zoom-registrant", "routes/manage/class-zoom-registrant.tsx"),
     route("class-zoom-participant-sync", "routes/manage/class-zoom-participant-sync.tsx"),

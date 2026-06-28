@@ -39,6 +39,7 @@ export const manageSections: ManageNavSection[] = [
     stickerSrc: '/stickers/radish.png',
     defaultCollapsed: false,
     items: [
+      { to: '/manage/zoom-connect-test', label: 'Zoom connect test', description: 'Test the configured zoom-api /zoom/connect endpoint.' },
       { to: '/manage/zoom-host', label: 'Zoom hosts', description: 'Zoom host roster and assignment priority.' },
       { to: '/manage/class-zoom-meeting', label: 'Class Zoom meetings', description: 'Zoom meeting records mapped to classes.' },
       { to: '/manage/class-zoom-registrant', label: 'Class Zoom registrants', description: 'Per-student registrant records and join link metadata.' },
