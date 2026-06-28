@@ -1,3 +1,5 @@
+import os
+
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -9,6 +11,11 @@ from app.transforms import transform_meetings, transform_participants
 from app.zoom import MeetingInProgressError, ZoomClient
 
 app = FastAPI(title="Zoom API Service")
+
+
+@app.on_event("startup")
+def log_runtime_port() -> None:
+    print(f"[zoom-api] startup PORT={os.getenv('PORT', '<unset>')}")
 
 
 def _zoom() -> ZoomClient:
