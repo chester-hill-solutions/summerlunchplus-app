@@ -128,13 +128,27 @@ export async function loadWorkshopEnrollmentData(request: Request) {
 
     const concernScore = scoreConcernSignals(profileSignals)
     const concernBand = concernBandForSignals(profileSignals, concernScore)
-    const rowClass = concernRowClass(concernBand)
+    const onlyNonWhitelistedRiding = profileSignals.every(
+      signal => signal.signal_type === 'non_whitelisted_riding'
+    )
+    const rowClass = onlyNonWhitelistedRiding ? null : concernRowClass(concernBand)
+    const ridingCellClass =
+      concernBand === 'high'
+        ? 'bg-red-100'
+        : concernBand === 'medium'
+          ? 'bg-amber-100'
+          : concernBand === 'low'
+            ? 'bg-yellow-100'
+            : ''
     const primarySignal = profileSignals[0]
     const countLabel = profileSignals.length === 1 ? '1 open signal' : `${profileSignals.length} open signals`
 
     return {
       ...baseRow,
       _row_class: rowClass ?? undefined,
+      _cell_class_by_column: onlyNonWhitelistedRiding && ridingCellClass
+        ? { riding_display: ridingCellClass }
+        : undefined,
       _row_concern_score: concernScore,
       _row_concern_band: concernBand,
       _row_signal_summary: `Concern ${concernScore} (${concernBand}) · ${countLabel}: ${primarySignal.summary}`,

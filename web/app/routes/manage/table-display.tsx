@@ -2120,6 +2120,14 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                       const filterable = columnMeta[column]?.filterable ?? true
                       const canClickFilter = enableCellClickFilter && filterable
                       const cellValue = getCellValue(column, row, tableName)
+                      const rowCellClassByColumn =
+                        row._cell_class_by_column && typeof row._cell_class_by_column === 'object' && !Array.isArray(row._cell_class_by_column)
+                          ? (row._cell_class_by_column as Record<string, unknown>)
+                          : null
+                      const extraCellClass =
+                        rowCellClassByColumn && typeof rowCellClassByColumn[column] === 'string'
+                          ? rowCellClassByColumn[column]
+                          : ''
                       const maxChars = columnMeta[column]?.maxChars
                       const displayValue =
                         typeof maxChars === 'number' && maxChars > 0 && cellValue.length > maxChars
@@ -2181,8 +2189,8 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           title={cellValue || '(empty)'}
                           className={
                             isNumericColumn(column)
-                              ? `w-24 whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''}`
-                              : `px-4 py-2 font-mono select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''}`
+                              ? `w-24 whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''} ${extraCellClass}`
+                              : `px-4 py-2 font-mono select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''} ${extraCellClass}`
                           }
                           onClick={event => {
                             const interactiveTarget = (event.target as HTMLElement | null)?.closest(
