@@ -1,0 +1,9 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+watchPatterns = ["**/*"]
+
+[deploy]
+startCommand = "/usr/local/bin/supercronic /app/crontab"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
