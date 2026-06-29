@@ -15,6 +15,7 @@ import {
 } from '@/lib/workshop-capacity'
 import { resolveSemesterSurveyForm } from '@/lib/semester-survey.server'
 import { createClient } from '@/lib/supabase/server'
+import { transitionWorkshopEnrollmentStatus } from '@/lib/workshop-enrollment-status.server'
 
 type WorkshopRow = {
   id: string
@@ -66,6 +67,8 @@ type EnrollmentRequestResult = {
 
 const ENROLLMENT_SUCCESS_MESSAGE =
   "Thank you for registering for summerlunch+! We're excited to welcome your family this summer. Your registration has been received and is currently pending approval. Our team will review your information and send you a confirmation email shortly with your program details, class schedule, and next steps."
+
+const ACTIVE_ENROLLMENT_STATUSES = new Set(['pending', 'waitlisted', 'approved'])
 
 const redirectWithEnrollmentMessage = (status: 'success' | 'error', message: string) => {
   const params = new URLSearchParams({
@@ -287,6 +290,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const formData = await request.formData()
+  const intent = String(formData.get('intent') ?? 'request-enrollment')
+  const status = String(formData.get('status') ?? '')
   const workshop_id = String(formData.get('workshop_id') ?? '')
 
   const auth = await requireAuth(request)
@@ -298,6 +303,30 @@ export async function action({ request }: Route.ActionArgs) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Profile not found'
     return { error: message } satisfies ActionData
+  }
+
+  if (intent === 'update-status') {
+    const enrollmentId = String(formData.get('enrollment_id') ?? '')
+    const semesterId = String(formData.get('semester_id') ?? '')
+
+    if (!enrollmentId || !semesterId || status !== 'revoked') {
+      return { error: 'Missing enrollment data for status update.' } satisfies ActionData
+    }
+
+    const transitionResult = await transitionWorkshopEnrollmentStatus({
+      enrollmentId,
+      nextStatus: 'revoked',
+      actorUserId: auth.user.id,
+      scope: 'family',
+      semesterId,
+      familyProfileIds: family.familyProfileIds,
+    })
+
+    if (!transitionResult.ok) {
+      return { error: transitionResult.error ?? 'Unable to update enrollment status.' } satisfies ActionData
+    }
+
+    return redirect(`/enroll/${semesterId}`)
   }
 
   const { data: workshopRow, error: workshopError } = await supabase
@@ -454,7 +483,12 @@ export default function EnrollPage() {
 
   const semesterId = selectedSemesterId
   const selectedSemester = semesterId ? semesters.find(semester => semester.id === semesterId) : null
-  const semesterEnrollment = semesterId ? enrollments.find(enrollment => enrollment.semester_id === semesterId) : null
+  const semesterEnrollment =
+    semesterId
+      ? enrollments.find(
+          enrollment => enrollment.semester_id === semesterId && ACTIVE_ENROLLMENT_STATUSES.has(enrollment.status)
+        )
+      : null
 
   return (
     <main className="flex w-full flex-col gap-6 px-6 pt-6 pb-10">
@@ -492,7 +526,9 @@ export default function EnrollPage() {
             <TableBody>
               {semesters.map(semester => {
                 const preSurvey = preSurveyBySemester[semester.id]
-                const status = enrollments.find(enrollment => enrollment.semester_id === semester.id)?.status
+                const status = enrollments.find(
+                  enrollment => enrollment.semester_id === semester.id && ACTIVE_ENROLLMENT_STATUSES.has(enrollment.status)
+                )?.status
                 return (
                   <TableRow key={semester.id}>
                     <TableCell className="font-medium">{semester.id.slice(0, 8)}</TableCell>
@@ -532,9 +568,22 @@ export default function EnrollPage() {
             <div className="rounded-lg border bg-card p-4 shadow-sm space-y-2">
               <p className="font-medium">Your family is already enrolled in one workshop for this semester.</p>
               <p className="text-sm text-muted-foreground capitalize">Enrollment status: {semesterEnrollment.status}</p>
-              <Button asChild variant="outline" size="sm">
-                <Link to="/home">Back to Family Workshops</Link>
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link to="/home">Back to Family Workshops</Link>
+                </Button>
+                {(semesterEnrollment.status === 'pending' || semesterEnrollment.status === 'waitlisted') && semesterId ? (
+                  <Form method="post" onSubmit={() => setSubmitLocked(true)}>
+                    <input type="hidden" name="intent" value="update-status" />
+                    <input type="hidden" name="status" value="revoked" />
+                    <input type="hidden" name="enrollment_id" value={semesterEnrollment.id} />
+                    <input type="hidden" name="semester_id" value={semesterId} />
+                    <Button type="submit" variant="destructive" size="sm" disabled={mutationLocked}>
+                      {mutationLocked ? 'Revoking...' : 'Revoke request'}
+                    </Button>
+                  </Form>
+                ) : null}
+              </div>
             </div>
           ) : preSurveyBySemester[selectedSemester.id]?.required &&
             !preSurveyBySemester[selectedSemester.id]?.completed ? (

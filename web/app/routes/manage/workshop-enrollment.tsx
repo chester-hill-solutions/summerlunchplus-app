@@ -15,6 +15,7 @@ import { Download } from 'lucide-react'
 import type { Route } from './+types/workshop-enrollment'
 import TableDisplay from './table-display'
 import { EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV } from '@/lib/exports/types'
+import { transitionWorkshopEnrollmentStatus } from '@/lib/workshop-enrollment-status.server'
 
 const isLikelyEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
@@ -72,37 +73,30 @@ export async function action({ request }: Route.ActionArgs) {
       return new Response('Invalid status', { status: 400, headers: auth.headers })
     }
 
-    const { supabase } = createClient(request)
-    const { data: existingEnrollment, error: existingEnrollmentError } = await supabase
-      .from('workshop_enrollment')
-      .select('id, profile_id, workshop_id, status')
-      .eq('id', enrollmentId)
-      .single()
+    const transitionResult = await transitionWorkshopEnrollmentStatus({
+      enrollmentId,
+      nextStatus: status as Database['public']['Enums']['workshop_enrollment_status'],
+      actorUserId: auth.user.id,
+      scope: 'admin',
+    })
 
-    if (existingEnrollmentError || !existingEnrollment) {
-      return new Response(existingEnrollmentError?.message ?? 'Enrollment not found', {
-        status: 404,
+    if (!transitionResult.ok || !transitionResult.enrollment) {
+      return new Response(transitionResult.error ?? 'Unable to update enrollment', {
+        status: transitionResult.code === 'not_found' ? 404 : 500,
         headers: auth.headers,
       })
     }
 
-    const { error } = await supabase
-      .from('workshop_enrollment')
-      .update({ status, decided_by: auth.user.id })
-      .eq('id', enrollmentId)
+    const enrollment = transitionResult.enrollment
 
-    if (error) {
-      return new Response(error.message, { status: 500, headers: auth.headers })
-    }
-
-    const transitionedToApproved = existingEnrollment.status !== 'approved' && status === 'approved'
-    if (transitionedToApproved && existingEnrollment.profile_id) {
+    const transitionedToApproved = transitionResult.previousStatus !== 'approved' && status === 'approved'
+    if (transitionedToApproved && enrollment.profile_id) {
       try {
-        const familyContacts = await resolveFamilyContactsByProfileId(adminClient, existingEnrollment.profile_id)
+        const familyContacts = await resolveFamilyContactsByProfileId(adminClient, enrollment.profile_id)
         const { data: workshopRow } = await adminClient
           .from('workshop')
           .select('description')
-          .eq('id', existingEnrollment.workshop_id)
+          .eq('id', enrollment.workshop_id)
           .single()
 
         const workshopName = workshopRow?.description?.trim() || 'selected workshop'
@@ -129,9 +123,9 @@ export async function action({ request }: Route.ActionArgs) {
               triggeredByUserId: auth.user.id,
               recipientUserId: recipient?.user_id ?? null,
               profileId: recipient?.id ?? null,
-              familyProfileId: existingEnrollment.profile_id,
-              workshopEnrollmentId: enrollmentId,
-            })
+               familyProfileId: enrollment.profile_id,
+               workshopEnrollmentId: enrollmentId,
+             })
           })
         )
       } catch (notificationError) {
