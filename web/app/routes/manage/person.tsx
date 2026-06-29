@@ -1,10 +1,12 @@
 import { isIP } from 'node:net'
 
-import { Link, NavLink, Outlet, redirect, useLoaderData, useLocation } from 'react-router'
+import { Form, Link, NavLink, Outlet, redirect, useActionData, useLoaderData, useLocation, useNavigation } from 'react-router'
 
 import { requireAuth } from '@/lib/auth.server'
 import { resolveIpGeolocation } from '@/lib/geoip.server'
+import { runIpEvidenceRecompute } from '@/lib/ip-evidence-recompute.server'
 import { isRoleAtLeast } from '@/lib/roles'
+import { refreshSuspiciousSignalsForProfile } from '@/lib/suspicious-signals.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -38,6 +40,37 @@ const headerValue = (headers: unknown, key: string) => {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed || null
+}
+
+const loadFamilyGraph = async (seedProfileId: string) => {
+  const seen = new Set<string>([seedProfileId])
+  const queue: string[] = [seedProfileId]
+  const edges: Array<{ guardian_profile_id: string; child_profile_id: string; primary_child: boolean }> = []
+
+  while (queue.length) {
+    const batch = queue.splice(0, queue.length)
+    const { data: batchEdges } = await adminClient
+      .from('person_guardian_child')
+      .select('guardian_profile_id, child_profile_id, primary_child')
+      .or(`guardian_profile_id.in.(${batch.join(',')}),child_profile_id.in.(${batch.join(',')})`)
+
+    for (const edge of batchEdges ?? []) {
+      edges.push(edge)
+      if (!seen.has(edge.guardian_profile_id)) {
+        seen.add(edge.guardian_profile_id)
+        queue.push(edge.guardian_profile_id)
+      }
+      if (!seen.has(edge.child_profile_id)) {
+        seen.add(edge.child_profile_id)
+        queue.push(edge.child_profile_id)
+      }
+    }
+  }
+
+  return {
+    familyProfileIds: Array.from(seen),
+    edges,
+  }
 }
 
 const geoStatusReasonFor = (input: {
@@ -143,20 +176,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw redirect('/manage/participants', { headers: auth.headers })
   }
 
+  const { familyProfileIds, edges } = await loadFamilyGraph(profileRow.id)
+
+  const { data: familyProfilesRaw } = await adminClient
+    .from('profile')
+    .select(
+      'id, user_id, role, firstname, surname, email, phone, street_address, city, province, postcode, date_of_birth, federal_electoral_district_name, riding_lookup_status, riding_lookup_last_attempt_at, riding_lookup_error'
+    )
+    .in('id', familyProfileIds)
+
+  const familyProfiles = (familyProfilesRaw ?? []) as ProfileRow[]
+  const familyUserIds = Array.from(
+    new Set(familyProfiles.map(profile => profile.user_id).filter((userId): userId is string => Boolean(userId)))
+  )
+
   const [latestFormSubmissionResult, latestLoginEventResult] = await Promise.all([
     adminClient
       .from('form_submission')
       .select('id, form_id, submitted_at, ip_address, ip_selected, ip_selected_source, ip_parse_confidence, ip_classification, ip_confidence_level, ip_reason_codes, ip_reason_text, ip_classifier_version, proxy_provider_match, proxy_match_cidr, forwarded_for, request_headers')
-      .eq('profile_id', profileRow.id)
+      .in('profile_id', familyProfileIds)
       .order('submitted_at', { ascending: false })
-      .limit(25),
-    profileRow.user_id
+      .limit(100),
+    familyUserIds.length
       ? adminClient
           .from('login_event')
           .select('id, event_at, email, login_method, success, ip_address, ip_selected, ip_selected_source, ip_parse_confidence, ip_classification, ip_confidence_level, ip_reason_codes, ip_reason_text, ip_classifier_version, proxy_provider_match, proxy_match_cidr, forwarded_for, request_headers')
-          .eq('user_id', profileRow.user_id)
+          .in('user_id', familyUserIds)
           .order('event_at', { ascending: false })
-          .limit(25)
+          .limit(100)
       : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
   ])
 
@@ -325,39 +372,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const ipEvidence = activityEvents.slice(0, 8)
 
-  const seen = new Set<string>([profileRow.id])
-  const queue: string[] = [profileRow.id]
-  const edges: Array<{ guardian_profile_id: string; child_profile_id: string; primary_child: boolean }> = []
-
-  while (queue.length) {
-    const batch = queue.splice(0, queue.length)
-    const { data: batchEdges } = await adminClient
-      .from('person_guardian_child')
-      .select('guardian_profile_id, child_profile_id, primary_child')
-      .or(`guardian_profile_id.in.(${batch.join(',')}),child_profile_id.in.(${batch.join(',')})`)
-
-    for (const edge of batchEdges ?? []) {
-      edges.push(edge)
-      if (!seen.has(edge.guardian_profile_id)) {
-        seen.add(edge.guardian_profile_id)
-        queue.push(edge.guardian_profile_id)
-      }
-      if (!seen.has(edge.child_profile_id)) {
-        seen.add(edge.child_profile_id)
-        queue.push(edge.child_profile_id)
-      }
-    }
-  }
-
-  const familyProfileIds = Array.from(seen)
-
-  const [{ data: familyProfilesRaw }, { data: enrollmentRowsRaw }, { data: suspiciousSignalsRaw }, { data: districtRowsRaw }] = await Promise.all([
-    adminClient
-      .from('profile')
-      .select(
-        'id, user_id, role, firstname, surname, email, phone, street_address, city, province, postcode, date_of_birth, federal_electoral_district_name, riding_lookup_status, riding_lookup_last_attempt_at, riding_lookup_error'
-      )
-      .in('id', familyProfileIds),
+  const [{ data: enrollmentRowsRaw }, { data: suspiciousSignalsRaw }, { data: districtRowsRaw }] = await Promise.all([
     adminClient
       .from('workshop_enrollment')
       .select('id, profile_id, workshop_id, semester_id, status, requested_at')
@@ -375,14 +390,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .order('name', { ascending: true }),
   ])
 
-  const familyProfiles = (familyProfilesRaw ?? []) as ProfileRow[]
   const enrollments = (enrollmentRowsRaw ?? []) as PersonLoaderData['enrollments']
   const suspiciousSignals = ((suspiciousSignalsRaw ?? []) as SuspiciousSignalRow[]).filter(signal =>
     signal.family_profile_ids?.some(profileId => familyProfileIds.includes(profileId))
-  )
-
-  const familyUserIds = Array.from(
-    new Set(familyProfiles.map(profile => profile.user_id).filter((userId): userId is string => Boolean(userId)))
   )
 
   const { data: profileLinkedSubmissionsRaw } = familyProfileIds.length
@@ -518,8 +528,57 @@ export async function action({ request }: LoaderFunctionArgs) {
 
   const formData = await request.formData()
   const intent = String(formData.get('intent') ?? '')
-  if (intent !== 'update-riding') {
+  if (intent !== 'update-riding' && intent !== 'rescan-family') {
     return new Response('Unsupported action', { status: 400, headers: auth.headers })
+  }
+
+  if (intent === 'rescan-family') {
+    const profileId = String(formData.get('profile_id') ?? '').trim()
+    if (!profileId) {
+      return { error: 'Missing profile id.' }
+    }
+
+    const { familyProfileIds } = await loadFamilyGraph(profileId)
+    if (!familyProfileIds.length) {
+      return { error: 'No family members found for rescan.' }
+    }
+
+    const { data: familyProfilesRaw } = await adminClient
+      .from('profile')
+      .select('id, user_id')
+      .in('id', familyProfileIds)
+
+    const familyProfiles = (familyProfilesRaw ?? []) as Array<{ id: string; user_id: string | null }>
+    const familyUserIds = Array.from(
+      new Set(familyProfiles.map(profile => profile.user_id).filter((userId): userId is string => Boolean(userId)))
+    )
+
+    const recomputeResult = await runIpEvidenceRecompute({
+      maxRowsPerSource: 2000,
+      refreshSignals: false,
+      profileIds: familyProfileIds,
+      userIds: familyUserIds,
+    })
+
+    let refreshedFamilies = 0
+    for (const familyProfileId of familyProfileIds) {
+      try {
+        await refreshSuspiciousSignalsForProfile(familyProfileId)
+        refreshedFamilies += 1
+      } catch (error) {
+        console.error('[manage/person] family rescan signal refresh failed', {
+          familyProfileId,
+          error,
+        })
+      }
+    }
+
+    return {
+      success: true,
+      rescanned: true,
+      recomputeResult,
+      refreshedFamilies,
+    }
   }
 
   const profileId = String(formData.get('profile_id') ?? '').trim()
@@ -561,11 +620,28 @@ export async function action({ request }: LoaderFunctionArgs) {
 
 export default function ManagePersonLayoutPage() {
   const data = useLoaderData() as PersonLoaderData
+  const actionData = useActionData() as
+    | {
+        success?: boolean
+        error?: string
+        rescanned?: boolean
+        refreshedFamilies?: number
+        recomputeResult?: {
+          updatedRows: {
+            formSubmission: number
+            loginEvent: number
+          }
+        }
+      }
+    | undefined
   const { profile, suspiciousSignals } = data
   const location = useLocation()
+  const navigation = useNavigation()
   const returnTo = new URLSearchParams(location.search).get('returnTo')
   const backTo = returnTo && returnTo.startsWith('/') ? returnTo : '/manage/participants'
   const openSignalCount = suspiciousSignals.filter(signal => signal.status === 'open').length
+  const isRescanning =
+    navigation.state === 'submitting' && navigation.formData?.get('intent') === 'rescan-family'
 
   return (
     <div className="space-y-5">
@@ -582,6 +658,24 @@ export default function ManagePersonLayoutPage() {
         <Button asChild variant="outline" size="sm">
           <Link to={backTo}>Back</Link>
         </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Form method="post">
+          <input type="hidden" name="intent" value="rescan-family" />
+          <input type="hidden" name="profile_id" value={profile.id} />
+          <Button type="submit" variant="secondary" size="sm" disabled={isRescanning}>
+            {isRescanning ? 'Re-scanning family...' : 'Re-scan family'}
+          </Button>
+        </Form>
+        {actionData?.rescanned ? (
+          <p className="text-xs text-muted-foreground">
+            Re-scan complete: {actionData.recomputeResult?.updatedRows.formSubmission ?? 0} form rows,{' '}
+            {actionData.recomputeResult?.updatedRows.loginEvent ?? 0} login rows,{' '}
+            {actionData.refreshedFamilies ?? 0} profile discrepancy refreshes.
+          </p>
+        ) : null}
+        {actionData?.error ? <p className="text-xs text-destructive">{actionData.error}</p> : null}
       </div>
 
       <nav className="sticky left-0 top-0 z-30 -mx-2 overflow-x-auto border-b bg-background/95 px-2 pb-2 pt-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
