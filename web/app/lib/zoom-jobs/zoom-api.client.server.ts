@@ -14,6 +14,12 @@ type ZoomCreateMeetingRequest = {
   host_zoom_user_email?: string
 }
 
+type ZoomUpdateMeetingRequest = {
+  topic: string
+  start_time: string
+  duration: number
+}
+
 type ZoomCreateMeetingResponse = {
   id: number
   uuid: string
@@ -49,7 +55,7 @@ const parsePayload = async (response: Response) => {
   return response.text().catch(() => null)
 }
 
-const requestJson = async <T>({ method, path, body }: { method: 'GET' | 'POST'; path: string; body?: unknown }): Promise<T> => {
+const requestJson = async <T>({ method, path, body }: { method: 'GET' | 'POST' | 'PATCH'; path: string; body?: unknown }): Promise<T> => {
   const { endpoint, apiKey } = getConfig()
   const response = await fetch(`${endpoint}${path}`, {
     method,
@@ -72,6 +78,8 @@ export const zoomApiClient = {
   listHosts: () => requestJson<Record<string, unknown>>({ method: 'GET', path: '/hosts' }),
   createMeeting: (body: ZoomCreateMeetingRequest) =>
     requestJson<ZoomCreateMeetingResponse>({ method: 'POST', path: '/meetings', body }),
+  updateMeeting: (meetingId: string, body: ZoomUpdateMeetingRequest) =>
+    requestJson<{ ok: boolean }>({ method: 'PATCH', path: `/meetings/${meetingId}`, body }),
   registerParticipant: async (meetingId: string, registrant: ZoomRegistrantRequest) => {
     const results = await requestJson<Array<{ registrant_id?: string; join_url?: string }>>({
       method: 'POST',

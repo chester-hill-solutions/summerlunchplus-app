@@ -61,6 +61,15 @@ class CreateMeetingResponse(BaseModel):
     join_url: str = Field(description="URL participants use to join the meeting.")
 
 
+class UpdateMeetingRequest(BaseModel):
+    topic: str = Field(description="Meeting title.", examples=["Summer Lunch Program - Week 3"])
+    start_time: str = Field(
+        description="Meeting start time in ISO 8601 format. Include a timezone offset or 'Z' for UTC.",
+        examples=["2026-06-15T10:00:00Z"],
+    )
+    duration: int = Field(description="Meeting duration in minutes.", examples=[60])
+
+
 class ZoomUserSummary(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -236,6 +245,21 @@ def create_meeting(body: CreateMeetingRequest) -> CreateMeetingResponse:
     except httpx.HTTPStatusError as exc:
         raise _as_http_exception(exc) from exc
     return {"id": result["id"], "uuid": result["uuid"], "join_url": result["join_url"]}
+
+
+@app.patch("/meetings/{meeting_id}", dependencies=[Depends(get_api_key)])
+def update_meeting(meeting_id: str, body: UpdateMeetingRequest) -> dict[str, bool]:
+    """Updates a scheduled Zoom meeting's topic/start time/duration."""
+    try:
+        _zoom().update_meeting(
+            meeting_id=meeting_id,
+            topic=body.topic,
+            start_time=body.start_time,
+            duration=body.duration,
+        )
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
+    return {"ok": True}
 
 
 @app.post("/meetings/{meeting_id}/registrants", dependencies=[Depends(get_api_key)])

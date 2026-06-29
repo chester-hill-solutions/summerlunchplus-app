@@ -24,6 +24,11 @@ type ClassZoomMeetingRow = {
   class_id: string
   zoom_host_id: string
   status: 'pending' | 'created' | 'failed' | 'cancelled'
+  start_time?: string | null
+  duration_minutes?: number | null
+  topic?: string | null
+  zoom_meeting_id?: string | null
+  zoom_meeting_uuid?: string | null
   class?: Array<{ starts_at: string; ends_at: string }> | null
 }
 
@@ -143,15 +148,73 @@ const upsertFailedMeeting = async (classId: string, errorMessage: string) => {
   }
 }
 
+const isMeetingScheduleOutOfSync = ({
+  existingStart,
+  existingDuration,
+  existingTopic,
+  nextStart,
+  nextDuration,
+  nextTopic,
+}: {
+  existingStart: string | null | undefined
+  existingDuration: number | null | undefined
+  existingTopic: string | null | undefined
+  nextStart: string
+  nextDuration: number
+  nextTopic: string
+}) => {
+  const existingStartMs = existingStart ? new Date(existingStart).getTime() : Number.NaN
+  const nextStartMs = new Date(nextStart).getTime()
+  const startOutOfSync = !Number.isFinite(existingStartMs) || !Number.isFinite(nextStartMs) || Math.abs(existingStartMs - nextStartMs) > 60_000
+
+  const durationOutOfSync = typeof existingDuration !== 'number' || existingDuration !== nextDuration
+  const topicOutOfSync = (existingTopic ?? '').trim() !== nextTopic.trim()
+
+  return startOutOfSync || durationOutOfSync || topicOutOfSync
+}
+
 const ensureMeetingForClass = async (classRow: ClassRow) => {
+  const desiredTopic = buildTopic(classRow)
+  const durationMinutes = Math.max(1, Math.round((new Date(classRow.ends_at).getTime() - new Date(classRow.starts_at).getTime()) / 60000))
+
   const { data: existingMeeting, error: existingError } = await adminClient
     .from('class_zoom_meeting')
-    .select('id, class_id, zoom_host_id, status, zoom_meeting_id, zoom_meeting_uuid')
+    .select('id, class_id, zoom_host_id, status, zoom_meeting_id, zoom_meeting_uuid, start_time, duration_minutes, topic')
     .eq('class_id', classRow.id)
     .maybeSingle()
 
   if (existingError) throw new Error(existingError.message)
   if (existingMeeting?.status === 'created' && existingMeeting.zoom_meeting_id && existingMeeting.zoom_meeting_uuid) {
+    if (
+      isMeetingScheduleOutOfSync({
+        existingStart: existingMeeting.start_time,
+        existingDuration: existingMeeting.duration_minutes,
+        existingTopic: existingMeeting.topic,
+        nextStart: classRow.starts_at,
+        nextDuration: durationMinutes,
+        nextTopic: desiredTopic,
+      })
+    ) {
+      await zoomApiClient.updateMeeting(existingMeeting.zoom_meeting_id, {
+        topic: desiredTopic,
+        start_time: classRow.starts_at,
+        duration: durationMinutes,
+      })
+
+      const { error: updateError } = await adminClient
+        .from('class_zoom_meeting')
+        .update({
+          topic: desiredTopic,
+          start_time: classRow.starts_at,
+          duration_minutes: durationMinutes,
+          error_message: null,
+          last_synced_at: new Date().toISOString(),
+        })
+        .eq('id', existingMeeting.id)
+
+      if (updateError) throw new Error(updateError.message)
+    }
+
     return { id: existingMeeting.id, zoom_meeting_id: existingMeeting.zoom_meeting_id, created: false }
   }
 
@@ -162,9 +225,8 @@ const ensureMeetingForClass = async (classRow: ClassRow) => {
     throw new Error(msg)
   }
 
-  const durationMinutes = Math.max(1, Math.round((new Date(classRow.ends_at).getTime() - new Date(classRow.starts_at).getTime()) / 60000))
   const createResp = await zoomApiClient.createMeeting({
-    topic: buildTopic(classRow),
+    topic: desiredTopic,
     start_time: classRow.starts_at,
     duration: durationMinutes,
     ...(host.zoom_user_id ? { host_zoom_user_id: host.zoom_user_id } : {}),
@@ -181,7 +243,7 @@ const ensureMeetingForClass = async (classRow: ClassRow) => {
         host_zoom_user_email: host.zoom_user_email,
         zoom_meeting_id: String(createResp.id),
         zoom_meeting_uuid: createResp.uuid,
-        topic: buildTopic(classRow),
+        topic: desiredTopic,
         start_time: classRow.starts_at,
         duration_minutes: durationMinutes,
         join_url: createResp.join_url,
