@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { Form, redirect, useActionData, useLoaderData, useNavigation, useRevalidator } from 'react-router'
+import { useEffect, useState } from 'react'
+import { Form, redirect, useActionData, useFetcher, useLoaderData, useNavigation, useRevalidator } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
@@ -24,6 +24,17 @@ type ActionData = {
   success?: string
   warning?: string
 }
+
+type DownloadActionData = {
+  signedUrl?: string
+  message?: string
+  error?: string
+}
+
+type ToastState = {
+  tone: 'success' | 'error'
+  message: string
+} | null
 
 const isActiveStatus = (status: string) => status === 'queued' || status === 'running'
 
@@ -161,8 +172,10 @@ export default function ManageExportsPage() {
   const actionData = useActionData<typeof action>()
   const navigation = useNavigation()
   const revalidator = useRevalidator()
+  const downloadFetcher = useFetcher<DownloadActionData>()
   const isSubmitting = navigation.state === 'submitting'
   const hasActiveJobs = jobs.some(job => isActiveStatus(job.status))
+  const [toast, setToast] = useState<ToastState>(null)
 
   useEffect(() => {
     if (!hasActiveJobs) return
@@ -175,8 +188,43 @@ export default function ManageExportsPage() {
     }
   }, [hasActiveJobs, revalidator])
 
+  useEffect(() => {
+    if (!downloadFetcher.data) return
+
+    if (downloadFetcher.data.signedUrl) {
+      window.open(downloadFetcher.data.signedUrl, '_blank', 'noopener,noreferrer')
+      setToast({
+        tone: 'success',
+        message: downloadFetcher.data.message ?? 'Export download started.',
+      })
+      return
+    }
+
+    if (downloadFetcher.data.error) {
+      setToast({ tone: 'error', message: downloadFetcher.data.error })
+    }
+  }, [downloadFetcher.data])
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), 3500)
+    return () => window.clearTimeout(timer)
+  }, [toast])
+
   return (
     <div className="space-y-4">
+      {toast ? (
+        <div
+          className={`fixed bottom-4 right-4 z-50 rounded border px-3 py-2 text-sm shadow-md ${
+            toast.tone === 'success'
+              ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+              : 'border-destructive/40 bg-destructive/10 text-destructive'
+          }`}
+        >
+          {toast.message}
+        </div>
+      ) : null}
+
       <section className="rounded-lg border bg-card p-4">
         <h1 className="text-xl font-semibold">Exports</h1>
         <p className="text-sm text-muted-foreground">
@@ -231,11 +279,24 @@ export default function ManageExportsPage() {
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-2">
                     {job.status === 'completed' ? (
-                      <Form method="post" action={`/manage/exports/${job.id}/download`}>
-                        <Button type="submit" size="sm" variant="outline" disabled={isSubmitting}>
-                          Download
-                        </Button>
-                      </Form>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={downloadFetcher.state === 'submitting'}
+                        onClick={() => {
+                          setToast({ tone: 'success', message: 'Preparing export download...' })
+                          downloadFetcher.submit(
+                            {},
+                            {
+                              method: 'post',
+                              action: `/manage/exports/${job.id}/download`,
+                            }
+                          )
+                        }}
+                      >
+                        Download
+                      </Button>
                     ) : null}
                     {job.status === 'failed' ? (
                       <Form method="post">
