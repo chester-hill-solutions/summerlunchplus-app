@@ -76,20 +76,6 @@ class ZoomClient:
         r.raise_for_status()
         return r.json()
 
-    def update_meeting(self, meeting_id: str, topic: str, start_time: str, duration: int) -> dict:
-        payload = {
-            "topic": topic,
-            "start_time": start_time,
-            "duration": duration,
-        }
-        r = httpx.patch(
-            f"{ZOOM_API_BASE}/meetings/{meeting_id}",
-            json=payload,
-            headers=self._headers(),
-        )
-        r.raise_for_status()
-        return {"ok": True}
-
     def list_hosts(self) -> dict:
         r = httpx.get(
             f"{ZOOM_API_BASE}/users",
@@ -108,6 +94,13 @@ class ZoomClient:
         r = httpx.patch(
             f"{ZOOM_API_BASE}/meetings/{meeting_id}",
             json=payload,
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+
+    def delete_meeting(self, meeting_id: str) -> None:
+        r = httpx.delete(
+            f"{ZOOM_API_BASE}/meetings/{meeting_id}",
             headers=self._headers(),
         )
         r.raise_for_status()

@@ -88,6 +88,8 @@ export const zoomApiClient = {
     requestJson<ZoomCreateMeetingResponse>({ method: 'POST', path: '/meetings', body }),
   updateMeeting: (meetingId: string, body: ZoomUpdateMeetingRequest) =>
     requestJson<{ ok: boolean }>({ method: 'PATCH', path: `/meetings/${meetingId}`, body }),
+  deleteMeeting: (meetingId: string) =>
+    requestJson<{ ok: boolean }>({ method: 'DELETE', path: `/meetings/${meetingId}` }),
   registerParticipant: async (meetingId: string, registrant: ZoomRegistrantRequest) => {
     const results = await requestJson<Array<{ registrant_id?: string; join_url?: string }>>({
       method: 'POST',

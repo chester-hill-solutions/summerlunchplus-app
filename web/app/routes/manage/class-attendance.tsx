@@ -8,11 +8,56 @@ import { createTableLoader } from './table-loader'
 
 const baseLoader = createTableLoader('class-attendance')
 
+type AttendanceRow = Record<string, unknown> & {
+  class_display?: { label?: unknown; timestamp?: unknown } | string | null
+  profile_display?: string | null
+}
+
+const timestampMs = (value: unknown) => {
+  if (typeof value !== 'string' || !value) return Number.POSITIVE_INFINITY
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY
+}
+
+const classLabel = (value: AttendanceRow['class_display']) => {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object' && typeof value.label === 'string') return value.label
+  return ''
+}
+
+const profileLabel = (value: unknown) => (typeof value === 'string' ? value : '')
+
 export async function loader(args: Route.LoaderArgs) {
   const auth = await requireAuth(args.request)
   const base = await baseLoader(args)
+
+  const sortedRows = [...((base.rows ?? []) as AttendanceRow[])].sort((left, right) => {
+    const leftClassTimestamp =
+      left.class_display && typeof left.class_display === 'object'
+        ? timestampMs(left.class_display.timestamp)
+        : Number.POSITIVE_INFINITY
+    const rightClassTimestamp =
+      right.class_display && typeof right.class_display === 'object'
+        ? timestampMs(right.class_display.timestamp)
+        : Number.POSITIVE_INFINITY
+
+    if (leftClassTimestamp !== rightClassTimestamp) {
+      return leftClassTimestamp - rightClassTimestamp
+    }
+
+    const leftClassLabel = classLabel(left.class_display)
+    const rightClassLabel = classLabel(right.class_display)
+    const byClassLabel = leftClassLabel.localeCompare(rightClassLabel)
+    if (byClassLabel !== 0) return byClassLabel
+
+    const leftProfile = profileLabel(left.profile_display)
+    const rightProfile = profileLabel(right.profile_display)
+    return leftProfile.localeCompare(rightProfile)
+  })
+
   return {
     ...base,
+    rows: sortedRows,
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
   }
 }

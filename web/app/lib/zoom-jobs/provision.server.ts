@@ -67,6 +67,14 @@ type ProvisionOptions = {
   excludedHostIds?: string[]
 }
 
+type ClassScheduleRelation = { starts_at: string; ends_at: string }
+
+const relationRow = <T extends Record<string, unknown>>(value: T | T[] | null | undefined): T | null => {
+  if (Array.isArray(value)) return value[0] ?? null
+  if (value && typeof value === 'object') return value
+  return null
+}
+
 const overlaps = (aStart: string, aEnd: string, bStart: string, bEnd: string) => {
   const aS = new Date(aStart).getTime()
   const aE = new Date(aEnd).getTime()
@@ -245,7 +253,7 @@ const selectAvailableHost = async ({
     class_id: string
     zoom_host_id: string
     status: string
-    class: Array<{ starts_at: string; ends_at: string }> | null
+    class: ClassScheduleRelation | ClassScheduleRelation[] | null
   }>
 
   for (const host of hostRows) {
@@ -253,7 +261,7 @@ const selectAvailableHost = async ({
 
     const isBusy = meetingRows.some(meeting => {
       if (excludeMeetingId && meeting.id === excludeMeetingId) return false
-      const classRelation = Array.isArray(meeting.class) ? meeting.class[0] : null
+      const classRelation = relationRow<ClassScheduleRelation>(meeting.class)
       if (meeting.zoom_host_id !== host.id || !classRelation) return false
       return overlaps(classRow.starts_at, classRow.ends_at, classRelation.starts_at, classRelation.ends_at)
     })
@@ -451,10 +459,7 @@ const ensureRegistrantsForClass = async ({
       row.profile_id,
       {
         ...row,
-        zoom_meeting_id:
-          Array.isArray(row.class_zoom_meeting) && row.class_zoom_meeting[0]?.zoom_meeting_id
-            ? row.class_zoom_meeting[0].zoom_meeting_id
-            : null,
+        zoom_meeting_id: relationRow<{ zoom_meeting_id: string | null }>(row.class_zoom_meeting)?.zoom_meeting_id ?? null,
       },
     ])
   )
@@ -470,9 +475,10 @@ const ensureRegistrantsForClass = async ({
     const profileId = row.profile_id
     if (!profileId || eligibleProfileIds.has(profileId)) continue
 
-    if (row.zoom_registrant_id && Array.isArray(row.class_zoom_meeting) && row.class_zoom_meeting[0]?.zoom_meeting_id) {
+    const existingMeeting = relationRow<{ zoom_meeting_id: string | null }>(row.class_zoom_meeting)
+    if (row.zoom_registrant_id && existingMeeting?.zoom_meeting_id) {
       try {
-        await zoomApiClient.removeRegistrant(row.class_zoom_meeting[0].zoom_meeting_id, row.zoom_registrant_id)
+        await zoomApiClient.removeRegistrant(existingMeeting.zoom_meeting_id, row.zoom_registrant_id)
       } catch (error) {
         console.error('[zoom-jobs][registrant] failed to remove stale registrant from zoom', {
           classId: classRow.id,
