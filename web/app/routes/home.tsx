@@ -690,11 +690,6 @@ export default function Home() {
               <p className="text-sm text-muted-foreground">
                 {formatDateTime(nextClass.starts_at)} - {formatDateTime(nextClass.ends_at)}
               </p>
-              <Form method="post" className="mt-3">
-                <input type="hidden" name="intent" value="join-class" />
-                <input type="hidden" name="class_id" value={nextClass.classId} />
-                <Button type="submit" disabled={mutationLocked}>JOIN CLASS</Button>
-              </Form>
             </section>
           ) : null}
 
@@ -776,6 +771,7 @@ export default function Home() {
                             <TableRow>
                               <TableHead>Starts</TableHead>
                               <TableHead>Ends</TableHead>
+                              <TableHead>Join</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -783,6 +779,15 @@ export default function Home() {
                               <TableRow key={classRow.id}>
                                 <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
                                 <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
+                                <TableCell>
+                                  <Form method="post" className="inline-flex">
+                                    <input type="hidden" name="intent" value="join-class" />
+                                    <input type="hidden" name="class_id" value={classRow.id} />
+                                    <Button type="submit" size="sm" disabled={mutationLocked}>
+                                      JOIN CLASS
+                                    </Button>
+                                  </Form>
+                                </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
