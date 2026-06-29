@@ -61,6 +61,15 @@ class CreateMeetingResponse(BaseModel):
     join_url: str = Field(description="URL participants use to join the meeting.")
 
 
+class UpdateMeetingRequest(BaseModel):
+    topic: str = Field(description="Meeting title.", examples=["Summer Lunch Program - Week 3"])
+    start_time: str = Field(
+        description="Meeting start time in ISO 8601 format. Include a timezone offset or 'Z' for UTC.",
+        examples=["2026-06-15T10:00:00Z"],
+    )
+    duration: int = Field(description="Meeting duration in minutes.", examples=[60])
+
+
 class ZoomUserSummary(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -238,6 +247,20 @@ def create_meeting(body: CreateMeetingRequest) -> CreateMeetingResponse:
     return {"id": result["id"], "uuid": result["uuid"], "join_url": result["join_url"]}
 
 
+@app.patch("/meetings/{meeting_id}", dependencies=[Depends(get_api_key)])
+def update_meeting(meeting_id: str, body: UpdateMeetingRequest) -> dict[str, bool]:
+    """Updates a scheduled Zoom meeting's topic, start time, and duration."""
+    try:
+        return _zoom().update_meeting(
+            meeting_id=meeting_id,
+            topic=body.topic,
+            start_time=body.start_time,
+            duration=body.duration,
+        )
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
+
+
 @app.post("/meetings/{meeting_id}/registrants", dependencies=[Depends(get_api_key)])
 def register_participants(meeting_id: str, registrants: list[Registrant]) -> list[dict]:
     """Bulk-registers a list of participants for a scheduled meeting.
@@ -249,5 +272,14 @@ def register_participants(meeting_id: str, registrants: list[Registrant]) -> lis
             meeting_id=meeting_id,
             registrants=[r.model_dump() for r in registrants],
         )
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
+
+
+@app.delete("/meetings/{meeting_id}/registrants/{registrant_id}", dependencies=[Depends(get_api_key)])
+def remove_registrant(meeting_id: str, registrant_id: str) -> dict[str, bool]:
+    """Removes a registrant from a scheduled meeting by registrant id."""
+    try:
+        return _zoom().remove_registrant(meeting_id=meeting_id, registrant_id=registrant_id)
     except httpx.HTTPStatusError as exc:
         raise _as_http_exception(exc) from exc

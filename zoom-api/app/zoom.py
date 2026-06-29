@@ -71,6 +71,20 @@ class ZoomClient:
         r.raise_for_status()
         return r.json()
 
+    def update_meeting(self, meeting_id: str, topic: str, start_time: str, duration: int) -> dict:
+        payload = {
+            "topic": topic,
+            "start_time": start_time,
+            "duration": duration,
+        }
+        r = httpx.patch(
+            f"{ZOOM_API_BASE}/meetings/{meeting_id}",
+            json=payload,
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+        return {"ok": True}
+
     def list_hosts(self) -> dict:
         r = httpx.get(
             f"{ZOOM_API_BASE}/users",
@@ -92,6 +106,15 @@ class ZoomClient:
             r.raise_for_status()
             results.append(r.json())
         return results
+
+    def remove_registrant(self, meeting_id: str, registrant_id: str) -> dict:
+        encoded_registrant_id = quote(registrant_id, safe="")
+        r = httpx.delete(
+            f"{ZOOM_API_BASE}/meetings/{meeting_id}/registrants/{encoded_registrant_id}",
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+        return {"ok": True}
 
     def list_past_meetings(self, user_id: str = "me", days: int = 30) -> dict:
         from datetime import date, timedelta

@@ -1,9 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto'
 
 import { sendTransactionalEmail } from '@/lib/email/send-email.server'
+import { resolveFamilyContactsByProfileId } from '@/lib/family.server'
 import { adminClient } from '@/lib/supabase/adminClient'
-import { getClassesInWindow, provisionClassById } from '@/lib/zoom-jobs/provision.server'
-import { zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
+import {
+  getClassesInWindow,
+  getClassesStartingAtOrAfter,
+  provisionClassById,
+} from '@/lib/zoom-jobs/provision.server'
+import { ZoomApiError, zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
 
 const toIso = (date: Date) => date.toISOString()
 
@@ -17,10 +22,30 @@ const normalizeEmail = (value: string | null) => (value ?? '').trim().toLowerCas
 
 const ensureOrigin = (origin: string) => origin.replace(/\/+$/, '')
 
-const provisionWindow = async ({ now, leadMinutes }: { now: Date; leadMinutes: number }) => {
+const REPROVISION_HORIZON_MINUTES = 36 * 60
+const REMINDER_WINDOW_MINUTES = 2 * 60
+
+const reprovision36hAndOnward = async ({ now }: { now: Date }) => {
+  const start = addMinutes(now, REPROVISION_HORIZON_MINUTES)
+  const classIds = await getClassesStartingAtOrAfter({ startsAt: toIso(start) })
+
+  const results = [] as Awaited<ReturnType<typeof provisionClassById>>[]
+  for (const classId of classIds) {
+    results.push(await provisionClassById(classId))
+  }
+
+  return {
+    scanned: classIds.length,
+    reconciled: results.filter(result => !result.error).length,
+    failed: results.filter(result => Boolean(result.error)).length,
+    details: results,
+  }
+}
+
+const nearTermGapFill = async ({ now }: { now: Date }) => {
   const classIds = await getClassesInWindow({
     startsAt: toIso(now),
-    endsAt: toIso(addMinutes(now, leadMinutes)),
+    endsAt: toIso(addMinutes(now, REPROVISION_HORIZON_MINUTES)),
   })
 
   const results = [] as Awaited<ReturnType<typeof provisionClassById>>[]
@@ -30,34 +55,150 @@ const provisionWindow = async ({ now, leadMinutes }: { now: Date; leadMinutes: n
 
   return {
     scanned: classIds.length,
-    provisioned: results.filter(result => !result.error).length,
+    reconciled: results.filter(result => !result.error).length,
     failed: results.filter(result => Boolean(result.error)).length,
     details: results,
   }
 }
 
-const reprovision2h30m = async ({ now }: { now: Date }) => {
-  const classIds = await getClassesInWindow({
-    startsAt: toIso(addMinutes(now, 140)),
-    endsAt: toIso(addMinutes(now, 160)),
+type UpcomingMeeting = {
+  id: string
+  class_id: string
+  zoom_host_id: string
+  zoom_meeting_id: string | null
+  class: { starts_at: string; ends_at: string }[] | null
+}
+
+const hasOverlap = (left: { starts_at: string; ends_at: string }, right: { starts_at: string; ends_at: string }) => {
+  const leftStart = new Date(left.starts_at).getTime()
+  const leftEnd = new Date(left.ends_at).getTime()
+  const rightStart = new Date(right.starts_at).getTime()
+  const rightEnd = new Date(right.ends_at).getTime()
+  return leftStart < rightEnd && rightStart < leftEnd
+}
+
+const findHostConflicts = (meetings: UpcomingMeeting[]) => {
+  const conflicts: Array<{ hostId: string; sourceClassId: string; targetClassId: string }> = []
+  const byHost = new Map<string, UpcomingMeeting[]>()
+
+  for (const meeting of meetings) {
+    const bucket = byHost.get(meeting.zoom_host_id) ?? []
+    bucket.push(meeting)
+    byHost.set(meeting.zoom_host_id, bucket)
+  }
+
+  for (const [hostId, hostMeetings] of byHost.entries()) {
+    hostMeetings.sort((a, b) => {
+      const aClass = Array.isArray(a.class) ? a.class[0] : null
+      const bClass = Array.isArray(b.class) ? b.class[0] : null
+      const aStart = aClass?.starts_at ? new Date(aClass.starts_at).getTime() : Number.POSITIVE_INFINITY
+      const bStart = bClass?.starts_at ? new Date(bClass.starts_at).getTime() : Number.POSITIVE_INFINITY
+      return aStart - bStart
+    })
+
+    for (let index = 1; index < hostMeetings.length; index += 1) {
+      const prev = hostMeetings[index - 1]
+      const curr = hostMeetings[index]
+      const prevClass = Array.isArray(prev.class) ? prev.class[0] : null
+      const currClass = Array.isArray(curr.class) ? curr.class[0] : null
+      if (!prevClass || !currClass) continue
+      if (!hasOverlap(prevClass, currClass)) continue
+
+      conflicts.push({
+        hostId,
+        sourceClassId: prev.class_id,
+        targetClassId: curr.class_id,
+      })
+    }
+  }
+
+  return conflicts
+}
+
+const reconcileHostOverlaps = async ({ now }: { now: Date }) => {
+  const { data: meetings, error } = await adminClient
+    .from('class_zoom_meeting')
+    .select('id, class_id, zoom_host_id, zoom_meeting_id, class:class_id ( starts_at, ends_at )')
+    .eq('status', 'created')
+
+  if (error) {
+    return {
+      scanned: 0,
+      detected: 0,
+      fixed: 0,
+      failed: 1,
+      remaining: 0,
+      error: error.message,
+    }
+  }
+
+  const upcoming = ((meetings ?? []) as UpcomingMeeting[]).filter(meeting => {
+    const classRow = Array.isArray(meeting.class) ? meeting.class[0] : null
+    if (!classRow) return false
+    return new Date(classRow.ends_at).getTime() >= now.getTime()
   })
 
-  const results = [] as Awaited<ReturnType<typeof provisionClassById>>[]
-  for (const classId of classIds) {
-    results.push(await provisionClassById(classId))
+  const conflicts = findHostConflicts(upcoming)
+  let fixed = 0
+  let failed = 0
+  const targetClassSet = new Set<string>()
+
+  for (const conflict of conflicts) {
+    if (targetClassSet.has(conflict.targetClassId)) continue
+    targetClassSet.add(conflict.targetClassId)
+
+    const result = await provisionClassById(conflict.targetClassId, {
+      forceMeetingRecreate: true,
+      excludedHostIds: [conflict.hostId],
+    })
+
+    if (result.error) {
+      failed += 1
+    } else {
+      fixed += 1
+    }
   }
 
+  const { data: meetingsAfter } = await adminClient
+    .from('class_zoom_meeting')
+    .select('id, class_id, zoom_host_id, zoom_meeting_id, class:class_id ( starts_at, ends_at )')
+    .eq('status', 'created')
+
+  const remaining = findHostConflicts((meetingsAfter ?? []) as UpcomingMeeting[]).length
+
   return {
-    scanned: classIds.length,
-    reprovisioned: results.filter(result => !result.error).length,
-    failed: results.filter(result => Boolean(result.error)).length,
-    details: results,
+    scanned: upcoming.length,
+    detected: conflicts.length,
+    fixed,
+    failed,
+    remaining,
   }
 }
 
-const send2hReminders = async ({ now, appOrigin }: { now: Date; appOrigin: string }) => {
-  const reminderStart = addMinutes(now, 110)
-  const reminderEnd = addMinutes(now, 130)
+const resolveReminderRecipientEmail = async (profileId: string) => {
+  const { data: profile } = await adminClient
+    .from('profile')
+    .select('email')
+    .eq('id', profileId)
+    .maybeSingle<{ email: string | null }>()
+
+  const profileEmail = normalizeEmail(profile?.email ?? null)
+  if (profileEmail) return profileEmail
+
+  try {
+    const familyContacts = await resolveFamilyContactsByProfileId(adminClient, profileId)
+    const guardianEmail = familyContacts
+      .map(contact => normalizeEmail(contact.email))
+      .find(email => Boolean(email))
+    return guardianEmail ?? ''
+  } catch {
+    return ''
+  }
+}
+
+const sendReminderCoverage = async ({ now, appOrigin }: { now: Date; appOrigin: string }) => {
+  const reminderStart = now
+  const reminderEnd = addMinutes(now, REMINDER_WINDOW_MINUTES)
   const classIds = await getClassesInWindow({ startsAt: toIso(reminderStart), endsAt: toIso(reminderEnd) })
 
   let sent = 0
@@ -75,7 +216,7 @@ const send2hReminders = async ({ now, appOrigin }: { now: Date; appOrigin: strin
 
     const { data: registrants, error: registrantError } = await adminClient
       .from('class_zoom_registrant')
-      .select('id, profile_id')
+      .select('id, profile_id, last_sent_at')
       .eq('class_id', classId)
 
     if (registrantError || !classRow) {
@@ -83,26 +224,13 @@ const send2hReminders = async ({ now, appOrigin }: { now: Date; appOrigin: strin
       continue
     }
 
-    const profileIds = Array.from(new Set((registrants ?? []).map(row => row.profile_id).filter((id): id is string => Boolean(id))))
-    if (!profileIds.length) {
-      skipped += 1
-      continue
-    }
-
-    const { data: profiles, error: profileError } = await adminClient
-      .from('profile')
-      .select('id, email')
-      .in('id', profileIds)
-
-    if (profileError) {
-      failed += 1
-      continue
-    }
-
-    const emailByProfile = new Map((profiles ?? []).map(profile => [profile.id, normalizeEmail(profile.email)]))
-
     for (const registrant of registrants ?? []) {
-      const email = emailByProfile.get(registrant.profile_id) ?? ''
+      if (registrant.last_sent_at) {
+        skipped += 1
+        continue
+      }
+
+      const email = await resolveReminderRecipientEmail(registrant.profile_id)
       if (!email) {
         skipped += 1
         continue
@@ -111,18 +239,8 @@ const send2hReminders = async ({ now, appOrigin }: { now: Date; appOrigin: strin
       const token = newToken()
       const tokenHash = hashToken(token)
       const expiresAt = addMinutes(new Date(classRow.starts_at), 240).toISOString()
-
-      const { error: tokenUpdateError } = await adminClient
-        .from('class_zoom_registrant')
-        .update({ zlr_token_hash: tokenHash, zlr_expires_at: expiresAt, last_sent_at: new Date().toISOString() })
-        .eq('id', registrant.id)
-
-      if (tokenUpdateError) {
-        failed += 1
-        continue
-      }
-
       const joinLink = `${ensureOrigin(appOrigin)}/zlr/${token}`
+
       const workshopName =
         typeof classRow.workshop === 'object' && classRow.workshop && 'description' in classRow.workshop
           ? (classRow.workshop.description ?? 'your class')
@@ -144,14 +262,27 @@ const send2hReminders = async ({ now, appOrigin }: { now: Date; appOrigin: strin
           startsAt: classRow.starts_at,
           joinLink,
         },
-        eventKey: `class:${classId}:reminder_2h:v1:${registrant.profile_id}`,
+        eventKey: `class:${classId}:registrant:${registrant.id}:reminder_v2:${tokenHash.slice(0, 12)}`,
         profileId: registrant.profile_id,
       })
 
-      if (result.status === 'sent') {
-        sent += 1
-      } else if (result.status === 'skipped') {
-        skipped += 1
+      if (result.status === 'sent' || result.status === 'skipped') {
+        const { error: tokenUpdateError } = await adminClient
+          .from('class_zoom_registrant')
+          .update({
+            zlr_token_hash: tokenHash,
+            zlr_expires_at: expiresAt,
+            last_sent_at: new Date().toISOString(),
+          })
+          .eq('id', registrant.id)
+
+        if (tokenUpdateError) {
+          failed += 1
+        } else if (result.status === 'sent') {
+          sent += 1
+        } else {
+          skipped += 1
+        }
       } else {
         failed += 1
       }
@@ -168,12 +299,13 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
     .eq('status', 'created')
 
   if (error) {
-    return { scanned: 0, synced: 0, failed: 1, error: error.message }
+    return { scanned: 0, synced: 0, failed: 1, pendingRetry: 0, error: error.message }
   }
 
   let scanned = 0
   let synced = 0
   let failed = 0
+  let pendingRetry = 0
 
   for (const meeting of meetings ?? []) {
     const classRelation = Array.isArray(meeting.class) ? meeting.class[0] : null
@@ -196,6 +328,8 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
     try {
       const participantsPayload = await zoomApiClient.getParticipants(meeting.zoom_meeting_uuid)
       const participants = participantsPayload.participants ?? []
+
+      await adminClient.from('class_zoom_participant').delete().eq('class_zoom_meeting_id', meeting.id)
 
       const rows = participants.map(participant => ({
         class_zoom_meeting_id: meeting.id,
@@ -222,10 +356,7 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
       )
 
       if (participantEmails.length) {
-        const { data: profiles } = await adminClient
-          .from('profile')
-          .select('id, email')
-          .in('email', participantEmails)
+        const { data: profiles } = await adminClient.from('profile').select('id, email').in('email', participantEmails)
 
         for (const profile of profiles ?? []) {
           const { error: attendanceUpdateError } = await adminClient
@@ -251,11 +382,17 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
 
       synced += 1
     } catch (err) {
-      failed += 1
+      const retryable = err instanceof ZoomApiError && err.status === 409
+      if (retryable) {
+        pendingRetry += 1
+      } else {
+        failed += 1
+      }
+
       await adminClient
         .from('class_zoom_participant_sync')
         .update({
-          status: 'failed',
+          status: retryable ? 'pending' : 'failed',
           completed_at: new Date().toISOString(),
           error_message: err instanceof Error ? err.message : 'Unknown attendance sync error',
         })
@@ -263,21 +400,23 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
     }
   }
 
-  return { scanned, synced, failed }
+  return { scanned, synced, failed, pendingRetry }
 }
 
 export const runZoomJobs = async ({ now = new Date(), appOrigin }: { now?: Date; appOrigin: string }) => {
-  const provision24h = await provisionWindow({ now, leadMinutes: 24 * 60 })
-  const reprovision = await reprovision2h30m({ now })
-  const reminders = await send2hReminders({ now, appOrigin })
+  const reprovision = await reprovision36hAndOnward({ now })
+  const nearTerm = await nearTermGapFill({ now })
+  const hostReconciliation = await reconcileHostOverlaps({ now })
+  const reminders = await sendReminderCoverage({ now, appOrigin })
   const attendanceSync = await syncPostClassAttendance({ now })
 
   return {
     ok: true,
     ranAt: now.toISOString(),
-    provision24h,
-    reprovision2h30m: reprovision,
-    reminders2h: reminders,
+    reprovision36hAndOnward: reprovision,
+    nearTermGapFill: nearTerm,
+    hostOverlapReconciliation: hostReconciliation,
+    reminderCoverage: reminders,
     attendanceSync,
   }
 }
