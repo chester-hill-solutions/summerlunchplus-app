@@ -299,6 +299,20 @@ def test_update_meeting_missing_auth(client):
     assert resp.status_code == 401
 
 
+def test_delete_meeting_success(client, headers):
+    with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
+         patch("app.zoom.httpx.delete", return_value=ok({})) as mock_delete:
+        resp = client.delete("/meetings/99999", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    delete_url = mock_delete.call_args.args[0]
+    assert "/meetings/99999" in delete_url
+
+
+def test_delete_meeting_missing_auth(client):
+    assert client.delete("/meetings/99999").status_code == 401
+
+
 # ── POST /meetings/{id}/registrants ──────────────────────────────────────────
 
 def test_register_participants_success(client, headers):

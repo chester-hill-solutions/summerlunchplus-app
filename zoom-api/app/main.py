@@ -262,6 +262,16 @@ def update_meeting(meeting_id: str, body: UpdateMeetingRequest) -> dict[str, boo
     return {"ok": True}
 
 
+@app.delete("/meetings/{meeting_id}", dependencies=[Depends(get_api_key)])
+def delete_meeting(meeting_id: str) -> dict[str, bool]:
+    """Deletes a scheduled Zoom meeting."""
+    try:
+        _zoom().delete_meeting(meeting_id=meeting_id)
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
+    return {"ok": True}
+
+
 @app.post("/meetings/{meeting_id}/registrants", dependencies=[Depends(get_api_key)])
 def register_participants(meeting_id: str, registrants: list[Registrant]) -> list[dict]:
     """Bulk-registers a list of participants for a scheduled meeting.

@@ -1,11 +1,7 @@
 import { sendTransactionalEmail } from '@/lib/email/send-email.server'
 import { resolveFamilyContactsByProfileId } from '@/lib/family.server'
 import { adminClient } from '@/lib/supabase/adminClient'
-import {
-  getClassesInWindow,
-  getClassesStartingAtOrAfter,
-  provisionClassById,
-} from '@/lib/zoom-jobs/provision.server'
+import { getClassesInWindow, provisionClassById } from '@/lib/zoom-jobs/provision.server'
 import { ZoomApiError, zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
 import { hashZlrToken, newZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
 
@@ -22,25 +18,7 @@ const REMINDER_WINDOW_MINUTES = 2 * 60
 const RUNNING_SYNC_TIMEOUT_MINUTES = 20
 const FAILED_SYNC_RETRY_COOLDOWN_MINUTES = 10
 
-const reprovision36hAndOnward = async ({ now }: { now: Date }) => {
-  const start = addMinutes(now, REPROVISION_HORIZON_MINUTES)
-  const classIds = await getClassesStartingAtOrAfter({ startsAt: toIso(start) })
-
-  const results = [] as Awaited<ReturnType<typeof provisionClassById>>[]
-  for (const classId of classIds) {
-    results.push(await provisionClassById(classId))
-  }
-
-  return {
-    scanned: classIds.length,
-    reconciled: results.filter(result => !result.error && !result.skipped).length,
-    skipped: results.filter(result => result.skipped).length,
-    failed: results.filter(result => Boolean(result.error)).length,
-    details: results,
-  }
-}
-
-const nearTermGapFill = async ({ now }: { now: Date }) => {
+const provisionWithin36h = async ({ now }: { now: Date }) => {
   const classIds = await getClassesInWindow({
     startsAt: toIso(now),
     endsAt: toIso(addMinutes(now, REPROVISION_HORIZON_MINUTES)),
@@ -65,7 +43,13 @@ type UpcomingMeeting = {
   class_id: string
   zoom_host_id: string
   zoom_meeting_id: string | null
-  class: { starts_at: string; ends_at: string }[] | null
+  class: { starts_at: string; ends_at: string } | Array<{ starts_at: string; ends_at: string }> | null
+}
+
+const relationRow = <T extends Record<string, unknown>>(value: T | T[] | null | undefined): T | null => {
+  if (Array.isArray(value)) return value[0] ?? null
+  if (value && typeof value === 'object') return value
+  return null
 }
 
 const hasOverlap = (left: { starts_at: string; ends_at: string }, right: { starts_at: string; ends_at: string }) => {
@@ -88,8 +72,8 @@ const findHostConflicts = (meetings: UpcomingMeeting[]) => {
 
   for (const [hostId, hostMeetings] of byHost.entries()) {
     hostMeetings.sort((a, b) => {
-      const aClass = Array.isArray(a.class) ? a.class[0] : null
-      const bClass = Array.isArray(b.class) ? b.class[0] : null
+      const aClass = relationRow<{ starts_at: string; ends_at: string }>(a.class)
+      const bClass = relationRow<{ starts_at: string; ends_at: string }>(b.class)
       const aStart = aClass?.starts_at ? new Date(aClass.starts_at).getTime() : Number.POSITIVE_INFINITY
       const bStart = bClass?.starts_at ? new Date(bClass.starts_at).getTime() : Number.POSITIVE_INFINITY
       return aStart - bStart
@@ -98,8 +82,8 @@ const findHostConflicts = (meetings: UpcomingMeeting[]) => {
     for (let index = 1; index < hostMeetings.length; index += 1) {
       const prev = hostMeetings[index - 1]
       const curr = hostMeetings[index]
-      const prevClass = Array.isArray(prev.class) ? prev.class[0] : null
-      const currClass = Array.isArray(curr.class) ? curr.class[0] : null
+      const prevClass = relationRow<{ starts_at: string; ends_at: string }>(prev.class)
+      const currClass = relationRow<{ starts_at: string; ends_at: string }>(curr.class)
       if (!prevClass || !currClass) continue
       if (!hasOverlap(prevClass, currClass)) continue
 
@@ -132,7 +116,7 @@ const reconcileHostOverlaps = async ({ now }: { now: Date }) => {
   }
 
   const upcoming = ((meetings ?? []) as UpcomingMeeting[]).filter(meeting => {
-    const classRow = Array.isArray(meeting.class) ? meeting.class[0] : null
+    const classRow = relationRow<{ starts_at: string; ends_at: string }>(meeting.class)
     if (!classRow) return false
     return new Date(classRow.ends_at).getTime() >= now.getTime()
   })
@@ -163,7 +147,12 @@ const reconcileHostOverlaps = async ({ now }: { now: Date }) => {
     .select('id, class_id, zoom_host_id, zoom_meeting_id, class:class_id ( starts_at, ends_at )')
     .eq('status', 'created')
 
-  const remaining = findHostConflicts((meetingsAfter ?? []) as UpcomingMeeting[]).length
+  const remainingUpcoming = ((meetingsAfter ?? []) as UpcomingMeeting[]).filter(meeting => {
+    const classRow = relationRow<{ starts_at: string; ends_at: string }>(meeting.class)
+    if (!classRow) return false
+    return new Date(classRow.ends_at).getTime() >= now.getTime()
+  })
+  const remaining = findHostConflicts(remainingUpcoming).length
 
   return {
     scanned: upcoming.length,
@@ -196,7 +185,7 @@ const resolveReminderRecipientEmail = async (profileId: string) => {
 }
 
 const sendReminderCoverage = async ({ now, appOrigin }: { now: Date; appOrigin: string }) => {
-  const reminderStart = addMinutes(now, -REMINDER_WINDOW_MINUTES)
+  const reminderStart = now
   const reminderEnd = addMinutes(now, REMINDER_WINDOW_MINUTES)
   const classIds = await getClassesInWindow({ startsAt: toIso(reminderStart), endsAt: toIso(reminderEnd) })
 
@@ -364,7 +353,7 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
   const nowIso = now.toISOString()
 
   for (const meeting of meetings ?? []) {
-    const classRelation = Array.isArray(meeting.class) ? meeting.class[0] : null
+    const classRelation = relationRow<{ starts_at: string; ends_at: string }>(meeting.class)
     const classEndsAt = classRelation?.ends_at ? new Date(classRelation.ends_at) : null
     if (!classEndsAt || classEndsAt.getTime() > addMinutes(now, -15).getTime()) continue
     if (!meeting.zoom_meeting_uuid) continue
@@ -515,8 +504,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     now: now.toISOString(),
   })
 
-  const reprovision = await reprovision36hAndOnward({ now })
-  const nearTerm = await nearTermGapFill({ now })
+  const within36h = await provisionWithin36h({ now })
   const hostReconciliation = await reconcileHostOverlaps({ now })
   const reminders = await sendReminderCoverage({ now, appOrigin })
   const attendanceSync = await syncPostClassAttendance({ now })
@@ -524,8 +512,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
   console.info('[zoom-jobs] run completed', {
     runId: runId ?? null,
     ranAt: now.toISOString(),
-    reprovisionScanned: reprovision.scanned,
-    nearTermScanned: nearTerm.scanned,
+    within36hScanned: within36h.scanned,
     hostConflictsDetected: hostReconciliation.detected,
     reminderScanned: reminders.scannedClasses,
     attendanceScanned: attendanceSync.scanned,
@@ -536,8 +523,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     ok: true,
     runId: runId ?? null,
     ranAt: now.toISOString(),
-    reprovision36hAndOnward: reprovision,
-    nearTermGapFill: nearTerm,
+    provisionWithin36h: within36h,
     hostOverlapReconciliation: hostReconciliation,
     reminderCoverage: reminders,
     attendanceSync,
