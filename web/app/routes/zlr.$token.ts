@@ -20,6 +20,24 @@ const unavailableLink = () =>
     headers: noStoreHeaders,
   })
 
+const tooEarlyLink = (startsAt: string) =>
+  new Response(
+    `This class has not started yet. You can join up to 15 minutes before start time. Scheduled start: ${new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(startsAt))}.`,
+    {
+      status: 403,
+      headers: noStoreHeaders,
+    }
+  )
+
+const tooLateLink = () =>
+  new Response('This class link is closed. Join access ends 15 minutes after class end time.', {
+    status: 410,
+    headers: noStoreHeaders,
+  })
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const token = (params.token ?? '').trim()
   if (!token) return invalidLink()
@@ -27,7 +45,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const tokenHash = hashZlrToken(token)
   const { data: registrant, error: registrantError } = await adminClient
     .from('class_zoom_registrant')
-    .select('id, profile_id, class_id, zoom_join_url, zlr_expires_at')
+    .select('id, profile_id, class_id, zoom_join_url, zlr_expires_at, class:class_id ( starts_at, ends_at )')
     .eq('zlr_token_hash', tokenHash)
     .maybeSingle()
 
@@ -71,6 +89,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const expiresAt = registrant.zlr_expires_at ? new Date(registrant.zlr_expires_at) : null
   if (expiresAt && Number.isFinite(expiresAt.getTime()) && Date.now() > expiresAt.getTime()) {
     return unavailableLink()
+  }
+
+  const classRelation = Array.isArray(registrant.class) ? registrant.class[0] : registrant.class
+  const nowMs = Date.now()
+  const classStartsAtMs = classRelation?.starts_at ? new Date(classRelation.starts_at).getTime() : Number.NaN
+  const classEndsAtMs = classRelation?.ends_at ? new Date(classRelation.ends_at).getTime() : Number.NaN
+
+  if (Number.isFinite(classStartsAtMs) && nowMs < classStartsAtMs - 15 * 60_000) {
+    return tooEarlyLink(classRelation.starts_at)
+  }
+
+  if (Number.isFinite(classEndsAtMs) && nowMs > classEndsAtMs + 15 * 60_000) {
+    return tooLateLink()
   }
 
   const joinUrl = (registrant.zoom_join_url ?? '').trim()
