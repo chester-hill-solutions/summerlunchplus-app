@@ -4,43 +4,43 @@ import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { hashZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
 
-const noStoreHeaders = {
-  'cache-control': 'no-store',
+const homeMessageRedirect = ({ request, message }: { request: Request; message: string }) => {
+  const url = new URL('/home', request.url)
+  url.searchParams.set('enrollmentStatus', 'error')
+  url.searchParams.set('enrollmentMessage', message)
+  return redirect(`${url.pathname}?${url.searchParams.toString()}`)
 }
 
-const invalidLink = () =>
-  new Response('This Zoom link is invalid or expired. Please request a new class reminder email.', {
-    status: 404,
-    headers: noStoreHeaders,
+const invalidLink = ({ request }: { request: Request }) =>
+  homeMessageRedirect({
+    request,
+    message: 'This class link is invalid or expired. Please request a new class reminder email.',
   })
 
-const unavailableLink = () =>
-  new Response('This Zoom link is no longer available. Please contact support if you need help joining.', {
-    status: 410,
-    headers: noStoreHeaders,
+const unavailableLink = ({ request }: { request: Request }) =>
+  homeMessageRedirect({
+    request,
+    message: 'This class link is no longer available. Please contact support if you need help joining.',
   })
 
-const tooEarlyLink = (startsAt: string) =>
-  new Response(
-    `This class has not started yet. You can join up to 15 minutes before start time. Scheduled start: ${new Intl.DateTimeFormat(undefined, {
+const tooEarlyLink = ({ request, startsAt }: { request: Request; startsAt: string }) =>
+  homeMessageRedirect({
+    request,
+    message: `You can join up to 15 minutes before class starts. Scheduled start: ${new Intl.DateTimeFormat(undefined, {
       dateStyle: 'medium',
       timeStyle: 'short',
     }).format(new Date(startsAt))}.`,
-    {
-      status: 403,
-      headers: noStoreHeaders,
-    }
-  )
+  })
 
-const tooLateLink = () =>
-  new Response('This class link is closed. Join access ends 15 minutes after class end time.', {
-    status: 410,
-    headers: noStoreHeaders,
+const tooLateLink = ({ request }: { request: Request }) =>
+  homeMessageRedirect({
+    request,
+    message: 'This class link is closed. Join access ends 15 minutes after class end time.',
   })
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const token = (params.token ?? '').trim()
-  if (!token) return invalidLink()
+  if (!token) return invalidLink({ request })
 
   const tokenHash = hashZlrToken(token)
   const { data: registrant, error: registrantError } = await adminClient
@@ -51,11 +51,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   if (registrantError) {
     console.error('[zlr] lookup failed', { tokenHashPrefix: tokenHash.slice(0, 12), error: registrantError.message })
-    return new Response('Unable to process this Zoom link right now.', { status: 500, headers: noStoreHeaders })
+    return homeMessageRedirect({
+      request,
+      message: 'Unable to process this class link right now. Please try again in a few minutes.',
+    })
   }
 
   if (!registrant) {
-    return invalidLink()
+    return invalidLink({ request })
   }
 
   const requestMetadata = extractRequestMetadata(request)
@@ -88,7 +91,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const expiresAt = registrant.zlr_expires_at ? new Date(registrant.zlr_expires_at) : null
   if (expiresAt && Number.isFinite(expiresAt.getTime()) && Date.now() > expiresAt.getTime()) {
-    return unavailableLink()
+    return unavailableLink({ request })
   }
 
   const classRelation = Array.isArray(registrant.class) ? registrant.class[0] : registrant.class
@@ -97,16 +100,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const classEndsAtMs = classRelation?.ends_at ? new Date(classRelation.ends_at).getTime() : Number.NaN
 
   if (Number.isFinite(classStartsAtMs) && nowMs < classStartsAtMs - 15 * 60_000) {
-    return tooEarlyLink(classRelation.starts_at)
+    return tooEarlyLink({ request, startsAt: classRelation.starts_at })
   }
 
   if (Number.isFinite(classEndsAtMs) && nowMs > classEndsAtMs + 15 * 60_000) {
-    return tooLateLink()
+    return tooLateLink({ request })
   }
 
   const joinUrl = (registrant.zoom_join_url ?? '').trim()
   if (!joinUrl) {
-    return unavailableLink()
+    return unavailableLink({ request })
   }
 
   return redirect(joinUrl)
