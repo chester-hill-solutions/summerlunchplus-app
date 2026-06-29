@@ -275,6 +275,30 @@ def test_create_meeting_missing_auth(client):
     assert resp.status_code == 401
 
 
+def test_update_meeting_success(client, headers):
+    with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
+         patch("app.zoom.httpx.patch", return_value=ok({})) as mock_patch:
+        resp = client.patch("/meetings/99999", headers=headers, json={
+            "topic": "Q2 Review Updated",
+            "start_time": "2026-06-01T15:00:00",
+            "duration": 90,
+        })
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    payload = mock_patch.call_args.kwargs["json"]
+    assert payload["topic"] == "Q2 Review Updated"
+    assert payload["duration"] == 90
+
+
+def test_update_meeting_missing_auth(client):
+    resp = client.patch("/meetings/99999", json={
+        "topic": "Q2 Review Updated",
+        "start_time": "2026-06-01T15:00:00",
+        "duration": 90,
+    })
+    assert resp.status_code == 401
+
+
 # ── POST /meetings/{id}/registrants ──────────────────────────────────────────
 
 def test_register_participants_success(client, headers):
