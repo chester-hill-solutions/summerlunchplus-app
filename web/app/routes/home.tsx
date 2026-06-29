@@ -1,4 +1,5 @@
-import { Form, Link, redirect, useActionData, useLoaderData, useNavigation, useSearchParams } from 'react-router'
+import { Form, Link, redirect, useActionData, useFetcher, useLoaderData, useNavigation, useSearchParams } from 'react-router'
+import { useEffect } from 'react'
 
 import type { Route } from './+types/home'
 import { Button } from '@/components/ui/button'
@@ -88,6 +89,7 @@ type ActionData = {
   ok?: boolean
   error?: string
   message?: string
+  joinClassPath?: string
 }
 
 const formatDate = (value: string) =>
@@ -372,7 +374,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     if (tokenError) return { error: tokenError.message } satisfies ActionData
 
-    throw redirect(`/zlr/${token}`)
+    return { ok: true, joinClassPath: `/zlr/${token}` } satisfies ActionData
   }
 
   if (family.profileRole !== 'guardian') {
@@ -585,12 +587,14 @@ export default function Home() {
     nextClass,
   } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
+  const joinClassFetcher = useFetcher<ActionData>()
   const navigation = useNavigation()
   const [searchParams] = useSearchParams()
   const mutationLocked =
     navigation.state !== 'idle' &&
     typeof navigation.formMethod === 'string' &&
     navigation.formMethod.toLowerCase() === 'post'
+  const joinClassRunning = joinClassFetcher.state !== 'idle'
   const tab = searchParams.get('tab') === 'manage-family' ? 'manage-family' : 'family-workshops'
   const enrollmentStatusParam = searchParams.get('enrollmentStatus')
   const enrollmentStatus = enrollmentStatusParam === 'error' ? 'error' : enrollmentStatusParam === 'success' ? 'success' : null
@@ -655,6 +659,11 @@ export default function Home() {
       return a.requested_at.localeCompare(b.requested_at)
     })
 
+  useEffect(() => {
+    if (!joinClassFetcher.data?.joinClassPath) return
+    window.location.assign(joinClassFetcher.data.joinClassPath)
+  }, [joinClassFetcher.data?.joinClassPath])
+
   return (
     <main className="w-full px-6 pt-6 pb-10 space-y-6">
       <div className="flex gap-2">
@@ -680,6 +689,7 @@ export default function Home() {
 
       {actionData?.error ? <p className="text-sm text-destructive">{actionData.error}</p> : null}
       {actionData?.ok && actionData.message ? <p className="text-sm text-emerald-600">{actionData.message}</p> : null}
+      {joinClassFetcher.data?.error ? <p className="text-sm text-destructive">{joinClassFetcher.data.error}</p> : null}
 
       {tab === 'family-workshops' ? (
         <div className="space-y-6">
@@ -780,13 +790,13 @@ export default function Home() {
                                 <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
                                 <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
                                 <TableCell>
-                                  <Form method="post" className="inline-flex">
+                                  <joinClassFetcher.Form method="post" className="inline-flex">
                                     <input type="hidden" name="intent" value="join-class" />
                                     <input type="hidden" name="class_id" value={classRow.id} />
-                                    <Button type="submit" size="sm" disabled={mutationLocked}>
-                                      JOIN CLASS
+                                    <Button type="submit" size="sm" disabled={mutationLocked || joinClassRunning}>
+                                      {joinClassRunning ? 'Preparing...' : 'JOIN CLASS'}
                                     </Button>
-                                  </Form>
+                                  </joinClassFetcher.Form>
                                 </TableCell>
                               </TableRow>
                             ))}
