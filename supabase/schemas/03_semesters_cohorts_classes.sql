@@ -234,6 +234,7 @@ declare
   v_workshop public.workshop%rowtype;
   v_now timestamptz := now();
   v_existing_enrollment_id uuid;
+  v_reusable_enrollment_id uuid;
   v_approved_count integer;
   v_waitlisted_count integer;
   v_status public.workshop_enrollment_status;
@@ -268,12 +269,23 @@ begin
   from public.workshop_enrollment we
   where we.semester_id = v_workshop.semester_id
     and we.profile_id = any(coalesce(p_family_profile_ids, array[]::uuid[]))
+    and we.status not in ('rejected', 'revoked')
   limit 1;
 
   if v_existing_enrollment_id is not null then
     return query select false, null::uuid, null::public.workshop_enrollment_status, 'family_already_enrolled', 'Your family is already enrolled in one workshop for this semester.';
     return;
   end if;
+
+  select we.id
+  into v_reusable_enrollment_id
+  from public.workshop_enrollment we
+  where we.semester_id = v_workshop.semester_id
+    and we.profile_id = p_profile_id
+    and we.status in ('rejected', 'revoked')
+  order by we.updated_at desc, we.requested_at desc
+  limit 1
+  for update;
 
   select count(*)::integer
   into v_approved_count
@@ -296,9 +308,21 @@ begin
     return;
   end if;
 
-  insert into public.workshop_enrollment (workshop_id, profile_id, status)
-  values (p_workshop_id, p_profile_id, v_status)
-  returning id into v_inserted_id;
+  if v_reusable_enrollment_id is not null then
+    update public.workshop_enrollment
+    set
+      workshop_id = p_workshop_id,
+      status = v_status,
+      requested_at = v_now,
+      decided_at = null,
+      decided_by = null
+    where id = v_reusable_enrollment_id
+    returning id into v_inserted_id;
+  else
+    insert into public.workshop_enrollment (workshop_id, profile_id, status)
+    values (p_workshop_id, p_profile_id, v_status)
+    returning id into v_inserted_id;
+  end if;
 
   return query select true, v_inserted_id, v_status, null::text, null::text;
 end;
