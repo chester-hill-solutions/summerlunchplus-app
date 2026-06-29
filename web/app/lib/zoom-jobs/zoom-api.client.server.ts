@@ -55,7 +55,15 @@ const parsePayload = async (response: Response) => {
   return response.text().catch(() => null)
 }
 
-const requestJson = async <T>({ method, path, body }: { method: 'GET' | 'POST' | 'PATCH'; path: string; body?: unknown }): Promise<T> => {
+const requestJson = async <T>({
+  method,
+  path,
+  body,
+}: {
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  path: string
+  body?: unknown
+}): Promise<T> => {
   const { endpoint, apiKey } = getConfig()
   const response = await fetch(`${endpoint}${path}`, {
     method,
@@ -88,6 +96,11 @@ export const zoomApiClient = {
     })
     return results[0] ?? null
   },
+  removeRegistrant: (meetingId: string, registrantId: string) =>
+    requestJson<{ ok: boolean }>({
+      method: 'DELETE',
+      path: `/meetings/${meetingId}/registrants/${encodeURIComponent(registrantId)}`,
+    }),
   getParticipants: (meetingUuid: string) =>
     requestJson<{ participants?: Array<Record<string, unknown>> }>({
       method: 'GET',

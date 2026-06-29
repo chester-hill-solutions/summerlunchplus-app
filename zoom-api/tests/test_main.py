@@ -319,3 +319,17 @@ def test_register_participants_missing_fields(client, headers):
 
 def test_register_participants_missing_auth(client):
     assert client.post("/meetings/99999/registrants", json=REGISTRANTS).status_code == 401
+
+
+def test_remove_registrant_success(client, headers):
+    with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
+         patch("app.zoom.httpx.delete", return_value=ok({})) as mock_delete:
+        resp = client.delete("/meetings/99999/registrants/reg-abc", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    delete_url = mock_delete.call_args.args[0]
+    assert "/meetings/99999/registrants/reg-abc" in delete_url
+
+
+def test_remove_registrant_missing_auth(client):
+    assert client.delete("/meetings/99999/registrants/reg-abc").status_code == 401

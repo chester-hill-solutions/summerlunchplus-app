@@ -275,3 +275,12 @@ def register_participants(meeting_id: str, registrants: list[Registrant]) -> lis
         )
     except httpx.HTTPStatusError as exc:
         raise _as_http_exception(exc) from exc
+
+
+@app.delete("/meetings/{meeting_id}/registrants/{registrant_id}", dependencies=[Depends(get_api_key)])
+def remove_registrant(meeting_id: str, registrant_id: str) -> dict[str, bool]:
+    """Removes a registrant from a scheduled meeting by registrant id."""
+    try:
+        return _zoom().remove_registrant(meeting_id=meeting_id, registrant_id=registrant_id)
+    except httpx.HTTPStatusError as exc:
+        raise _as_http_exception(exc) from exc
