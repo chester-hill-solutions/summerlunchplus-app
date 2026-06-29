@@ -10,10 +10,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return new Response('Method not allowed', { status: 405 })
   }
 
-  const authCheck = validateInternalRunnerRequest(request, {
-    specificEnvVar: 'ZOOM_RUNNER_SECRET',
-    specificHeader: 'x-zoom-runner-secret',
-  })
+  const authCheck = validateInternalRunnerRequest(request)
 
   if (!authCheck.ok) {
     return unauthorized()
