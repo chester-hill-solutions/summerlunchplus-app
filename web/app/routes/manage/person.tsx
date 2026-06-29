@@ -32,6 +32,14 @@ const normalizeIp = (ipCandidate: string | null) => {
   return isIP(ipCandidate) ? ipCandidate : null
 }
 
+const headerValue = (headers: unknown, key: string) => {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return null
+  const value = (headers as Record<string, unknown>)[key]
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed || null
+}
+
 const geoStatusReasonFor = (input: {
   ipCandidate: string | null
   normalizedIp: string | null
@@ -138,14 +146,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const [latestFormSubmissionResult, latestLoginEventResult] = await Promise.all([
     adminClient
       .from('form_submission')
-      .select('id, form_id, submitted_at, ip_address, ip_selected, ip_selected_source, ip_parse_confidence, ip_classification, ip_confidence_level, ip_reason_codes, ip_reason_text, ip_classifier_version, proxy_provider_match, proxy_match_cidr, forwarded_for')
+      .select('id, form_id, submitted_at, ip_address, ip_selected, ip_selected_source, ip_parse_confidence, ip_classification, ip_confidence_level, ip_reason_codes, ip_reason_text, ip_classifier_version, proxy_provider_match, proxy_match_cidr, forwarded_for, request_headers')
       .eq('profile_id', profileRow.id)
       .order('submitted_at', { ascending: false })
       .limit(25),
     profileRow.user_id
       ? adminClient
           .from('login_event')
-          .select('id, event_at, email, login_method, success, ip_address, ip_selected, ip_selected_source, ip_parse_confidence, ip_classification, ip_confidence_level, ip_reason_codes, ip_reason_text, ip_classifier_version, proxy_provider_match, proxy_match_cidr, forwarded_for')
+          .select('id, event_at, email, login_method, success, ip_address, ip_selected, ip_selected_source, ip_parse_confidence, ip_classification, ip_confidence_level, ip_reason_codes, ip_reason_text, ip_classifier_version, proxy_provider_match, proxy_match_cidr, forwarded_for, request_headers')
           .eq('user_id', profileRow.user_id)
           .order('event_at', { ascending: false })
           .limit(25)
@@ -171,6 +179,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ip_classifier_version: typeof row.ip_classifier_version === 'number' ? row.ip_classifier_version : null,
       proxy_provider_match: typeof row.proxy_provider_match === 'string' ? row.proxy_provider_match : null,
       proxy_match_cidr: typeof row.proxy_match_cidr === 'string' ? row.proxy_match_cidr : null,
+      cf_connecting_ip: headerValue(row.request_headers, 'cf-connecting-ip'),
       forwarded_for: typeof row.forwarded_for === 'string' ? row.forwarded_for : null,
       ip_legacy: typeof row.ip_address === 'string' ? row.ip_address : null,
       ip_candidate: resolveIpCandidate(
@@ -196,6 +205,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ip_classifier_version: typeof row.ip_classifier_version === 'number' ? row.ip_classifier_version : null,
       proxy_provider_match: typeof row.proxy_provider_match === 'string' ? row.proxy_provider_match : null,
       proxy_match_cidr: typeof row.proxy_match_cidr === 'string' ? row.proxy_match_cidr : null,
+      cf_connecting_ip: headerValue(row.request_headers, 'cf-connecting-ip'),
       forwarded_for: typeof row.forwarded_for === 'string' ? row.forwarded_for : null,
       ip_legacy: typeof row.ip_address === 'string' ? row.ip_address : null,
       ip_candidate: resolveIpCandidate(
@@ -295,6 +305,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ip_classifier_version: row.ip_classifier_version,
         proxy_provider_match: row.proxy_provider_match,
         proxy_match_cidr: row.proxy_match_cidr,
+        cf_connecting_ip: row.cf_connecting_ip,
         forwarded_for: row.forwarded_for,
         ip_legacy: row.ip_legacy,
         ip_candidate: row.ip_candidate,

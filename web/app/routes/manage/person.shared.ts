@@ -55,6 +55,7 @@ export type PersonLoaderData = {
     ip_classifier_version: number | null
     proxy_provider_match: string | null
     proxy_match_cidr: string | null
+    cf_connecting_ip: string | null
     forwarded_for: string | null
     ip_legacy: string | null
     ip_candidate: string | null

@@ -59,6 +59,7 @@ export default function ManagePersonActivityPage() {
           success: successLabel,
           email: event.login_email ?? '-',
           ip: event.ip_selected ?? event.ip_address ?? event.ip_candidate ?? event.ip_legacy ?? '-',
+          cf_connecting_ip: event.cf_connecting_ip ?? '-',
           ip_selected: event.ip_selected ?? '-',
           source_confidence: [event.ip_selected_source, event.ip_parse_confidence].filter(Boolean).join(' / ') || '-',
           classification:
@@ -88,6 +89,7 @@ export default function ManagePersonActivityPage() {
     'geo',
     'org',
     'ip',
+    'cf_connecting_ip',
     'forwarded_chain',
     'success',
     'email',
@@ -117,6 +119,7 @@ export default function ManagePersonActivityPage() {
       source_detail: { label: 'Source detail', preferredWidth: 200, fitContentOnLoad: true },
       geo: { label: 'Geo', preferredWidth: 220, fitContentOnLoad: true },
       org: { label: 'Org', preferredWidth: 260, truncate: true, fitContentOnLoad: true },
+      cf_connecting_ip: { label: 'CF-Connecting-IP', preferredWidth: 170, fitContentOnLoad: true },
       success: { label: 'Success', preferredWidth: 110, fitContentOnLoad: true },
       email: { label: 'Email', preferredWidth: 220, fitContentOnLoad: true },
       ip: { label: 'IP', preferredWidth: 170, fitContentOnLoad: true },
