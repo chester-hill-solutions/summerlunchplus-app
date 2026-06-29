@@ -9,9 +9,11 @@ const PROFILE_SPLIT_COLUMNS = [
   'student_firstname',
   'student_lastname',
   'student_email',
+  'student_phone',
   'guardian_firstname',
   'guardian_lastname',
   'guardian_email',
+  'guardian_phone',
 ] as const
 
 const GENERATED_WORKSHOP_COLUMNS = new Set([
