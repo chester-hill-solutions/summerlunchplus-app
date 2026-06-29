@@ -27,6 +27,8 @@ type RecomputeResult = RecomputePreview & {
 type RecomputeOptions = {
   maxRowsPerSource?: number
   refreshSignals?: boolean
+  profileIds?: string[]
+  userIds?: string[]
 }
 
 type EventRow = {
@@ -270,21 +272,37 @@ const scoreCandidate = async (
   }
 }
 
-const selectRows = async (source: RecomputeSource, maxRowsPerSource: number) => {
+const selectRows = async (
+  source: RecomputeSource,
+  maxRowsPerSource: number,
+  filters?: { profileIds?: string[]; userIds?: string[] }
+) => {
   if (source === 'form_submission') {
-    const { data } = await (adminClient.from('form_submission' as any) as any)
+    let query = (adminClient.from('form_submission' as any) as any)
       .select(
         'id, profile_id, ip_address, ip_selected, ip_selected_source, ip_chain, request_headers, forwarded_for, ip_classification'
       )
       .order('submitted_at', { ascending: false })
       .limit(maxRowsPerSource)
+
+    if (filters?.profileIds?.length) {
+      query = query.in('profile_id', filters.profileIds)
+    }
+
+    const { data } = await query
     return (data ?? []) as EventRow[]
   }
 
-  const { data } = await (adminClient.from('login_event' as any) as any)
+  let query = (adminClient.from('login_event' as any) as any)
     .select('id, ip_address, ip_selected, ip_selected_source, ip_chain, request_headers, forwarded_for, ip_classification')
     .order('event_at', { ascending: false })
     .limit(maxRowsPerSource)
+
+  if (filters?.userIds?.length) {
+    query = query.in('user_id', filters.userIds)
+  }
+
+  const { data } = await query
   return (data ?? []) as EventRow[]
 }
 
@@ -296,8 +314,12 @@ const updateEventRow = async (source: RecomputeSource, rowId: string, payload: R
 export const previewIpEvidenceRecompute = async (options: RecomputeOptions = {}): Promise<RecomputePreview> => {
   const maxRowsPerSource = normalizeMaxRows(options.maxRowsPerSource)
   const [formRows, loginRows] = await Promise.all([
-    selectRows('form_submission', maxRowsPerSource),
-    selectRows('login_event', maxRowsPerSource),
+    selectRows('form_submission', maxRowsPerSource, {
+      profileIds: options.profileIds,
+    }),
+    selectRows('login_event', maxRowsPerSource, {
+      userIds: options.userIds,
+    }),
   ])
 
   const allRows = [...formRows, ...loginRows]
@@ -321,10 +343,18 @@ export const runIpEvidenceRecompute = async (options: RecomputeOptions = {}): Pr
   const refreshSignals = Boolean(options.refreshSignals)
 
   const [preview, orgPolicies, formRows, loginRows] = await Promise.all([
-    previewIpEvidenceRecompute({ maxRowsPerSource }),
+    previewIpEvidenceRecompute({
+      maxRowsPerSource,
+      profileIds: options.profileIds,
+      userIds: options.userIds,
+    }),
     loadOrgPolicies(),
-    selectRows('form_submission', maxRowsPerSource),
-    selectRows('login_event', maxRowsPerSource),
+    selectRows('form_submission', maxRowsPerSource, {
+      profileIds: options.profileIds,
+    }),
+    selectRows('login_event', maxRowsPerSource, {
+      userIds: options.userIds,
+    }),
   ])
 
   const geoCache = new Map<string, Awaited<ReturnType<typeof resolveIpGeolocation>>>()
