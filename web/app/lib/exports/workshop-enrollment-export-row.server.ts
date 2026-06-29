@@ -8,9 +8,11 @@ const PROFILE_SPLIT_COLUMNS = new Set([
   'student_firstname',
   'student_lastname',
   'student_email',
+  'student_phone',
   'guardian_firstname',
   'guardian_lastname',
   'guardian_email',
+  'guardian_phone',
 ])
 
 type ProfileRow = {
