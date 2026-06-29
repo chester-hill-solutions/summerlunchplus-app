@@ -32,6 +32,7 @@ export default [
   route("protected", "routes/protected.tsx"),
   route("auth/confirm", "routes/auth/confirm.tsx"),
   route("auth/error", "routes/auth/error.tsx"),
+  route("zlr/:token", "routes/zlr.$token.ts"),
   route("internal/export-jobs/run", "routes/internal/export-jobs.run.ts"),
   route("internal/export-jobs/cleanup", "routes/internal/export-jobs.cleanup.ts"),
   route("internal/zoom-jobs/run", "routes/internal/zoom-jobs.run.ts"),

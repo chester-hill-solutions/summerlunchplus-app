@@ -58,7 +58,12 @@ class ZoomClient:
             "type": 2,  # scheduled
             "start_time": start_time,
             "duration": duration,
-            "settings": {"approval_type": 0, "registration_type": 1},
+            "settings": {
+                "approval_type": 0,
+                "registration_type": 1,
+                "registrants_email_notification": False,
+                "registrants_confirmation_email": False,
+            },
         }
         user_id = "me"
         if isinstance(host_zoom_user_id, str) and host_zoom_user_id.strip():
@@ -93,6 +98,19 @@ class ZoomClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def update_meeting(self, meeting_id: str, topic: str, start_time: str, duration: int) -> None:
+        payload = {
+            "topic": topic,
+            "start_time": start_time,
+            "duration": duration,
+        }
+        r = httpx.patch(
+            f"{ZOOM_API_BASE}/meetings/{meeting_id}",
+            json=payload,
+            headers=self._headers(),
+        )
+        r.raise_for_status()
 
     def register_participants(self, meeting_id: str, registrants: list[dict]) -> list[dict]:
         results = []

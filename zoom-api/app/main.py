@@ -249,9 +249,9 @@ def create_meeting(body: CreateMeetingRequest) -> CreateMeetingResponse:
 
 @app.patch("/meetings/{meeting_id}", dependencies=[Depends(get_api_key)])
 def update_meeting(meeting_id: str, body: UpdateMeetingRequest) -> dict[str, bool]:
-    """Updates a scheduled Zoom meeting's topic, start time, and duration."""
+    """Updates a scheduled Zoom meeting's topic/start time/duration."""
     try:
-        return _zoom().update_meeting(
+        _zoom().update_meeting(
             meeting_id=meeting_id,
             topic=body.topic,
             start_time=body.start_time,
@@ -259,6 +259,7 @@ def update_meeting(meeting_id: str, body: UpdateMeetingRequest) -> dict[str, boo
         )
     except httpx.HTTPStatusError as exc:
         raise _as_http_exception(exc) from exc
+    return {"ok": True}
 
 
 @app.post("/meetings/{meeting_id}/registrants", dependencies=[Depends(get_api_key)])

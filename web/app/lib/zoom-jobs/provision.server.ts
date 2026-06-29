@@ -1,7 +1,7 @@
-import { createHash, randomBytes } from 'node:crypto'
-
 import { adminClient } from '@/lib/supabase/adminClient'
+import { releaseZoomClassLock, tryAcquireZoomClassLock } from '@/lib/zoom-jobs/lock.server'
 import { zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
+import { hashZlrToken, newZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
 
 type ClassRow = {
   id: string
@@ -57,6 +57,8 @@ type ProvisionClassResult = {
   registrantsUpdated: number
   registrantsRemoved: number
   registrantsSkipped: number
+  skipped?: boolean
+  skipReason?: string
   error?: string
 }
 
@@ -80,11 +82,6 @@ const toDisplayName = (profile: Pick<ProfileRow, 'firstname' | 'surname'>) => {
 }
 
 const normalizeEmail = (value: string | null) => (value ?? '').trim().toLowerCase()
-
-const randomToken = () => randomBytes(24).toString('base64url')
-
-const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
-
 const buildTopic = (classRow: ClassRow) => {
   const workshopName = classRow.workshop?.description?.trim() || 'SummerLunch+ Class'
   const starts = new Date(classRow.starts_at)
@@ -328,7 +325,6 @@ const ensureMeetingForClass = async ({
     .maybeSingle<ExistingMeeting>()
 
   if (existingError) throw new Error(existingError.message)
-
   if (
     existingMeeting?.status === 'created' &&
     existingMeeting.zoom_meeting_id &&
@@ -523,7 +519,7 @@ const ensureRegistrantsForClass = async ({
       email: identity.email,
     })
 
-    const tokenHash = sha256(randomToken())
+    const tokenHash = hashZlrToken(newZlrToken())
     const { error: upsertError } = await adminClient.from('class_zoom_registrant').upsert(
       {
         class_id: classRow.id,
@@ -550,6 +546,21 @@ const ensureRegistrantsForClass = async ({
 }
 
 export const provisionClassById = async (classId: string, options: ProvisionOptions = {}): Promise<ProvisionClassResult> => {
+  const lockAcquired = await tryAcquireZoomClassLock(classId)
+  if (!lockAcquired) {
+    return {
+      classId,
+      attendanceRowsEnsured: 0,
+      meetingCreated: false,
+      meetingRecreated: false,
+      registrantsCreated: 0,
+      registrantsUpdated: 0,
+      registrantsRemoved: 0,
+      registrantsSkipped: 0,
+      skipped: true,
+      skipReason: 'lock_not_acquired',
+    }
+  }
   const { data: classRowRaw, error: classError } = await adminClient
     .from('class')
     .select('id, workshop_id, starts_at, ends_at, workshop:workshop_id ( description )')
@@ -613,6 +624,8 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       registrantsSkipped: 0,
       error: error instanceof Error ? error.message : 'Unknown provisioning error',
     }
+  } finally {
+    await releaseZoomClassLock(classId)
   }
 }
 

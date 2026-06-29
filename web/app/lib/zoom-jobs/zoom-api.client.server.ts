@@ -14,16 +14,16 @@ type ZoomCreateMeetingRequest = {
   host_zoom_user_email?: string
 }
 
-type ZoomCreateMeetingResponse = {
-  id: number
-  uuid: string
-  join_url: string
-}
-
 type ZoomUpdateMeetingRequest = {
   topic: string
   start_time: string
   duration: number
+}
+
+type ZoomCreateMeetingResponse = {
+  id: number
+  uuid: string
+  join_url: string
 }
 
 export class ZoomApiError extends Error {
@@ -55,7 +55,15 @@ const parsePayload = async (response: Response) => {
   return response.text().catch(() => null)
 }
 
-const requestJson = async <T>({ method, path, body }: { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; path: string; body?: unknown }): Promise<T> => {
+const requestJson = async <T>({
+  method,
+  path,
+  body,
+}: {
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  path: string
+  body?: unknown
+}): Promise<T> => {
   const { endpoint, apiKey } = getConfig()
   const response = await fetch(`${endpoint}${path}`, {
     method,
