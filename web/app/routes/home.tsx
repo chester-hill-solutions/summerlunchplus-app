@@ -9,6 +9,7 @@ import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
 import { normalizeEmail } from '@/lib/email-domain'
+import { hashZlrToken, newZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
 import {
   Table,
   TableBody,
@@ -73,7 +74,8 @@ type LoaderData = {
   classesByWorkshop: Record<string, ClassRow[]>
   attendanceByClass: Record<string, AttendanceRow[]>
   nextClass:
-    | {
+      | {
+        classId: string
         workshopId: string
         workshopLabel: string
         starts_at: string
@@ -272,6 +274,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const nextClass = nextClassCandidate?.workshop_id
     ? {
+        classId: nextClassCandidate.id,
         workshopId: nextClassCandidate.workshop_id,
         workshopLabel: workshopsById[nextClassCandidate.workshop_id]?.description ?? 'Workshop',
         starts_at: nextClassCandidate.starts_at,
@@ -298,6 +301,79 @@ export async function action({ request }: Route.ActionArgs) {
   const family = await resolveFamilyGraph(supabase, auth.user.id)
   const formData = await request.formData()
   const intent = String(formData.get('intent') ?? '')
+
+  if (intent === 'join-class') {
+    const classId = String(formData.get('class_id') ?? '')
+    if (!classId) return { error: 'Class is required.' } satisfies ActionData
+
+    const { data: classRow, error: classError } = await supabase
+      .from('class')
+      .select('id, workshop_id, starts_at, ends_at')
+      .eq('id', classId)
+      .maybeSingle()
+
+    if (classError || !classRow?.id || !classRow.workshop_id) {
+      return { error: classError?.message ?? 'Class not found.' } satisfies ActionData
+    }
+
+    const { data: enrollments, error: enrollmentError } = await supabase
+      .from('workshop_enrollment')
+      .select('profile_id')
+      .eq('workshop_id', classRow.workshop_id)
+      .eq('status', 'approved')
+      .in('profile_id', family.familyProfileIds)
+
+    if (enrollmentError) return { error: enrollmentError.message } satisfies ActionData
+    const approvedProfileIds = new Set(
+      (enrollments ?? []).map(enrollment => enrollment.profile_id).filter((id): id is string => Boolean(id))
+    )
+    if (!approvedProfileIds.size) {
+      return { error: 'Your family is not approved for this class.' } satisfies ActionData
+    }
+
+    const profilePriority: string[] = []
+    const primaryChildId = family.profileRole === 'guardian' ? (family.primaryChildByGuardian.get(family.profileId) ?? null) : null
+    if (primaryChildId) profilePriority.push(primaryChildId)
+    for (const child of family.children) profilePriority.push(child.id)
+    for (const guardian of family.guardians) profilePriority.push(guardian.id)
+    if (family.profileId) profilePriority.push(family.profileId)
+
+    const orderedProfileIds = Array.from(new Set(profilePriority)).filter(profileId => approvedProfileIds.has(profileId))
+
+    if (!orderedProfileIds.length) {
+      return { error: 'No eligible family member found for this class.' } satisfies ActionData
+    }
+
+    const { data: registrants, error: registrantError } = await adminClient
+      .from('class_zoom_registrant')
+      .select('id, profile_id')
+      .eq('class_id', classId)
+      .in('profile_id', orderedProfileIds)
+
+    if (registrantError) return { error: registrantError.message } satisfies ActionData
+    if (!registrants?.length) {
+      return { error: 'Join link is not ready yet. Please try again in a few minutes.' } satisfies ActionData
+    }
+
+    const priorityIndex = new Map(orderedProfileIds.map((profileId, index) => [profileId, index]))
+    const registrant = [...registrants].sort((left, right) => {
+      const leftRank = priorityIndex.get(left.profile_id) ?? Number.MAX_SAFE_INTEGER
+      const rightRank = priorityIndex.get(right.profile_id) ?? Number.MAX_SAFE_INTEGER
+      return leftRank - rightRank
+    })[0]
+
+    const token = newZlrToken()
+    const tokenHash = hashZlrToken(token)
+    const expiresAt = new Date(new Date(classRow.ends_at).getTime() + 15 * 60_000).toISOString()
+    const { error: tokenError } = await adminClient
+      .from('class_zoom_registrant')
+      .update({ zlr_token_hash: tokenHash, zlr_expires_at: expiresAt })
+      .eq('id', registrant.id)
+
+    if (tokenError) return { error: tokenError.message } satisfies ActionData
+
+    throw redirect(`/zlr/${token}`)
+  }
 
   if (family.profileRole !== 'guardian') {
     return { error: 'Only guardians can manage family membership.' } satisfies ActionData
@@ -614,6 +690,11 @@ export default function Home() {
               <p className="text-sm text-muted-foreground">
                 {formatDateTime(nextClass.starts_at)} - {formatDateTime(nextClass.ends_at)}
               </p>
+              <Form method="post" className="mt-3">
+                <input type="hidden" name="intent" value="join-class" />
+                <input type="hidden" name="class_id" value={nextClass.classId} />
+                <Button type="submit" disabled={mutationLocked}>JOIN CLASS</Button>
+              </Form>
             </section>
           ) : null}
 
