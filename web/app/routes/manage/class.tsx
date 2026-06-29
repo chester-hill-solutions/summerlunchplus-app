@@ -1,10 +1,22 @@
+import { Form, useActionData, useNavigation } from 'react-router'
+
+import { Button } from '@/components/ui/button'
+import { requireAuth } from '@/lib/auth.server'
+import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
+import { runZoomJobs } from '@/lib/zoom-jobs/runner.server'
 import type { Route } from './+types/class'
 import TableDisplay from './table-display'
 import { createTableAction } from './table-actions.server'
 import { createTableLoader } from './table-loader'
 
 const baseLoader = createTableLoader('class')
+const baseAction = createTableAction('class')
+
+type ActionData = {
+  zoomRunSuccess?: string
+  zoomRunError?: string
+}
 
 type ClassRow = Record<string, unknown> & {
   id?: string
@@ -161,8 +173,55 @@ export async function loader(args: Route.LoaderArgs) {
   }
 }
 
-export const action = createTableAction('class')
+export async function action(args: Route.ActionArgs) {
+  const formData = await args.request.clone().formData()
+  const intent = String(formData.get('intent') ?? '')
+
+  if (intent === 'run-zoom-jobs') {
+    const auth = await requireAuth(args.request)
+    if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    try {
+      const appOrigin = new URL(args.request.url).origin
+      await runZoomJobs({ appOrigin, runId: `manual-ui-${Date.now().toString(36)}` })
+      return { zoomRunSuccess: 'Zoom provisioning sequence started and completed for this run.' } satisfies ActionData
+    } catch (error) {
+      return {
+        zoomRunError: error instanceof Error ? error.message : 'Failed to run Zoom jobs.',
+      } satisfies ActionData
+    }
+  }
+
+  return baseAction(args)
+}
 
 export default function ClassTablePage() {
-  return <TableDisplay />
+  const actionData = useActionData<ActionData>()
+  const navigation = useNavigation()
+  const isRunningZoomJobs =
+    navigation.state === 'submitting' &&
+    navigation.formData?.get('intent') === 'run-zoom-jobs'
+
+  return (
+    <TableDisplay
+      headerActions={
+        <div className="flex items-center gap-3">
+          <Form method="post">
+            <input type="hidden" name="intent" value="run-zoom-jobs" />
+            <Button type="submit" disabled={isRunningZoomJobs}>
+              {isRunningZoomJobs ? 'Running Zoom jobs...' : 'Run Zoom provisioning now'}
+            </Button>
+          </Form>
+          {actionData?.zoomRunSuccess ? (
+            <p className="text-sm text-emerald-700">{actionData.zoomRunSuccess}</p>
+          ) : null}
+          {actionData?.zoomRunError ? (
+            <p className="text-sm text-destructive">{actionData.zoomRunError}</p>
+          ) : null}
+        </div>
+      }
+    />
+  )
 }
