@@ -40,6 +40,7 @@ export const manageSections: ManageNavSection[] = [
     defaultCollapsed: false,
     items: [
       { to: '/manage/zoom-connect-test', label: 'Zoom connect test', description: 'Test the configured zoom-api /zoom/connect endpoint.' },
+      { to: '/manage/zoom-reset', label: 'Zoom reset', description: 'Dry-run or execute Zoom/attendance reset and deprovision meetings.' },
       { to: '/manage/zoom-host', label: 'Zoom hosts', description: 'Zoom host roster and assignment priority.' },
       { to: '/manage/class-zoom-meeting', label: 'Class Zoom meetings', description: 'Zoom meeting records mapped to classes.' },
       { to: '/manage/class-zoom-registrant', label: 'Class Zoom registrants', description: 'Per-student registrant records and join link metadata.' },
