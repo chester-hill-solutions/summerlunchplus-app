@@ -19,6 +19,7 @@ type ProfileRow = {
   firstname: string | null
   surname: string | null
   email: string | null
+  phone: string | null
 }
 
 type GuardianChildEdge = {
@@ -107,7 +108,7 @@ const buildProfileSplitData = async (enrollmentProfileIds: string[]) => {
   for (const chunk of chunkArray(Array.from(allRelatedIds), 250)) {
     const { data, error } = await adminClient
       .from('profile')
-      .select('id, role, firstname, surname, email')
+      .select('id, role, firstname, surname, email, phone')
       .in('id', chunk)
 
     if (error) {
@@ -147,9 +148,11 @@ const buildProfileSplitData = async (enrollmentProfileIds: string[]) => {
       student_firstname: normalizeText(studentProfile?.firstname),
       student_lastname: normalizeText(studentProfile?.surname),
       student_email: normalizeText(studentProfile?.email),
+      student_phone: normalizeText(studentProfile?.phone),
       guardian_firstname: normalizeText(guardianProfile?.firstname),
       guardian_lastname: normalizeText(guardianProfile?.surname),
       guardian_email: normalizeText(guardianProfile?.email),
+      guardian_phone: normalizeText(guardianProfile?.phone),
     })
   }
 
