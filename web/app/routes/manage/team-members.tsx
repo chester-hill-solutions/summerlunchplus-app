@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useFetcher } from 'react-router'
 
 import { Button } from '@/components/ui/button'
@@ -24,9 +25,9 @@ const TEAM_ROLES = ['instructor', 'staff', 'manager', 'admin'] as const
 const TEAM_ROLE_SET = new Set<string>(TEAM_ROLES)
 
 const allowedInviteRolesFor = (role: string | null | undefined): string[] => {
-  if (role === 'admin') return ['instructor', 'staff', 'manager', 'admin']
-  if (role === 'manager') return ['instructor', 'staff']
-  if (role === 'staff') return ['instructor']
+  if (role === 'admin') return ['staff', 'manager', 'admin']
+  if (role === 'manager') return ['staff']
+  if (role === 'staff') return ['staff']
   return []
 }
 
@@ -137,8 +138,14 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function TeamMembersTablePage({ loaderData }: Route.ComponentProps) {
   const fetcher = useFetcher<ActionData>()
-  const isSubmitting = fetcher.state === 'submitting'
+  const formRef = useRef<HTMLFormElement | null>(null)
+  const isSubmitting = fetcher.state !== 'idle'
   const canInvite = loaderData.allowedInviteRoles.length > 0
+
+  useEffect(() => {
+    if (!fetcher.data?.success || fetcher.state !== 'idle') return
+    formRef.current?.reset()
+  }, [fetcher.data, fetcher.state])
 
   return (
     <div className="space-y-6">
@@ -151,7 +158,7 @@ export default function TeamMembersTablePage({ loaderData }: Route.ComponentProp
         </p>
 
         {canInvite ? (
-          <fetcher.Form method="post" className="mt-4 grid gap-4 md:grid-cols-[1fr_200px_auto]">
+          <fetcher.Form ref={formRef} method="post" className="mt-4 grid gap-4 md:grid-cols-[1fr_200px_auto]">
             <div className="grid gap-2">
               <Label htmlFor="team-invite-email">Gmail</Label>
               <Input
@@ -170,7 +177,7 @@ export default function TeamMembersTablePage({ loaderData }: Route.ComponentProp
                 id="team-invite-role"
                 name="role"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                defaultValue={loaderData.allowedInviteRoles[0] ?? 'instructor'}
+                defaultValue={loaderData.allowedInviteRoles[0] ?? 'staff'}
                 required
               >
                 {loaderData.allowedInviteRoles.map(role => (
@@ -181,7 +188,11 @@ export default function TeamMembersTablePage({ loaderData }: Route.ComponentProp
               </select>
             </div>
             <div className="flex items-end">
-              <Button type="submit" disabled={isSubmitting}>
+              <Button
+                type="submit"
+                disabled={isSubmitting}
+                className="cursor-pointer disabled:pointer-events-auto disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+              >
                 {isSubmitting ? 'Sending...' : 'Send invite'}
               </Button>
             </div>
