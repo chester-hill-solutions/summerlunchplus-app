@@ -619,20 +619,97 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
       )
 
       const presentProfileIds = new Set<string>()
+      const matchSummary = {
+        matchedByStudentEmail: 0,
+        matchedByGuardianFallback: 0,
+        ambiguousGuardianMatches: 0,
+        unmatchedParticipantEmails: 0,
+      }
 
       if (participantEmails.length) {
-        const { data: profiles } = await adminClient.from('profile').select('id, email').in('email', participantEmails)
+        const { data: profiles, error: profileError } = await adminClient
+          .from('profile')
+          .select('id, email, role')
+          .in('email', participantEmails)
+        if (profileError) throw new Error(profileError.message)
 
+        const profilesByEmail = new Map<string, Array<{ id: string; role: string | null }>>()
         for (const profile of profiles ?? []) {
-          if (approvedProfileIds.size > 0 && !approvedProfileIds.has(profile.id)) continue
-          presentProfileIds.add(profile.id)
-          const { error: attendanceUpdateError } = await adminClient
-            .from('class_attendance')
-            .update({ status: 'present', recorded_by: null })
-            .eq('class_id', meeting.class_id)
-            .eq('profile_id', profile.id)
-          if (attendanceUpdateError) {
-            throw new Error(attendanceUpdateError.message)
+          const email = normalizeEmail(profile.email)
+          if (!email) continue
+          const bucket = profilesByEmail.get(email) ?? []
+          bucket.push({ id: profile.id, role: profile.role ?? null })
+          profilesByEmail.set(email, bucket)
+        }
+
+        const guardianProfileIds = Array.from(
+          new Set(
+            (profiles ?? [])
+              .filter(profile => normalizeEmail(profile.email) && profile.role === 'guardian')
+              .map(profile => profile.id)
+          )
+        )
+
+        const childIdsByGuardian = new Map<string, Set<string>>()
+        if (guardianProfileIds.length && approvedProfileIds.size > 0) {
+          const { data: edges, error: edgeError } = await adminClient
+            .from('person_guardian_child')
+            .select('guardian_profile_id, child_profile_id')
+            .in('guardian_profile_id', guardianProfileIds)
+            .in('child_profile_id', Array.from(approvedProfileIds))
+          if (edgeError) throw new Error(edgeError.message)
+
+          for (const edge of edges ?? []) {
+            const bucket = childIdsByGuardian.get(edge.guardian_profile_id) ?? new Set<string>()
+            bucket.add(edge.child_profile_id)
+            childIdsByGuardian.set(edge.guardian_profile_id, bucket)
+          }
+        }
+
+        for (const participantEmail of participantEmails) {
+          const matchedProfiles = profilesByEmail.get(participantEmail) ?? []
+          const directStudentIds = matchedProfiles
+            .map(profile => profile.id)
+            .filter(profileId => approvedProfileIds.has(profileId))
+
+          if (directStudentIds.length) {
+            for (const profileId of directStudentIds) {
+              presentProfileIds.add(profileId)
+            }
+            matchSummary.matchedByStudentEmail += directStudentIds.length
+            continue
+          }
+
+          const guardianChildCandidates = new Set<string>()
+          for (const profile of matchedProfiles) {
+            if (profile.role !== 'guardian') continue
+            const childIds = childIdsByGuardian.get(profile.id) ?? new Set<string>()
+            for (const childId of childIds) {
+              guardianChildCandidates.add(childId)
+            }
+          }
+
+          if (guardianChildCandidates.size === 1) {
+            const [childId] = Array.from(guardianChildCandidates)
+            presentProfileIds.add(childId)
+            matchSummary.matchedByGuardianFallback += 1
+          } else if (guardianChildCandidates.size > 1) {
+            matchSummary.ambiguousGuardianMatches += 1
+          } else {
+            matchSummary.unmatchedParticipantEmails += 1
+          }
+        }
+
+        if (presentProfileIds.size) {
+          for (const profileChunk of chunkArray(Array.from(presentProfileIds), IN_CLAUSE_BATCH_SIZE)) {
+            const { error: attendanceUpdateError } = await adminClient
+              .from('class_attendance')
+              .update({ status: 'present', recorded_by: null })
+              .eq('class_id', meeting.class_id)
+              .in('profile_id', profileChunk)
+            if (attendanceUpdateError) {
+              throw new Error(attendanceUpdateError.message)
+            }
           }
         }
       }
@@ -669,6 +746,10 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
             attempt_count: attemptCount,
             participant_count: rows.length,
             deduplicated_from: participants.length,
+            matched_by_student_email: matchSummary.matchedByStudentEmail,
+            matched_by_guardian_fallback: matchSummary.matchedByGuardianFallback,
+            ambiguous_guardian_matches: matchSummary.ambiguousGuardianMatches,
+            unmatched_participant_emails: matchSummary.unmatchedParticipantEmails,
           },
         })
         .eq('id', syncRun.id)

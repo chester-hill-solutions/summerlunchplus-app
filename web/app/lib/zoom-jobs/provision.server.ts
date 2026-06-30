@@ -133,7 +133,13 @@ const getApprovedProfilesForClass = async (classRow: ClassRow) => {
   return (profiles ?? []) as ProfileRow[]
 }
 
-const getGuardianFallbackIdentities = async (profileIds: string[]) => {
+const getGuardianFallbackIdentities = async ({
+  profileIds,
+  profilesById,
+}: {
+  profileIds: string[]
+  profilesById: Map<string, ProfileRow>
+}) => {
   if (!profileIds.length) return new Map<string, ProfileIdentity>()
 
   const { data: edges, error: edgeError } = await adminClient
@@ -168,20 +174,25 @@ const getGuardianFallbackIdentities = async (profileIds: string[]) => {
     if (fallbackByChild.has(edge.child_profile_id)) continue
     const guardian = guardianById.get(edge.guardian_profile_id)
     if (!guardian) continue
+    const child = profilesById.get(edge.child_profile_id)
     const email = normalizeEmail(guardian.email)
     if (!email) continue
 
-    const fullName = toDisplayName(guardian)
-    const [firstName, ...rest] = fullName ? fullName.split(' ') : ['Family']
-    const lastName = rest.join(' ').trim() || 'Contact'
+    const childFullName = child ? toDisplayName(child) : ''
+    const [firstName, ...rest] = childFullName ? childFullName.split(' ') : ['Student']
+    const lastName = rest.join(' ').trim() || 'Participant'
+    const profileUpdatedAt = [child?.updated_at ?? null, guardian.updated_at ?? null]
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? null
 
     fallbackByChild.set(edge.child_profile_id, {
       profileId: edge.child_profile_id,
-      firstName: firstName || 'Family',
+      firstName: firstName || 'Student',
       lastName,
       email,
       source: 'guardian_fallback',
-      profileUpdatedAt: guardian.updated_at ?? null,
+      profileUpdatedAt,
     })
   }
 
@@ -191,6 +202,7 @@ const getGuardianFallbackIdentities = async (profileIds: string[]) => {
 const buildIdentities = async (profiles: ProfileRow[]) => {
   const identities = new Map<string, ProfileIdentity>()
   const missingEmailProfileIds: string[] = []
+  const profilesById = new Map(profiles.map(profile => [profile.id, profile]))
 
   for (const profile of profiles) {
     const email = normalizeEmail(profile.email)
@@ -213,7 +225,10 @@ const buildIdentities = async (profiles: ProfileRow[]) => {
     })
   }
 
-  const fallbacks = await getGuardianFallbackIdentities(missingEmailProfileIds)
+  const fallbacks = await getGuardianFallbackIdentities({
+    profileIds: missingEmailProfileIds,
+    profilesById,
+  })
   for (const [profileId, identity] of fallbacks.entries()) {
     identities.set(profileId, identity)
   }
