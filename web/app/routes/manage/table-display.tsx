@@ -17,7 +17,7 @@ type TimestampLabelValue = {
 
 type EditorField = {
   label?: string
-  type: 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'foreign_key' | 'enum' | 'json'
+  type: 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'foreign_key' | 'enum' | 'json' | 'timezone'
   required?: boolean
   nullable?: boolean
   enumValues?: string[]
@@ -157,6 +157,7 @@ const FILTER_EMPTY_LABEL = '(empty)'
 const ENABLE_PERSISTED_COLUMN_WIDTHS = false
 const WORKSHOP_ENRICHMENT_BATCH_SIZE = 40
 const WORKSHOP_ENRICHMENT_FILTER_BOOTSTRAP_BATCH_SIZE = 200
+const FALLBACK_TIMEZONES = ['America/New_York', 'America/Toronto', 'America/Vancouver', 'UTC'] as const
 const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
   'riding_display',
   'geo_locations_display',
@@ -712,6 +713,20 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
   const debugPerf = searchParams.get('debugPerf') === '1'
+  const timezoneOptions = useMemo(() => {
+    const supported =
+      typeof Intl.supportedValuesOf === 'function'
+        ? Intl.supportedValuesOf('timeZone')
+        : ([] as string[])
+    const merged = new Set<string>([...supported, ...FALLBACK_TIMEZONES])
+    return Array.from(merged)
+      .sort((left, right) => left.localeCompare(right))
+      .map(value => ({
+        value,
+        label: value,
+        keywords: [value, value.replaceAll('_', ' '), value.replaceAll('/', ' ')],
+      }))
+  }, [])
 
   const rowsWithEnrichment = useMemo(() => {
     return rows.map(row => {
@@ -1813,6 +1828,35 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
               setValues(prev => ({ ...prev, [fieldName]: nextValue }))
             }}
             placeholder="Search..."
+          />
+        </label>
+      )
+    }
+
+    if (field.type === 'timezone') {
+      const timezoneFieldOptions = timezoneOptions.some(option => option.value === value)
+        ? timezoneOptions
+        : value
+          ? [
+              {
+                value,
+                label: value,
+                keywords: [value, value.replaceAll('_', ' '), value.replaceAll('/', ' ')],
+              },
+              ...timezoneOptions,
+            ]
+          : timezoneOptions
+
+      return (
+        <label key={fieldName} className="grid gap-1 text-xs">
+          <span className="text-muted-foreground">{commonLabel}</span>
+          <Combobox
+            value={value}
+            options={timezoneFieldOptions}
+            onChange={nextValue => {
+              setValues(prev => ({ ...prev, [fieldName]: nextValue }))
+            }}
+            placeholder="Select timezone..."
           />
         </label>
       )

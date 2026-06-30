@@ -9,7 +9,16 @@ export type LookupMapping = {
   format?: 'profile_display' | 'semester_range' | 'semester_title' | 'class_display' | 'submission_display'
 }
 
-export type EditorFieldType = 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'foreign_key' | 'enum' | 'json'
+export type EditorFieldType =
+  | 'text'
+  | 'number'
+  | 'boolean'
+  | 'date'
+  | 'datetime'
+  | 'foreign_key'
+  | 'enum'
+  | 'json'
+  | 'timezone'
 
 export type EditorFieldConfig = {
   label?: string
@@ -108,7 +117,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
       fields: {
         semester_id: { label: 'Semester', type: 'foreign_key', required: true, foreignKeyTable: 'semester' },
         description: { label: 'Description', type: 'text', nullable: true },
-        timezone: { label: 'Timezone', type: 'text', required: true },
+        timezone: { label: 'Timezone', type: 'timezone', required: true },
         enrollment_open_at: { label: 'Enrollment Open', type: 'datetime', nullable: true },
         enrollment_close_at: { label: 'Enrollment Close', type: 'datetime', nullable: true },
         capacity: { label: 'Capacity', type: 'number', required: true },
