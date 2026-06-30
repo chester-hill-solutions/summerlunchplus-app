@@ -33,6 +33,20 @@ const REMINDER_WINDOW_MINUTES = 2 * 60
 const RUNNING_SYNC_TIMEOUT_MINUTES = 20
 const FAILED_SYNC_RETRY_COOLDOWN_MINUTES = 10
 
+const backfillPastAttendanceRows = async () => {
+  const { error } = await adminClient.rpc('ensure_class_attendance_rows')
+  if (error) {
+    return {
+      ok: false,
+      error: error.message,
+    }
+  }
+
+  return {
+    ok: true,
+  }
+}
+
 const provisionWithin36h = async ({ now }: { now: Date }) => {
   const classIds = await getClassesInWindow({
     startsAt: toIso(now),
@@ -519,6 +533,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     now: now.toISOString(),
   })
 
+  const attendanceRowBackfill = await backfillPastAttendanceRows()
   const within36h = await provisionWithin36h({ now })
   const hostReconciliation = await reconcileHostOverlaps({ now })
   const reminders = await sendReminderCoverage({ now, appOrigin })
@@ -532,6 +547,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     reminderScanned: reminders.scannedClasses,
     attendanceScanned: attendanceSync.scanned,
     attendanceFailed: attendanceSync.failed,
+    attendanceRowBackfillOk: attendanceRowBackfill.ok,
   })
 
   return {
@@ -541,6 +557,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     provisionWithin36h: within36h,
     hostOverlapReconciliation: hostReconciliation,
     reminderCoverage: reminders,
+    attendanceRowBackfill,
     attendanceSync,
   }
 }
