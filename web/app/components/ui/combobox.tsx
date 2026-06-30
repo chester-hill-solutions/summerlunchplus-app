@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 type ComboboxOption = {
   value: string
   label: string
+  keywords?: string[]
 }
 
 type ComboboxProps = {
@@ -22,6 +23,20 @@ const optionLabel = (options: ComboboxOption[], value: string) => {
   return option?.label ?? ''
 }
 
+const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+const fuzzyMatch = (option: ComboboxOption, query: string) => {
+  const trimmed = query.trim().toLowerCase()
+  if (!trimmed) return true
+
+  const haystacks = [option.label, option.value, ...(option.keywords ?? [])].map(value => value.toLowerCase())
+  if (haystacks.some(value => value.includes(trimmed))) return true
+
+  const normalizedQuery = normalize(trimmed)
+  if (!normalizedQuery) return true
+  return haystacks.some(value => normalize(value).includes(normalizedQuery))
+}
+
 export function Combobox({ value, onChange, options, placeholder, disabled }: ComboboxProps) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -31,9 +46,8 @@ export function Combobox({ value, onChange, options, placeholder, disabled }: Co
   }, [value, options])
 
   const filteredOptions = useMemo(() => {
-    const lower = query.toLowerCase()
     return options
-      .filter(option => option.label.toLowerCase().includes(lower))
+      .filter(option => fuzzyMatch(option, query))
       .slice(0, 50)
   }, [options, query])
 

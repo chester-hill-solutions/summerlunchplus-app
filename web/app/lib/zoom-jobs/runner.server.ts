@@ -1,9 +1,8 @@
-import { sendTransactionalEmail } from '@/lib/email/send-email.server'
+import { sendTemplateEmail } from '@/lib/email/send-email.server'
 import { resolveFamilyContactsByProfileId } from '@/lib/family.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { getClassesInWindow, provisionClassById } from '@/lib/zoom-jobs/provision.server'
 import { ZoomApiError, zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
-import { hashZlrToken, newZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
 
 const toIso = (date: Date) => date.toISOString()
 
@@ -12,6 +11,22 @@ const addMinutes = (date: Date, minutes: number) => new Date(date.getTime() + mi
 const normalizeEmail = (value: string | null) => (value ?? '').trim().toLowerCase()
 
 const ensureOrigin = (origin: string) => origin.replace(/\/+$/, '')
+
+const resolvePublicAppOrigin = (fallbackOrigin: string) => {
+  const railwayPublicDomain = (process.env.RAILWAY_PUBLIC_DOMAIN ?? '').trim()
+  const railwayPublicOrigin = railwayPublicDomain ? `https://${railwayPublicDomain}` : ''
+  const explicitOrigin = [
+    process.env.PUBLIC_APP_ORIGIN,
+    process.env.APP_BASE_URL,
+    railwayPublicOrigin,
+    process.env.VITE_PUBLIC_APP_ORIGIN,
+    process.env.VITE_APP_ORIGIN,
+  ]
+    .map(value => (value ?? '').trim())
+    .find(Boolean)
+    ?? ''
+  return ensureOrigin(explicitOrigin || fallbackOrigin)
+}
 
 const REPROVISION_HORIZON_MINUTES = 36 * 60
 const REMINDER_WINDOW_MINUTES = 2 * 60
@@ -185,6 +200,7 @@ const resolveReminderRecipientEmail = async (profileId: string) => {
 }
 
 const sendReminderCoverage = async ({ now, appOrigin }: { now: Date; appOrigin: string }) => {
+  const publicAppOrigin = resolvePublicAppOrigin(appOrigin)
   const reminderStart = now
   const reminderEnd = addMinutes(now, REMINDER_WINDOW_MINUTES)
   const classIds = await getClassesInWindow({ startsAt: toIso(reminderStart), endsAt: toIso(reminderEnd) })
@@ -224,14 +240,16 @@ const sendReminderCoverage = async ({ now, appOrigin }: { now: Date; appOrigin: 
         continue
       }
 
-      const token = newZlrToken()
-      const tokenHash = hashZlrToken(token)
-      const expiresAt = addMinutes(new Date(classRow.starts_at), 240).toISOString()
-      const joinLink = `${ensureOrigin(appOrigin)}/zlr/${token}`
+      const loginUrl = `${publicAppOrigin}/login?next=${encodeURIComponent('/home')}`
 
+      const workshopRelation = Array.isArray(classRow.workshop) ? classRow.workshop[0] : classRow.workshop
       const workshopName =
-        typeof classRow.workshop === 'object' && classRow.workshop && 'description' in classRow.workshop
-          ? (classRow.workshop.description ?? 'your class')
+        workshopRelation &&
+        typeof workshopRelation === 'object' &&
+        'description' in workshopRelation &&
+        typeof workshopRelation.description === 'string' &&
+        workshopRelation.description.trim()
+          ? workshopRelation.description.trim()
           : 'your class'
 
       const startsAtText = new Intl.DateTimeFormat('en-US', {
@@ -239,18 +257,17 @@ const sendReminderCoverage = async ({ now, appOrigin }: { now: Date; appOrigin: 
         timeStyle: 'short',
       }).format(new Date(classRow.starts_at))
 
-      const result = await sendTransactionalEmail({
+      const templateData: { workshopName: string; classStartsAt: string; loginUrl: string } = {
+        workshopName,
+        classStartsAt: startsAtText,
+        loginUrl,
+      }
+
+      const result = await sendTemplateEmail({
         toEmail: email,
-        subject: `Reminder: ${workshopName} starts soon`,
-        text: `Your class starts at ${startsAtText}. Join here: ${joinLink}`,
-        html: `<p>Your class starts at <strong>${startsAtText}</strong>.</p><p><a href="${joinLink}">Join class</a></p>`,
-        templateKey: 'class_reminder_zoom_link_v1',
-        templateData: {
-          classId,
-          startsAt: classRow.starts_at,
-          joinLink,
-        },
-        eventKey: `class:${classId}:registrant:${registrant.id}:reminder_v2:${tokenHash.slice(0, 12)}`,
+        templateKey: 'class_reminder_login_v1',
+        templateData,
+        eventKey: `class:${classId}:registrant:${registrant.id}:reminder_login_v1`,
         profileId: registrant.profile_id,
       })
 
@@ -258,8 +275,6 @@ const sendReminderCoverage = async ({ now, appOrigin }: { now: Date; appOrigin: 
         const { error: tokenUpdateError } = await adminClient
           .from('class_zoom_registrant')
           .update({
-            zlr_token_hash: tokenHash,
-            zlr_expires_at: expiresAt,
             last_sent_at: new Date().toISOString(),
           })
           .eq('id', registrant.id)

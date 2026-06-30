@@ -1,8 +1,9 @@
 import os
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.auth import get_api_key
 from app.cache import _participants_cache, _past_meetings_cache, get_cached, set_cached
@@ -26,12 +27,27 @@ def _zoom() -> ZoomClient:
     )
 
 
+def _to_utc_z(start_time: str) -> str:
+    raw = start_time.strip()
+    if not raw:
+        raise ValueError("start_time is required.")
+
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("start_time must be a valid ISO 8601 datetime.") from exc
+
+    if parsed.tzinfo is None:
+        raise ValueError("start_time must include a timezone offset or 'Z'.")
+
+    return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 class CreateMeetingRequest(BaseModel):
     topic: str = Field(description="Meeting title.", examples=["Summer Lunch Program - Week 3"])
     start_time: str = Field(
-        description="Meeting start time in ISO 8601 format. Include a timezone offset or 'Z' for UTC — "
-        "e.g. '2026-06-15T10:00:00Z' (for UTC) or '2026-06-15T10:00:00-04:00' (for EDT). "
-        "Bare datetimes with no offset are interpreted as UTC by Zoom.",
+        description="Meeting start time in ISO 8601 format with timezone offset or 'Z'. "
+        "The API normalizes this to UTC ('Z') before sending to Zoom.",
         examples=["2026-06-15T10:00:00Z"],
     )
     duration: int = Field(description="Meeting duration in minutes.", examples=[60])
@@ -54,6 +70,11 @@ class CreateMeetingRequest(BaseModel):
             raise ValueError("Provide only one of host_zoom_user_id or host_zoom_user_email.")
         return self
 
+    @field_validator("start_time")
+    @classmethod
+    def validate_start_time(cls, value: str) -> str:
+        return _to_utc_z(value)
+
 
 class CreateMeetingResponse(BaseModel):
     id: int = Field(description="Numeric meeting ID used for registration.")
@@ -64,10 +85,16 @@ class CreateMeetingResponse(BaseModel):
 class UpdateMeetingRequest(BaseModel):
     topic: str = Field(description="Meeting title.", examples=["Summer Lunch Program - Week 3"])
     start_time: str = Field(
-        description="Meeting start time in ISO 8601 format. Include a timezone offset or 'Z' for UTC.",
+        description="Meeting start time in ISO 8601 format with timezone offset or 'Z'. "
+        "The API normalizes this to UTC ('Z') before sending to Zoom.",
         examples=["2026-06-15T10:00:00Z"],
     )
     duration: int = Field(description="Meeting duration in minutes.", examples=[60])
+
+    @field_validator("start_time")
+    @classmethod
+    def validate_start_time(cls, value: str) -> str:
+        return _to_utc_z(value)
 
 
 class ZoomUserSummary(BaseModel):

@@ -1,5 +1,4 @@
-import { Form, Link, redirect, useActionData, useFetcher, useLoaderData, useNavigation, useSearchParams } from 'react-router'
-import { useEffect } from 'react'
+import { Form, Link, redirect, useActionData, useLoaderData, useNavigation, useSearchParams } from 'react-router'
 
 import type { Route } from './+types/home'
 import { Button } from '@/components/ui/button'
@@ -10,7 +9,6 @@ import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
 import { normalizeEmail } from '@/lib/email-domain'
-import { hashZlrToken, newZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
 import {
   Table,
   TableBody,
@@ -59,12 +57,6 @@ type ClassRow = {
   ends_at: string
 }
 
-type AttendanceRow = {
-  class_id: string
-  profile_id: string
-  status: 'unknown' | 'present' | 'absent' | null
-}
-
 type LoaderData = {
   family: Awaited<ReturnType<typeof resolveFamilyGraph>>
   familyProfiles: FamilyProfile[]
@@ -73,7 +65,7 @@ type LoaderData = {
   semesterById: Record<string, { id: string; name: string | null; starts_at: string; ends_at: string }>
   enrollments: EnrollmentRow[]
   classesByWorkshop: Record<string, ClassRow[]>
-  attendanceByClass: Record<string, AttendanceRow[]>
+  joinUrlByClass: Record<string, string>
   nextClass:
       | {
         classId: string
@@ -89,7 +81,6 @@ type ActionData = {
   ok?: boolean
   error?: string
   message?: string
-  joinClassPath?: string
 }
 
 const formatDate = (value: string) =>
@@ -253,22 +244,61 @@ export async function loader({ request }: Route.LoaderArgs) {
   }, {})
 
   const classIds = classes.map(classRow => classRow.id)
-  const { data: attendanceRaw } = classIds.length
+
+  const { data: registrantsRaw } = classIds.length
     ? await adminClient
-        .from('class_attendance')
-        .select('class_id, profile_id, status')
+        .from('class_zoom_registrant')
+        .select('class_id, profile_id, zoom_join_url')
         .in('class_id', classIds)
         .in('profile_id', family.familyProfileIds)
     : { data: [] }
-  const attendanceByClass = ((attendanceRaw ?? []) as AttendanceRow[]).reduce<Record<string, AttendanceRow[]>>((acc, row) => {
+
+  const registrantsByClass = ((registrantsRaw ?? []) as Array<{ class_id: string; profile_id: string; zoom_join_url: string | null }>).reduce<
+    Record<string, Array<{ profile_id: string; zoom_join_url: string | null }>>
+  >((acc, row) => {
     if (!acc[row.class_id]) acc[row.class_id] = []
-    acc[row.class_id].push(row)
+    acc[row.class_id].push({ profile_id: row.profile_id, zoom_join_url: row.zoom_join_url })
     return acc
   }, {})
 
   const approvedWorkshopIds = new Set(
     enrollments.filter(enrollment => enrollment.status === 'approved').map(enrollment => enrollment.workshop_id).filter(Boolean)
   )
+
+  const approvedProfileIdsByWorkshopId = enrollments.reduce<Record<string, Set<string>>>((acc, enrollment) => {
+    if (enrollment.status !== 'approved' || !enrollment.workshop_id || !enrollment.profile_id) return acc
+    if (!acc[enrollment.workshop_id]) acc[enrollment.workshop_id] = new Set<string>()
+    acc[enrollment.workshop_id].add(enrollment.profile_id)
+    return acc
+  }, {})
+
+  const profilePriority: string[] = []
+  const primaryChildId = family.profileRole === 'guardian' ? (family.primaryChildByGuardian.get(family.profileId) ?? null) : null
+  if (primaryChildId) profilePriority.push(primaryChildId)
+  for (const child of family.children) profilePriority.push(child.id)
+  for (const guardian of family.guardians) profilePriority.push(guardian.id)
+  if (family.profileId) profilePriority.push(family.profileId)
+
+  const orderedFamilyProfileIds = Array.from(new Set(profilePriority))
+
+  const joinUrlByClass = classes.reduce<Record<string, string>>((acc, classRow) => {
+    if (!classRow.workshop_id) return acc
+    const approvedSet = approvedProfileIdsByWorkshopId[classRow.workshop_id]
+    if (!approvedSet?.size) return acc
+
+    const registrants = registrantsByClass[classRow.id] ?? []
+    const registrantByProfileId = new Map(registrants.map(registrant => [registrant.profile_id, registrant]))
+
+    for (const profileId of orderedFamilyProfileIds) {
+      if (!approvedSet.has(profileId)) continue
+      const joinUrl = registrantByProfileId.get(profileId)?.zoom_join_url?.trim() ?? ''
+      if (!joinUrl) continue
+      acc[classRow.id] = joinUrl
+      break
+    }
+
+    return acc
+  }, {})
 
   const nextClassCandidate = classes
     .filter(classRow => Boolean(classRow.workshop_id) && approvedWorkshopIds.has(classRow.workshop_id) && new Date(classRow.starts_at).getTime() > now)
@@ -292,7 +322,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     semesterById,
     enrollments,
     classesByWorkshop,
-    attendanceByClass,
+    joinUrlByClass,
     nextClass,
   } satisfies LoaderData
 }
@@ -303,79 +333,6 @@ export async function action({ request }: Route.ActionArgs) {
   const family = await resolveFamilyGraph(supabase, auth.user.id)
   const formData = await request.formData()
   const intent = String(formData.get('intent') ?? '')
-
-  if (intent === 'join-class') {
-    const classId = String(formData.get('class_id') ?? '')
-    if (!classId) return { error: 'Class is required.' } satisfies ActionData
-
-    const { data: classRow, error: classError } = await supabase
-      .from('class')
-      .select('id, workshop_id, starts_at, ends_at')
-      .eq('id', classId)
-      .maybeSingle()
-
-    if (classError || !classRow?.id || !classRow.workshop_id) {
-      return { error: classError?.message ?? 'Class not found.' } satisfies ActionData
-    }
-
-    const { data: enrollments, error: enrollmentError } = await supabase
-      .from('workshop_enrollment')
-      .select('profile_id')
-      .eq('workshop_id', classRow.workshop_id)
-      .eq('status', 'approved')
-      .in('profile_id', family.familyProfileIds)
-
-    if (enrollmentError) return { error: enrollmentError.message } satisfies ActionData
-    const approvedProfileIds = new Set(
-      (enrollments ?? []).map(enrollment => enrollment.profile_id).filter((id): id is string => Boolean(id))
-    )
-    if (!approvedProfileIds.size) {
-      return { error: 'Your family is not approved for this class.' } satisfies ActionData
-    }
-
-    const profilePriority: string[] = []
-    const primaryChildId = family.profileRole === 'guardian' ? (family.primaryChildByGuardian.get(family.profileId) ?? null) : null
-    if (primaryChildId) profilePriority.push(primaryChildId)
-    for (const child of family.children) profilePriority.push(child.id)
-    for (const guardian of family.guardians) profilePriority.push(guardian.id)
-    if (family.profileId) profilePriority.push(family.profileId)
-
-    const orderedProfileIds = Array.from(new Set(profilePriority)).filter(profileId => approvedProfileIds.has(profileId))
-
-    if (!orderedProfileIds.length) {
-      return { error: 'No eligible family member found for this class.' } satisfies ActionData
-    }
-
-    const { data: registrants, error: registrantError } = await adminClient
-      .from('class_zoom_registrant')
-      .select('id, profile_id')
-      .eq('class_id', classId)
-      .in('profile_id', orderedProfileIds)
-
-    if (registrantError) return { error: registrantError.message } satisfies ActionData
-    if (!registrants?.length) {
-      return { error: 'Join link is not ready yet. Please try again in a few minutes.' } satisfies ActionData
-    }
-
-    const priorityIndex = new Map(orderedProfileIds.map((profileId, index) => [profileId, index]))
-    const registrant = [...registrants].sort((left, right) => {
-      const leftRank = priorityIndex.get(left.profile_id) ?? Number.MAX_SAFE_INTEGER
-      const rightRank = priorityIndex.get(right.profile_id) ?? Number.MAX_SAFE_INTEGER
-      return leftRank - rightRank
-    })[0]
-
-    const token = newZlrToken()
-    const tokenHash = hashZlrToken(token)
-    const expiresAt = new Date(new Date(classRow.ends_at).getTime() + 15 * 60_000).toISOString()
-    const { error: tokenError } = await adminClient
-      .from('class_zoom_registrant')
-      .update({ zlr_token_hash: tokenHash, zlr_expires_at: expiresAt })
-      .eq('id', registrant.id)
-
-    if (tokenError) return { error: tokenError.message } satisfies ActionData
-
-    return { ok: true, joinClassPath: `/zlr/${token}` } satisfies ActionData
-  }
 
   if (family.profileRole !== 'guardian') {
     return { error: 'Only guardians can manage family membership.' } satisfies ActionData
@@ -583,18 +540,16 @@ export default function Home() {
     semesterById,
     enrollments,
     classesByWorkshop,
-    attendanceByClass,
+    joinUrlByClass,
     nextClass,
   } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
-  const joinClassFetcher = useFetcher<ActionData>()
   const navigation = useNavigation()
   const [searchParams] = useSearchParams()
   const mutationLocked =
     navigation.state !== 'idle' &&
     typeof navigation.formMethod === 'string' &&
     navigation.formMethod.toLowerCase() === 'post'
-  const joinClassRunning = joinClassFetcher.state !== 'idle'
   const tab = searchParams.get('tab') === 'manage-family' ? 'manage-family' : 'family-workshops'
   const enrollmentStatusParam = searchParams.get('enrollmentStatus')
   const enrollmentStatus = enrollmentStatusParam === 'error' ? 'error' : enrollmentStatusParam === 'success' ? 'success' : null
@@ -615,28 +570,17 @@ export default function Home() {
 
   const workshopEnrollments = enrollments.filter(enrollment => Boolean(enrollment.workshop_id))
   const hasWorkshopEnrollment = workshopEnrollments.length > 0
+  const hasPendingWorkshopEnrollment = workshopEnrollments.some(enrollment => enrollment.status === 'pending')
+  const shouldShowEnrollmentBanner =
+    enrollmentStatus === 'error' || (enrollmentStatus === 'success' && hasPendingWorkshopEnrollment)
 
-  const upcomingAndPastByWorkshop = Object.fromEntries(
+  const joinableByWorkshop = Object.fromEntries(
     Object.entries(classesByWorkshop).map(([workshopId, classes]) => {
       const now = Date.now()
-      const upcoming = classes.filter(classRow => new Date(classRow.starts_at).getTime() > now)
-      const past = classes.filter(classRow => new Date(classRow.starts_at).getTime() <= now)
-      return [workshopId, { upcoming, past }]
+      const joinable = classes.filter(classRow => new Date(classRow.ends_at).getTime() + 15 * 60_000 > now)
+      return [workshopId, joinable]
     })
-  ) as Record<string, { upcoming: ClassRow[]; past: ClassRow[] }>
-
-  const attendanceSummaryForWorkshop = (workshopId: string) => {
-    const classes = classesByWorkshop[workshopId] ?? []
-    let present = 0
-    let absent = 0
-    for (const classRow of classes) {
-      for (const record of attendanceByClass[classRow.id] ?? []) {
-        if (record.status === 'present') present += 1
-        if (record.status === 'absent') absent += 1
-      }
-    }
-    return { present, absent }
-  }
+  ) as Record<string, ClassRow[]>
 
   const sortedWorkshopEnrollments = workshopEnrollments
     .slice()
@@ -644,8 +588,8 @@ export default function Home() {
       const workshopIdA = a.workshop_id as string
       const workshopIdB = b.workshop_id as string
 
-      const nextA = upcomingAndPastByWorkshop[workshopIdA]?.upcoming?.[0]?.starts_at ?? null
-      const nextB = upcomingAndPastByWorkshop[workshopIdB]?.upcoming?.[0]?.starts_at ?? null
+      const nextA = joinableByWorkshop[workshopIdA]?.[0]?.starts_at ?? null
+      const nextB = joinableByWorkshop[workshopIdB]?.[0]?.starts_at ?? null
 
       if (nextA && nextB) {
         const byNextClass = new Date(nextA).getTime() - new Date(nextB).getTime()
@@ -658,11 +602,6 @@ export default function Home() {
 
       return a.requested_at.localeCompare(b.requested_at)
     })
-
-  useEffect(() => {
-    if (!joinClassFetcher.data?.joinClassPath) return
-    window.location.assign(joinClassFetcher.data.joinClassPath)
-  }, [joinClassFetcher.data?.joinClassPath])
 
   return (
     <main className="w-full px-6 pt-6 pb-10 space-y-6">
@@ -683,13 +622,12 @@ export default function Home() {
         <p className="text-sm text-muted-foreground">{subtitle}</p>
       </header>
 
-      {enrollmentMessage && enrollmentStatus ? (
+      {enrollmentMessage && enrollmentStatus && shouldShowEnrollmentBanner ? (
         <p className={enrollmentStatus === 'error' ? 'text-sm text-destructive' : 'text-sm text-emerald-600'}>{enrollmentMessage}</p>
       ) : null}
 
       {actionData?.error ? <p className="text-sm text-destructive">{actionData.error}</p> : null}
       {actionData?.ok && actionData.message ? <p className="text-sm text-emerald-600">{actionData.message}</p> : null}
-      {joinClassFetcher.data?.error ? <p className="text-sm text-destructive">{joinClassFetcher.data.error}</p> : null}
 
       {tab === 'family-workshops' ? (
         <div className="space-y-6">
@@ -729,9 +667,8 @@ export default function Home() {
                       const workshopId = enrollment.workshop_id as string
                       const workshop = workshopsById[workshopId]
                       const semester = semesterById[enrollment.semester_id]
-                      const upcoming = upcomingAndPastByWorkshop[workshopId]?.upcoming ?? []
+                      const upcoming = joinableByWorkshop[workshopId] ?? []
                       const next = upcoming[0]
-                      const attendance = attendanceSummaryForWorkshop(workshopId)
 
                       return (
                         <TableRow key={enrollment.id}>
@@ -754,7 +691,7 @@ export default function Home() {
                             )}
                           </TableCell>
                           <TableCell>{next ? formatDateTime(next.starts_at) : 'No upcoming class'}</TableCell>
-                          <TableCell>{`Present: ${attendance.present} · Absent: ${attendance.absent}`}</TableCell>
+                          <TableCell>{next ? 'Join from class list below' : '-'}</TableCell>
                         </TableRow>
                       )
                     })}
@@ -765,7 +702,7 @@ export default function Home() {
               {sortedWorkshopEnrollments.map(enrollment => {
                 const workshopId = enrollment.workshop_id as string
                 const workshop = workshopsById[workshopId]
-                const grouped = upcomingAndPastByWorkshop[workshopId] ?? { upcoming: [], past: [] }
+                const joinable = joinableByWorkshop[workshopId] ?? []
 
                 return (
                   <section key={`detail-${enrollment.id}`} id={`workshop-${workshopId}`} className="rounded-lg border bg-card p-4 shadow-sm space-y-4">
@@ -773,7 +710,7 @@ export default function Home() {
 
                     <div className="space-y-2">
                       <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Upcoming classes</h4>
-                      {grouped.upcoming.length === 0 ? (
+                      {joinable.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No upcoming classes scheduled.</p>
                       ) : (
                         <Table>
@@ -785,18 +722,24 @@ export default function Home() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {grouped.upcoming.map(classRow => (
+                            {joinable.map(classRow => (
                               <TableRow key={classRow.id}>
                                 <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
                                 <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
                                 <TableCell>
-                                  <joinClassFetcher.Form method="post" className="inline-flex">
-                                    <input type="hidden" name="intent" value="join-class" />
-                                    <input type="hidden" name="class_id" value={classRow.id} />
-                                    <Button type="submit" size="sm" disabled={mutationLocked || joinClassRunning}>
-                                      {joinClassRunning ? 'Preparing...' : 'JOIN CLASS'}
-                                    </Button>
-                                  </joinClassFetcher.Form>
+                                  {enrollment.status === 'approved' ? (
+                                    joinUrlByClass[classRow.id] ? (
+                                      <Button asChild size="sm">
+                                        <a href={joinUrlByClass[classRow.id]} target="_blank" rel="noreferrer">
+                                          JOIN CLASS
+                                        </a>
+                                      </Button>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">Link pending</span>
+                                    )
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">Available after acceptance</span>
+                                  )}
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -805,40 +748,6 @@ export default function Home() {
                       )}
                     </div>
 
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Past classes & attendance</h4>
-                      {grouped.past.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No past classes yet.</p>
-                      ) : (
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Class date</TableHead>
-                              <TableHead>Present</TableHead>
-                              <TableHead>Absent</TableHead>
-                              <TableHead>Unknown</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {grouped.past.map(classRow => {
-                              const records = attendanceByClass[classRow.id] ?? []
-                              const present = records.filter(record => record.status === 'present').length
-                              const absent = records.filter(record => record.status === 'absent').length
-                              const unknown = records.filter(record => record.status === 'unknown' || record.status === null).length
-
-                              return (
-                                <TableRow key={classRow.id}>
-                                  <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
-                                  <TableCell>{present}</TableCell>
-                                  <TableCell>{absent}</TableCell>
-                                  <TableCell>{unknown}</TableCell>
-                                </TableRow>
-                              )
-                            })}
-                          </TableBody>
-                        </Table>
-                      )}
-                    </div>
                   </section>
                 )
               })}

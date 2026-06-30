@@ -225,7 +225,7 @@ def test_create_meeting_success(client, headers):
     with patch("app.zoom.httpx.post", side_effect=[ok(TOKEN_RESP), ok(CREATE_RESP)]) as mock_post:
         resp = client.post("/meetings", headers=headers, json={
             "topic": "Q2 Review",
-            "start_time": "2026-06-01T14:00:00",
+            "start_time": "2026-06-01T14:00:00Z",
             "duration": 60,
         })
     assert resp.status_code == 200
@@ -243,7 +243,7 @@ def test_create_meeting_with_host_success(client, headers):
     with patch("app.zoom.httpx.post", side_effect=[ok(TOKEN_RESP), ok(CREATE_RESP)]) as mock_post:
         resp = client.post("/meetings", headers=headers, json={
             "topic": "Q2 Review",
-            "start_time": "2026-06-01T14:00:00",
+            "start_time": "2026-06-01T14:00:00Z",
             "duration": 60,
             "host_zoom_user_email": "host1@example.com",
         })
@@ -255,7 +255,7 @@ def test_create_meeting_with_host_success(client, headers):
 def test_create_meeting_rejects_multiple_host_selectors(client, headers):
     resp = client.post("/meetings", headers=headers, json={
         "topic": "Q2 Review",
-        "start_time": "2026-06-01T14:00:00",
+        "start_time": "2026-06-01T14:00:00Z",
         "duration": 60,
         "host_zoom_user_id": "host-123",
         "host_zoom_user_email": "host1@example.com",
@@ -270,9 +270,30 @@ def test_create_meeting_missing_fields(client, headers):
 
 def test_create_meeting_missing_auth(client):
     resp = client.post("/meetings", json={
-        "topic": "Test", "start_time": "2026-06-01T14:00:00", "duration": 60,
+        "topic": "Test", "start_time": "2026-06-01T14:00:00Z", "duration": 60,
     })
     assert resp.status_code == 401
+
+
+def test_create_meeting_normalizes_offset_to_utc(client, headers):
+    with patch("app.zoom.httpx.post", side_effect=[ok(TOKEN_RESP), ok(CREATE_RESP)]) as mock_post:
+        resp = client.post("/meetings", headers=headers, json={
+            "topic": "Q2 Review",
+            "start_time": "2026-06-01T14:00:00-04:00",
+            "duration": 60,
+        })
+    assert resp.status_code == 200
+    payload = mock_post.call_args_list[1].kwargs["json"]
+    assert payload["start_time"] == "2026-06-01T18:00:00Z"
+
+
+def test_create_meeting_rejects_naive_start_time(client, headers):
+    resp = client.post("/meetings", headers=headers, json={
+        "topic": "Q2 Review",
+        "start_time": "2026-06-01T14:00:00",
+        "duration": 60,
+    })
+    assert resp.status_code == 422
 
 
 def test_update_meeting_success(client, headers):
@@ -280,7 +301,7 @@ def test_update_meeting_success(client, headers):
          patch("app.zoom.httpx.patch", return_value=ok({})) as mock_patch:
         resp = client.patch("/meetings/99999", headers=headers, json={
             "topic": "Q2 Review Updated",
-            "start_time": "2026-06-01T15:00:00",
+            "start_time": "2026-06-01T15:00:00Z",
             "duration": 90,
         })
     assert resp.status_code == 200
@@ -293,10 +314,19 @@ def test_update_meeting_success(client, headers):
 def test_update_meeting_missing_auth(client):
     resp = client.patch("/meetings/99999", json={
         "topic": "Q2 Review Updated",
-        "start_time": "2026-06-01T15:00:00",
+        "start_time": "2026-06-01T15:00:00Z",
         "duration": 90,
     })
     assert resp.status_code == 401
+
+
+def test_update_meeting_rejects_naive_start_time(client, headers):
+    resp = client.patch("/meetings/99999", headers=headers, json={
+        "topic": "Q2 Review Updated",
+        "start_time": "2026-06-01T15:00:00",
+        "duration": 90,
+    })
+    assert resp.status_code == 422
 
 
 def test_delete_meeting_success(client, headers):

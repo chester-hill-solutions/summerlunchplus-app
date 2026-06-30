@@ -9,8 +9,14 @@ import { createTableLoader } from './table-loader'
 const baseLoader = createTableLoader('class-attendance')
 
 type AttendanceRow = Record<string, unknown> & {
+  class_id?: string
+  profile_id?: string
   class_display?: { label?: unknown; timestamp?: unknown } | string | null
   profile_display?: string | null
+  workshop_description?: string
+  class_starts_at?: string | null
+  class_ends_at?: string | null
+  zoom_join_url?: string | null
 }
 
 const timestampMs = (value: unknown) => {
@@ -27,11 +33,38 @@ const classLabel = (value: AttendanceRow['class_display']) => {
 
 const profileLabel = (value: unknown) => (typeof value === 'string' ? value : '')
 
+const classTimestamp = (value: AttendanceRow['class_display']) => {
+  if (value && typeof value === 'object' && typeof value.timestamp === 'string') {
+    return value.timestamp
+  }
+  return null
+}
+
 export async function loader(args: Route.LoaderArgs) {
   const auth = await requireAuth(args.request)
   const base = await baseLoader(args)
+  const rows = (base.rows ?? []) as AttendanceRow[]
 
-  const sortedRows = [...((base.rows ?? []) as AttendanceRow[])].sort((left, right) => {
+  const classIds = Array.from(new Set(rows.map(row => (typeof row.class_id === 'string' ? row.class_id : '')).filter(Boolean)))
+  const { supabase } = createClient(args.request)
+  const [{ data: classRows }, { data: registrantRows }] = await Promise.all([
+    classIds.length
+      ? supabase.from('class').select('id, ends_at').in('id', classIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; ends_at: string | null }> }),
+    classIds.length
+      ? supabase
+          .from('class_zoom_registrant')
+          .select('class_id, profile_id, zoom_join_url')
+          .in('class_id', classIds)
+      : Promise.resolve({ data: [] as Array<{ class_id: string; profile_id: string; zoom_join_url: string | null }> }),
+  ])
+
+  const classById = new Map((classRows ?? []).map(row => [row.id, row]))
+  const joinUrlByClassProfile = new Map(
+    (registrantRows ?? []).map(row => [`${row.class_id}::${row.profile_id}`, row.zoom_join_url ?? null])
+  )
+
+  const sortedRows = [...rows].sort((left, right) => {
     const leftClassTimestamp =
       left.class_display && typeof left.class_display === 'object'
         ? timestampMs(left.class_display.timestamp)
@@ -57,7 +90,44 @@ export async function loader(args: Route.LoaderArgs) {
 
   return {
     ...base,
-    rows: sortedRows,
+    rows: sortedRows.map(row => ({
+      ...row,
+      workshop_description: classLabel(row.class_display) || 'Workshop',
+      class_starts_at: classTimestamp(row.class_display),
+      class_ends_at:
+        typeof row.class_id === 'string' && classById.get(row.class_id)?.ends_at
+          ? classById.get(row.class_id)?.ends_at ?? null
+          : null,
+      zoom_join_url:
+        typeof row.class_id === 'string' && typeof row.profile_id === 'string'
+          ? (joinUrlByClassProfile.get(`${row.class_id}::${row.profile_id}`) ?? null)
+          : null,
+    })),
+    columns: [
+      'workshop_description',
+      'class_starts_at',
+      'class_ends_at',
+      'profile_display',
+      'zoom_join_url',
+      'status',
+      'photo_status',
+      'camera_on',
+      'recorded_by_email',
+      'created_at',
+    ],
+    columnMeta: {
+      ...(base.columnMeta ?? {}),
+      workshop_description: { label: 'Workshop', filterable: true },
+      class_starts_at: { label: 'Class date/time', filterable: true },
+      class_ends_at: { label: 'Class ends', filterable: true },
+      profile_display: { label: 'Profile', filterable: true },
+      zoom_join_url: { label: 'Student join link', filterable: false, truncate: true },
+      status: { label: 'Status', filterable: true },
+      photo_status: { label: 'Photo status', filterable: true },
+      camera_on: { label: 'Camera on', filterable: true },
+      recorded_by_email: { label: 'Recorded by', filterable: true },
+      created_at: { label: 'Created', filterable: true },
+    },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
   }
 }

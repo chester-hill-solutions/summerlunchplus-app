@@ -50,6 +50,6 @@ Schedules are declared in `scheduler/crontab`.
 
 Current jobs:
 
-- `*/15 * * * *` -> `/internal/zoom-jobs/run`
-- `*/10 * * * *` -> `/internal/export-jobs/run`
+- `*/5 * * * *` -> `/internal/zoom-jobs/run`
+- `*/5 * * * *` -> `/internal/export-jobs/run`
 - `5 * * * *` -> `/internal/export-jobs/cleanup`

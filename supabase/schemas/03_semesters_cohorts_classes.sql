@@ -42,6 +42,7 @@ create table public.workshop (
   id uuid primary key default gen_random_uuid(),
   semester_id uuid not null references public.semester (id) on update cascade on delete restrict,
   description text,
+  timezone text not null default 'America/New_York',
   enrollment_open_at timestamptz,
   enrollment_close_at timestamptz,
   capacity integer not null default 0,

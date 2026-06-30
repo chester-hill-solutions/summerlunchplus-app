@@ -150,7 +150,7 @@ values
   (
     '30000000-0000-0000-0000-000000000001'::uuid,
     null,
-    'guardian1@example.com',
+    'guardian1@chsolutions.ca',
     'password',
     true,
     '198.51.100.11'::inet,
@@ -165,7 +165,7 @@ values
   (
     '30000000-0000-0000-0000-000000000002'::uuid,
     null,
-    'seed.guardian.discrepancy@example.com',
+    'seed.guardian.discrepancy@chsolutions.ca',
     'password',
     false,
     '203.0.113.200'::inet,
@@ -212,7 +212,7 @@ insert into public.email_message (
 values
   (
     '40000000-0000-0000-0000-000000000001'::uuid,
-    'guardian1@example.com',
+    'guardian1@chsolutions.ca',
     'Enrollment request received',
     'family_enrollment_pending_v1',
     '{"workshopName":"Current Session A - Enrollment Triage"}'::jsonb,
@@ -231,7 +231,7 @@ values
   ),
   (
     '40000000-0000-0000-0000-000000000002'::uuid,
-    'guardian1@example.com',
+    'guardian1@chsolutions.ca',
     'Enrollment approved',
     'family_enrollment_accepted_v1',
     '{"workshopName":"Current Session A - Enrollment Triage"}'::jsonb,
@@ -250,7 +250,7 @@ values
   ),
   (
     '40000000-0000-0000-0000-000000000003'::uuid,
-    'seed.guardian.discrepancy@example.com',
+    'seed.guardian.discrepancy@chsolutions.ca',
     'Suspicious activity detected',
     'security_alert_v1',
     '{"signal":"network_distance_anomaly"}'::jsonb,
@@ -269,7 +269,7 @@ values
   ),
   (
     '40000000-0000-0000-0000-000000000004'::uuid,
-    'family+skipped@example.com',
+    'family+skipped@chsolutions.ca',
     'Duplicate message skipped',
     'family_enrollment_accepted_v1',
     '{"reason":"duplicate event key"}'::jsonb,

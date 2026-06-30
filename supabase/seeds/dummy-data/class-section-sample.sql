@@ -34,7 +34,7 @@ values
     'student',
     'Avery',
     'Lee',
-    'avery.lee@example.com',
+    'avery.lee@chsolutions.ca',
     '4165550103',
     '91 Rylander Blvd',
     'Toronto',

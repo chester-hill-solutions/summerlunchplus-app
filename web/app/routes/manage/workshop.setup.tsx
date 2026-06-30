@@ -10,6 +10,7 @@ import {
 } from '@/lib/datetime'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
+import { Combobox } from '@/components/ui/combobox'
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 
@@ -42,6 +43,33 @@ type ActionData = {
   values?: Record<string, string>
   byday?: ByDay[]
 }
+
+const FALLBACK_TIMEZONES = [
+  'America/New_York',
+  'America/Toronto',
+  'America/Vancouver',
+  'America/Edmonton',
+  'America/Winnipeg',
+  'America/Halifax',
+  'America/St_Johns',
+  'America/Los_Angeles',
+  'America/Chicago',
+  'America/Denver',
+  'America/Phoenix',
+  'America/Anchorage',
+  'Pacific/Honolulu',
+  'UTC',
+] as const
+
+const splitTimezone = (value: string) => {
+  const [region, ...rest] = value.split('/')
+  return {
+    region: region ?? '',
+    location: rest.join('/'),
+  }
+}
+
+const formatTimezoneLocation = (value: string) => value.replaceAll('_', ' ').replaceAll('/', ' / ')
 
 const safeReturnTo = (input: string | null) => {
   if (!input) return DEFAULT_RETURN_TO
@@ -134,6 +162,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const values: Record<string, string> = {
     semester_id: String(formData.get('semester_id') ?? ''),
     description: String(formData.get('description') ?? ''),
+    timezone: String(formData.get('timezone') ?? '').trim(),
     enrollment_open_at: String(formData.get('enrollment_open_at') ?? ''),
     enrollment_close_at: String(formData.get('enrollment_close_at') ?? ''),
     capacity: String(formData.get('capacity') ?? ''),
@@ -150,6 +179,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (!values.semester_id) {
     return { error: 'Semester is required.', values, byday } satisfies ActionData
+  }
+
+  if (!values.timezone) {
+    return { error: 'Workshop timezone is required.', values, byday } satisfies ActionData
   }
 
   const capacity = toInteger(values.capacity)
@@ -207,6 +240,7 @@ export async function action({ request }: ActionFunctionArgs) {
     .insert({
       semester_id: values.semester_id,
       description: values.description || null,
+      timezone: values.timezone,
       enrollment_open_at: enrollmentOpenAt ? enrollmentOpenAt.toISOString() : null,
       enrollment_close_at: enrollmentCloseAt ? enrollmentCloseAt.toISOString() : null,
       capacity,
@@ -238,6 +272,9 @@ export default function WorkshopSetupPage() {
   const actionData = useActionData<typeof action>() as ActionData | undefined
   const navigation = useNavigation()
   const [timezone, setTimezone] = useState('Local time')
+  const [workshopTimezone, setWorkshopTimezone] = useState(actionData?.values?.timezone ?? '')
+  const [timezoneRegion, setTimezoneRegion] = useState('')
+  const [timezoneLocation, setTimezoneLocation] = useState('')
   const isSubmitting = navigation.state === 'submitting'
 
   const [selectedSemesterId, setSelectedSemesterId] = useState(actionData?.values?.semester_id ?? '')
@@ -259,8 +296,79 @@ export default function WorkshopSetupPage() {
   const [classEndValue, setClassEndValue] = useState(actionData?.values?.class_end_at ?? '')
 
   useEffect(() => {
-    setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local time')
+    const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local time'
+    setTimezone(systemTimezone)
+    setWorkshopTimezone(current => current || (systemTimezone === 'Local time' ? 'America/New_York' : systemTimezone))
   }, [])
+
+  useEffect(() => {
+    if (!workshopTimezone) {
+      setTimezoneRegion('')
+      setTimezoneLocation('')
+      return
+    }
+    const { region, location } = splitTimezone(workshopTimezone)
+    setTimezoneRegion(region)
+    setTimezoneLocation(location)
+  }, [workshopTimezone])
+
+  const timezoneValues = useMemo(() => {
+    const supported =
+      typeof Intl.supportedValuesOf === 'function'
+        ? Intl.supportedValuesOf('timeZone')
+        : ([] as string[])
+    const merged = new Set<string>([...supported, ...FALLBACK_TIMEZONES, workshopTimezone].filter(Boolean))
+    return Array.from(merged)
+      .sort((left, right) => left.localeCompare(right))
+  }, [workshopTimezone])
+
+  const timezoneRegions = useMemo(() => {
+    const regions = new Set(timezoneValues.map(value => splitTimezone(value).region).filter(Boolean))
+    return Array.from(regions)
+      .sort((left, right) => left.localeCompare(right))
+      .map(region => ({
+        value: region,
+        label: region,
+        keywords: [region],
+      }))
+  }, [timezoneValues])
+
+  const timezoneLocations = useMemo(() => {
+    if (!timezoneRegion) return [] as Array<{ value: string; label: string; keywords: string[] }>
+    const locations = timezoneValues
+      .map(value => splitTimezone(value))
+      .filter(parts => parts.region === timezoneRegion && parts.location)
+      .map(parts => parts.location)
+    const deduped = Array.from(new Set(locations)).sort((left, right) => left.localeCompare(right))
+    return deduped.map(location => ({
+      value: location,
+      label: formatTimezoneLocation(location),
+      keywords: [location, location.replaceAll('_', ' '), location.replaceAll('/', ' ')],
+    }))
+  }, [timezoneRegion, timezoneValues])
+
+  const setRegion = (nextRegion: string) => {
+    setTimezoneRegion(nextRegion)
+    const firstLocation = timezoneValues
+      .map(value => splitTimezone(value))
+      .find(parts => parts.region === nextRegion && parts.location)?.location
+    if (firstLocation) {
+      setTimezoneLocation(firstLocation)
+      setWorkshopTimezone(`${nextRegion}/${firstLocation}`)
+      return
+    }
+    setTimezoneLocation('')
+    setWorkshopTimezone('')
+  }
+
+  const setLocation = (nextLocation: string) => {
+    setTimezoneLocation(nextLocation)
+    if (!timezoneRegion || !nextLocation) {
+      setWorkshopTimezone('')
+      return
+    }
+    setWorkshopTimezone(`${timezoneRegion}/${nextLocation}`)
+  }
 
   const onSemesterChange = (semesterId: string) => {
     setSelectedSemesterId(semesterId)
@@ -422,6 +530,7 @@ export default function WorkshopSetupPage() {
               {selectedSemester.description ? (
                 <p className="mt-1 text-xs text-muted-foreground">{selectedSemester.description}</p>
               ) : null}
+
               <dl className="mt-2 grid gap-1 text-xs text-muted-foreground md:grid-cols-2">
                 <div>
                   <dt className="font-medium text-foreground">Semester starts</dt>
@@ -442,13 +551,49 @@ export default function WorkshopSetupPage() {
               </dl>
             </div>
           ) : null}
+
+          <div className="grid gap-1 text-sm md:max-w-sm">
+            <span className="font-medium text-foreground">Workshop timezone</span>
+            <input type="hidden" name="timezone" value={workshopTimezone} />
+            <div className="grid gap-2 md:grid-cols-2">
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">Region</p>
+                <Combobox
+                  value={timezoneRegion}
+                  onChange={setRegion}
+                  options={timezoneRegions}
+                  placeholder="Search region..."
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">City / location</p>
+                <Combobox
+                  value={timezoneLocation}
+                  onChange={setLocation}
+                  options={timezoneLocations}
+                  placeholder={timezoneRegion ? 'Search city/location...' : 'Select region first'}
+                  disabled={!timezoneRegion}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Class schedule fields below use this timezone. Your current system timezone is {timezone}.
+            </p>
+            <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+              Tip: if you are unsure, look up your target city name and its IANA timezone identifier (for example
+              <span className="font-medium"> America/Toronto</span>).
+            </div>
+          </div>
         </section>
 
         <section className="space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Class schedule</h2>
+          <p className="text-xs text-muted-foreground">
+            Class schedule timezone: <span className="font-medium text-foreground">{workshopTimezone || 'Select timezone above'}</span>
+          </p>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="grid gap-1 text-sm">
-              <span>First class starts ({timezone})</span>
+              <span>First class starts ({workshopTimezone || 'Select timezone above'})</span>
               <input
                 name="class_start_at"
                 type="datetime-local"
@@ -460,7 +605,7 @@ export default function WorkshopSetupPage() {
             </label>
 
             <label className="grid gap-1 text-sm">
-              <span>First class ends ({timezone})</span>
+              <span>First class ends ({workshopTimezone || 'Select timezone above'})</span>
               <input
                 name="class_end_at"
                 type="datetime-local"
@@ -472,7 +617,7 @@ export default function WorkshopSetupPage() {
             </label>
 
             <label className="grid gap-1 text-sm">
-              <span>Repeat until ({timezone})</span>
+              <span>Repeat until ({workshopTimezone || 'Select timezone above'})</span>
               <input
                 name="until"
                 type="datetime-local"

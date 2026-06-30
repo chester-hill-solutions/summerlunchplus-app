@@ -99,6 +99,14 @@ const buildTopic = (classRow: ClassRow) => {
   return `${workshopName} - ${dateLabel}`
 }
 
+const toZoomUtcStartTime = (value: string) => {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error(`Invalid class start timestamp: ${value}`)
+  }
+  return date.toISOString().replace('.000Z', 'Z')
+}
+
 const getApprovedProfilesForClass = async (classRow: ClassRow) => {
   if (!classRow.workshop_id) return [] as ProfileRow[]
 
@@ -321,6 +329,7 @@ const ensureMeetingForClass = async ({
   excludedHostIds?: string[]
 }) => {
   const desiredTopic = buildTopic(classRow)
+  const zoomStartTime = toZoomUtcStartTime(classRow.starts_at)
   const durationMinutes = Math.max(
     1,
     Math.round((new Date(classRow.ends_at).getTime() - new Date(classRow.starts_at).getTime()) / 60000)
@@ -351,7 +360,7 @@ const ensureMeetingForClass = async ({
     ) {
       await zoomApiClient.updateMeeting(existingMeeting.zoom_meeting_id, {
         topic: desiredTopic,
-        start_time: classRow.starts_at,
+        start_time: zoomStartTime,
         duration: durationMinutes,
       })
 
@@ -392,7 +401,7 @@ const ensureMeetingForClass = async ({
 
   const createResp = await zoomApiClient.createMeeting({
     topic: desiredTopic,
-    start_time: classRow.starts_at,
+    start_time: zoomStartTime,
     duration: durationMinutes,
     ...(host.zoom_user_id ? { host_zoom_user_id: host.zoom_user_id } : {}),
     ...(!host.zoom_user_id && host.zoom_user_email ? { host_zoom_user_email: host.zoom_user_email } : {}),
