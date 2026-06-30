@@ -145,6 +145,10 @@ const FILTER_EMPTY_TOKEN = '__none__'
 const FILTER_POPOVER_WIDTH = 256
 const FILTER_POPOVER_MARGIN = 8
 const FILTER_POPOVER_ESTIMATED_HEIGHT = 340
+const HOVER_CARD_WIDTH_PX = 480
+const HOVER_CARD_MARGIN_PX = 8
+const HOVER_CARD_OFFSET_PX = 4
+const HOVER_CARD_ESTIMATED_HEIGHT_PX = 260
 const FILTER_LOAD_CHUNK_SIZE = 300
 const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
@@ -687,10 +691,18 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [columnMinWidths, setColumnMinWidths] = useState<Record<string, number>>({})
   const [resizeState, setResizeState] = useState<ResizeState | null>(null)
   const [pinnedHoverCardCellId, setPinnedHoverCardCellId] = useState<string | null>(null)
+  const [hoveredHoverCardCellId, setHoveredHoverCardCellId] = useState<string | null>(null)
+  const [activeHoverCard, setActiveHoverCard] = useState<{
+    cellId: string
+    data: Exclude<ReturnType<typeof hoverCardDataForCell>, null>
+  } | null>(null)
+  const [hoverCardPosition, setHoverCardPosition] = useState<{ top: number; left: number } | null>(null)
   const loadingEnrichmentProfileIdsRef = useRef<Set<string>>(new Set())
   const loadingDistrictRidingsRef = useRef<Set<string>>(new Set())
   const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const filterPopoverRef = useRef<HTMLDivElement | null>(null)
+  const hoverCardPopoverRef = useRef<HTMLDivElement | null>(null)
+  const hoverCardTriggerRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const filterCacheRef = useRef<Map<string, FilterOptionsCacheEntry>>(new Map())
   const filterCacheLruRef = useRef<string[]>([])
   const filterActiveRequestRef = useRef<Map<string, number>>(new Map())
@@ -882,6 +894,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       const target = event.target as HTMLElement | null
       const hovercardRoot = target?.closest('[data-hovercard-cell-id]') as HTMLElement | null
       if (hovercardRoot?.dataset.hovercardCellId === pinnedHoverCardCellId) return
+      if (hoverCardPopoverRef.current?.contains(target as Node)) return
       setPinnedHoverCardCellId(null)
     }
 
@@ -899,6 +912,62 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [pinnedHoverCardCellId])
+
+  const visibleHoverCardCellId = pinnedHoverCardCellId ?? hoveredHoverCardCellId
+
+  const updateHoverCardPosition = () => {
+    if (!visibleHoverCardCellId) {
+      setHoverCardPosition(null)
+      return
+    }
+
+    const triggerElement = hoverCardTriggerRefs.current[visibleHoverCardCellId]
+    if (!triggerElement) {
+      setHoverCardPosition(null)
+      return
+    }
+
+    const rect = triggerElement.getBoundingClientRect()
+    const popoverHeight = hoverCardPopoverRef.current?.offsetHeight ?? HOVER_CARD_ESTIMATED_HEIGHT_PX
+
+    const left = Math.max(
+      HOVER_CARD_MARGIN_PX,
+      Math.min(rect.left, window.innerWidth - HOVER_CARD_WIDTH_PX - HOVER_CARD_MARGIN_PX)
+    )
+
+    let top = rect.bottom + HOVER_CARD_OFFSET_PX
+    if (top + popoverHeight > window.innerHeight - HOVER_CARD_MARGIN_PX) {
+      top = rect.top - popoverHeight - HOVER_CARD_OFFSET_PX
+    }
+    if (top < HOVER_CARD_MARGIN_PX) {
+      top = HOVER_CARD_MARGIN_PX
+    }
+
+    setHoverCardPosition({ top, left })
+  }
+
+  useEffect(() => {
+    if (!visibleHoverCardCellId) {
+      setHoverCardPosition(null)
+      return
+    }
+
+    updateHoverCardPosition()
+
+    const onWindowChange = () => updateHoverCardPosition()
+    window.addEventListener('resize', onWindowChange)
+    window.addEventListener('scroll', onWindowChange, true)
+
+    return () => {
+      window.removeEventListener('resize', onWindowChange)
+      window.removeEventListener('scroll', onWindowChange, true)
+    }
+  }, [visibleHoverCardCellId])
+
+  useEffect(() => {
+    if (!visibleHoverCardCellId) return
+    updateHoverCardPosition()
+  }, [activeHoverCard, visibleHoverCardCellId])
 
   const syncSearch = (
     nextFilters: Record<string, string[]>,
@@ -2202,6 +2271,30 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                         )
                       }
 
+                      if (tableName === 'class' && column === 'sync_class') {
+                        const classId = typeof row.id === 'string' ? row.id : ''
+                        const isBusy = statusFetcher.state === 'submitting'
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="Run full sync for this class">
+                            <button
+                              type="button"
+                              disabled={!classId || isBusy}
+                              onClick={event => {
+                                event.stopPropagation()
+                                if (!classId) return
+                                const formData = new FormData()
+                                formData.set('intent', 'sync-class')
+                                formData.set('class_id', classId)
+                                statusFetcher.submit(formData, { method: 'post' })
+                              }}
+                              className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isBusy ? 'Syncing...' : 'Sync'}
+                            </button>
+                          </td>
+                        )
+                      }
+
                       const isFormNameLink = tableName === 'form' && column === 'name' && typeof row.id === 'string'
                       const isFormAnswersLink = tableName === 'form' && column === 'answers' && typeof row.id === 'string'
                       const personLink = personLinkForCell(tableName, column, row, `${location.pathname}${location.search}`)
@@ -2227,7 +2320,6 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           : cellValue
                       const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard)
                       const hoverCardCellId = `row-${absoluteRowIndex}-col-${column}`
-                      const isHoverCardPinned = pinnedHoverCardCellId === hoverCardCellId
 
                       const content = isFormNameLink ? (
                         <Link
@@ -2306,6 +2398,8 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                             if (selectedText) return
 
                             if (hoverCardData) {
+                              setActiveHoverCard({ cellId: hoverCardCellId, data: hoverCardData })
+                              setHoveredHoverCardCellId(hoverCardCellId)
                               setPinnedHoverCardCellId(prev => (prev === hoverCardCellId ? null : hoverCardCellId))
                               return
                             }
@@ -2321,79 +2415,23 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           }}
                         >
                           {hoverCardData ? (
-                            <div className="group/hovercard relative inline-block max-w-full" data-hovercard-cell-id={hoverCardCellId}>
+                            <div
+                              ref={element => {
+                                hoverCardTriggerRefs.current[hoverCardCellId] = element
+                              }}
+                              className="inline-block max-w-full"
+                              data-hovercard-cell-id={hoverCardCellId}
+                              onMouseEnter={() => {
+                                if (pinnedHoverCardCellId && pinnedHoverCardCellId !== hoverCardCellId) return
+                                setHoveredHoverCardCellId(hoverCardCellId)
+                                setActiveHoverCard({ cellId: hoverCardCellId, data: hoverCardData })
+                              }}
+                              onMouseLeave={() => {
+                                if (pinnedHoverCardCellId === hoverCardCellId) return
+                                setHoveredHoverCardCellId(prev => (prev === hoverCardCellId ? null : prev))
+                              }}
+                            >
                               {content}
-                              <div
-                                className={`absolute left-0 top-full z-40 mt-1 w-[30rem] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground shadow-lg transition-opacity select-text ${
-                                  isHoverCardPinned
-                                    ? 'pointer-events-auto visible opacity-100'
-                                    : 'pointer-events-none invisible opacity-0 group-hover/hovercard:pointer-events-auto group-hover/hovercard:visible group-hover/hovercard:opacity-100 group-focus-within/hovercard:pointer-events-auto group-focus-within/hovercard:visible group-focus-within/hovercard:opacity-100'
-                                }`}
-                                onClick={event => event.stopPropagation()}
-                              >
-                                {hoverCardData.title || hoverCardData.columns?.rightTitle ? (
-                                  <div className="mb-1 grid grid-cols-2 gap-3">
-                                    <p className="truncate font-semibold text-foreground">{hoverCardData.title || 'N/A'}</p>
-                                    {hoverCardData.columns?.rightTitle ? (
-                                      <p className="truncate text-right font-semibold text-foreground">
-                                        {hoverCardData.columns.rightTitle}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                                {hoverCardData.columns ? (
-                                  <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1">
-                                      {Array.from({
-                                        length: Math.max(
-                                          hoverCardData.columns.left.length,
-                                          hoverCardData.columns.right.length
-                                        ),
-                                      }).map((_, index) => {
-                                        const field = hoverCardData.columns?.left[index]
-                                        return (
-                                          <p key={`${column}-left-${index}`} className="min-h-4 break-words">
-                                            {field?.label ? (
-                                              <span className="font-medium text-foreground">{field.label}: </span>
-                                            ) : null}
-                                            <span>{field?.value || ''}</span>
-                                          </p>
-                                        )
-                                      })}
-                                    </div>
-                                    <div className="space-y-1 text-right">
-                                      {Array.from({
-                                        length: Math.max(
-                                          hoverCardData.columns.left.length,
-                                          hoverCardData.columns.right.length
-                                        ),
-                                      }).map((_, index) => {
-                                        const field = hoverCardData.columns?.right[index]
-                                        return (
-                                          <p key={`${column}-right-${index}`} className="min-h-4 break-words">
-                                            {field?.label ? (
-                                              <span className="font-medium text-foreground">{field.label}: </span>
-                                            ) : null}
-                                            <span>{field?.value || ''}</span>
-                                          </p>
-                                        )
-                                      })}
-                                    </div>
-                                  </div>
-                                ) : null}
-                                {hoverCardData.fields.length ? (
-                                  <div className="mt-2 space-y-1 border-t border-border/50 pt-2">
-                                    {hoverCardData.fields.map(field => (
-                                      <p key={`${column}-${field.label}`} className="break-words">
-                                        {field.label ? (
-                                          <span className="font-medium text-foreground">{field.label}: </span>
-                                        ) : null}
-                                        <span>{field.value || 'N/A'}</span>
-                                      </p>
-                                    ))}
-                                  </div>
-                                ) : null}
-                              </div>
                             </div>
                           ) : (
                             content
@@ -2459,6 +2497,93 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         </table>
       </div>
 
+      {visibleHoverCardCellId &&
+      activeHoverCard?.cellId === visibleHoverCardCellId &&
+      activeHoverCard.data &&
+      hoverCardPosition
+        ? createPortal(
+            <div
+              ref={hoverCardPopoverRef}
+              style={{
+                position: 'fixed',
+                top: `${hoverCardPosition.top}px`,
+                left: `${hoverCardPosition.left}px`,
+                width: `${HOVER_CARD_WIDTH_PX}px`,
+              }}
+              className="z-[120] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground shadow-lg select-text"
+              onMouseEnter={() => {
+                if (!pinnedHoverCardCellId) {
+                  setHoveredHoverCardCellId(visibleHoverCardCellId)
+                }
+              }}
+              onMouseLeave={() => {
+                if (!pinnedHoverCardCellId) {
+                  setHoveredHoverCardCellId(null)
+                }
+              }}
+              onClick={event => event.stopPropagation()}
+            >
+              {activeHoverCard.data.title || activeHoverCard.data.columns?.rightTitle ? (
+                <div className="mb-1 grid grid-cols-2 gap-3">
+                  <p className="truncate font-semibold text-foreground">{activeHoverCard.data.title || 'N/A'}</p>
+                  {activeHoverCard.data.columns?.rightTitle ? (
+                    <p className="truncate text-right font-semibold text-foreground">
+                      {activeHoverCard.data.columns.rightTitle}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              {activeHoverCard.data.columns ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    {Array.from({
+                      length: Math.max(
+                        activeHoverCard.data.columns.left.length,
+                        activeHoverCard.data.columns.right.length
+                      ),
+                    }).map((_, index) => {
+                      const field = activeHoverCard.data.columns?.left[index]
+                      return (
+                        <p key={`hover-left-${index}`} className="min-h-4 break-words">
+                          {field?.label ? <span className="font-medium text-foreground">{field.label}: </span> : null}
+                          <span>{field?.value || ''}</span>
+                        </p>
+                      )
+                    })}
+                  </div>
+                  <div className="space-y-1 text-right">
+                    {Array.from({
+                      length: Math.max(
+                        activeHoverCard.data.columns.left.length,
+                        activeHoverCard.data.columns.right.length
+                      ),
+                    }).map((_, index) => {
+                      const field = activeHoverCard.data.columns?.right[index]
+                      return (
+                        <p key={`hover-right-${index}`} className="min-h-4 break-words">
+                          {field?.label ? <span className="font-medium text-foreground">{field.label}: </span> : null}
+                          <span>{field?.value || ''}</span>
+                        </p>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              {activeHoverCard.data.fields.length ? (
+                <div className="mt-2 space-y-1 border-t border-border/50 pt-2">
+                  {activeHoverCard.data.fields.map(field => (
+                    <p key={`hover-field-${field.label}`} className="break-words">
+                      {field.label ? <span className="font-medium text-foreground">{field.label}: </span> : null}
+                      <span>{field.value || 'N/A'}</span>
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </div>,
+            document.body
+          )
+        : null}
+
       {openFilterColumn && filterPopoverPosition
         ? createPortal(
             <div
@@ -2469,7 +2594,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                 left: `${filterPopoverPosition.left}px`,
                 width: `${FILTER_POPOVER_WIDTH}px`,
               }}
-              className="z-50 rounded-md border bg-popover p-2 text-xs text-popover-foreground shadow-lg"
+              className="z-[120] rounded-md border bg-popover p-2 text-xs text-popover-foreground shadow-lg"
             >
               <input
                 type="text"

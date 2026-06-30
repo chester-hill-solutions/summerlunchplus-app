@@ -225,7 +225,7 @@ const findHostConflicts = (meetings: UpcomingMeeting[]) => {
   return conflicts
 }
 
-const reconcileHostOverlaps = async ({ now }: { now: Date }) => {
+const reconcileHostOverlaps = async ({ now, onlyClassIds }: { now: Date; onlyClassIds?: Set<string> }) => {
   const { data: meetings, error } = await adminClient
     .from('class_zoom_meeting')
     .select('id, class_id, zoom_host_id, zoom_meeting_id, class:class_id ( starts_at, ends_at )')
@@ -254,6 +254,9 @@ const reconcileHostOverlaps = async ({ now }: { now: Date }) => {
   const targetClassSet = new Set<string>()
 
   for (const conflict of conflicts) {
+    if (onlyClassIds && !onlyClassIds.has(conflict.targetClassId) && !onlyClassIds.has(conflict.sourceClassId)) {
+      continue
+    }
     if (targetClassSet.has(conflict.targetClassId)) continue
     targetClassSet.add(conflict.targetClassId)
 
@@ -311,11 +314,13 @@ const resolveReminderRecipientEmail = async (profileId: string) => {
   }
 }
 
-const sendReminderCoverage = async ({ now, appOrigin }: { now: Date; appOrigin: string }) => {
+const sendReminderCoverage = async ({ now, appOrigin, onlyClassId }: { now: Date; appOrigin: string; onlyClassId?: string }) => {
   const publicAppOrigin = resolvePublicAppOrigin(appOrigin)
   const reminderStart = now
   const reminderEnd = addMinutes(now, REMINDER_WINDOW_MINUTES)
-  const classIds = await getClassesInWindow({ startsAt: toIso(reminderStart), endsAt: toIso(reminderEnd) })
+  const classIds = onlyClassId
+    ? [onlyClassId]
+    : await getClassesInWindow({ startsAt: toIso(reminderStart), endsAt: toIso(reminderEnd) })
 
   let sent = 0
   let failed = 0
@@ -329,6 +334,15 @@ const sendReminderCoverage = async ({ now, appOrigin }: { now: Date; appOrigin: 
       .select('id, starts_at, workshop:workshop_id ( description )')
       .eq('id', classId)
       .single()
+
+    if (classRow) {
+      const startsAtMs = new Date(classRow.starts_at).getTime()
+      const inWindow = startsAtMs >= reminderStart.getTime() && startsAtMs < reminderEnd.getTime()
+      if (!inWindow) {
+        skipped += 1
+        continue
+      }
+    }
 
     const { data: registrants, error: registrantError } = await adminClient
       .from('class_zoom_registrant')
@@ -461,11 +475,17 @@ const dedupeParticipants = (participants: Array<Record<string, unknown>>) => {
   return rows
 }
 
-const syncPostClassAttendance = async ({ now }: { now: Date }) => {
-  const { data: meetings, error } = await adminClient
+const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyClassId?: string }) => {
+  const meetingQuery = adminClient
     .from('class_zoom_meeting')
     .select('id, class_id, zoom_meeting_uuid, status, class:class_id ( starts_at, ends_at, workshop_id )')
     .eq('status', 'created')
+
+  if (onlyClassId) {
+    meetingQuery.eq('class_id', onlyClassId)
+  }
+
+  const { data: meetings, error } = await meetingQuery
 
   if (error) {
     return { scanned: 0, synced: 0, failed: 1, pendingRetry: 0, skippedCooldown: 0, error: error.message }
@@ -721,6 +741,36 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     hostOverlapReconciliation: hostReconciliation,
     reminderCoverage: reminders,
     attendanceRowBackfill,
+    attendanceSync,
+  }
+}
+
+export const runZoomJobsForClass = async ({
+  classId,
+  now = new Date(),
+  appOrigin,
+  runId,
+}: {
+  classId: string
+  now?: Date
+  appOrigin: string
+  runId?: string
+}) => {
+  const attendanceRowBackfill = await backfillAttendanceRowsCoverage({ now })
+  const provision = await provisionClassById(classId)
+  const hostReconciliation = await reconcileHostOverlaps({ now, onlyClassIds: new Set([classId]) })
+  const reminderCoverage = await sendReminderCoverage({ now, appOrigin, onlyClassId: classId })
+  const attendanceSync = await syncPostClassAttendance({ now, onlyClassId: classId })
+
+  return {
+    ok: true,
+    runId: runId ?? null,
+    ranAt: now.toISOString(),
+    classId,
+    attendanceRowBackfill,
+    provision,
+    hostOverlapReconciliation: hostReconciliation,
+    reminderCoverage,
     attendanceSync,
   }
 }

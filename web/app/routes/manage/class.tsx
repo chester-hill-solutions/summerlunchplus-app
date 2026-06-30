@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
-import { runZoomJobs } from '@/lib/zoom-jobs/runner.server'
+import { runZoomJobs, runZoomJobsForClass } from '@/lib/zoom-jobs/runner.server'
 import type { Route } from './+types/class'
 import TableDisplay from './table-display'
 import { createTableAction } from './table-actions.server'
@@ -16,6 +16,8 @@ const baseAction = createTableAction('class')
 type ActionData = {
   zoomRunSuccess?: string
   zoomRunError?: string
+  classSyncSuccess?: string
+  classSyncError?: string
 }
 
 type ClassRow = Record<string, unknown> & {
@@ -226,6 +228,7 @@ export async function loader(args: Route.LoaderArgs) {
         zoomStartsAt: meeting?.start_time ?? null,
         zoomDurationMinutes: meeting?.duration_minutes ?? null,
       }),
+      sync_class: 'Sync class',
       zoom_host_email: meeting?.host_zoom_user_email ?? row.zoom_host_email ?? '',
       zoom_join_url: meeting?.join_url ?? row.zoom_join_url ?? '',
       step_meeting: meeting && meeting.status === 'created' && meeting.join_url ? 'Done' : 'Missing',
@@ -251,7 +254,7 @@ export async function loader(args: Route.LoaderArgs) {
     }
   }
 
-  displayColumns.push('zoom_topic', 'zoom_start_at', 'zoom_end_at', 'zoom_schedule_match')
+  displayColumns.push('zoom_topic', 'zoom_start_at', 'zoom_end_at', 'zoom_schedule_match', 'sync_class')
 
   const fitAllColumnsMeta = Object.fromEntries(
     displayColumns.map(column => [
@@ -297,6 +300,7 @@ export async function loader(args: Route.LoaderArgs) {
       zoom_start_at: { label: 'Zoom Start (UTC)' },
       zoom_end_at: { label: 'Zoom End (UTC)' },
       zoom_schedule_match: { label: 'Zoom Time Check', filterable: true },
+      sync_class: { label: 'Sync', filterable: false },
       zoom_host_email: { label: 'Zoom Host', filterable: true },
       zoom_join_url: { label: 'Zoom Join Link', truncate: true },
     },
@@ -320,6 +324,28 @@ export async function action(args: Route.ActionArgs) {
     } catch (error) {
       return {
         zoomRunError: error instanceof Error ? error.message : 'Failed to run Zoom jobs.',
+      } satisfies ActionData
+    }
+  }
+
+  if (intent === 'sync-class') {
+    const auth = await requireAuth(args.request)
+    if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    const classId = String(formData.get('class_id') ?? '')
+    if (!classId) {
+      return { classSyncError: 'Missing class id.' } satisfies ActionData
+    }
+
+    try {
+      const appOrigin = new URL(args.request.url).origin
+      await runZoomJobsForClass({ classId, appOrigin, runId: `manual-class-${Date.now().toString(36)}` })
+      return { classSyncSuccess: `Class sync completed for ${classId}.` } satisfies ActionData
+    } catch (error) {
+      return {
+        classSyncError: error instanceof Error ? error.message : `Failed to sync class ${classId}.`,
       } satisfies ActionData
     }
   }
@@ -349,6 +375,12 @@ export default function ClassTablePage() {
           ) : null}
           {actionData?.zoomRunError ? (
             <p className="text-sm text-destructive">{actionData.zoomRunError}</p>
+          ) : null}
+          {actionData?.classSyncSuccess ? (
+            <p className="text-sm text-emerald-700">{actionData.classSyncSuccess}</p>
+          ) : null}
+          {actionData?.classSyncError ? (
+            <p className="text-sm text-destructive">{actionData.classSyncError}</p>
           ) : null}
         </div>
       }

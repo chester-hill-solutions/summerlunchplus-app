@@ -40,6 +40,7 @@ export default [
   route("manage", "routes/manage/team.tsx", [
     index("routes/manage/index.tsx"),
     route("participants", "routes/manage/participants.tsx"),
+    route("attendance", "routes/manage/attendance.tsx"),
     route("person", "routes/manage/person.tsx", [
       index("routes/manage/person.overview.tsx"),
       route("family", "routes/manage/person.family.tsx"),

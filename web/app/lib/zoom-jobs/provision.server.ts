@@ -448,12 +448,14 @@ const ensureRegistrantsForClass = async ({
   classZoomMeetingId,
   meetingId,
   identities,
+  approvedProfileIds,
   forceReregister,
 }: {
   classRow: ClassRow
   classZoomMeetingId: string
   meetingId: string
   identities: Map<string, ProfileIdentity>
+  approvedProfileIds: Set<string>
   forceReregister: boolean
 }) => {
   const { data: existingRows, error: existingError } = await adminClient
@@ -473,8 +475,6 @@ const ensureRegistrantsForClass = async ({
     ])
   )
 
-  const eligibleProfileIds = new Set(Array.from(identities.keys()))
-
   let created = 0
   let updated = 0
   let removed = 0
@@ -482,7 +482,7 @@ const ensureRegistrantsForClass = async ({
 
   for (const row of existingRows ?? []) {
     const profileId = row.profile_id
-    if (!profileId || eligibleProfileIds.has(profileId)) continue
+    if (!profileId || approvedProfileIds.has(profileId)) continue
 
     const existingMeeting = relationRow<{ zoom_meeting_id: string | null }>(row.class_zoom_meeting)
     if (row.zoom_registrant_id && existingMeeting?.zoom_meeting_id) {
@@ -600,8 +600,9 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
 
   try {
     const profiles = await getApprovedProfilesForClass(classRow)
+    const approvedProfileIds = Array.from(new Set(profiles.map(profile => profile.id).filter(Boolean)))
     const identities = await buildIdentities(profiles)
-    const attendanceRowsEnsured = await ensureAttendanceRowsForClass(classId, Array.from(identities.keys()))
+    const attendanceRowsEnsured = await ensureAttendanceRowsForClass(classId, approvedProfileIds)
 
     const meeting = await ensureMeetingForClass({
       classRow,
@@ -614,6 +615,7 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       classZoomMeetingId: meeting.id,
       meetingId: meeting.zoom_meeting_id,
       identities,
+      approvedProfileIds: new Set(approvedProfileIds),
       forceReregister: meeting.recreated,
     })
 
