@@ -375,6 +375,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       'class_id',
       'profile_id',
       'id',
+      'delete_row',
     ],
     rows,
     columnMeta: {
@@ -409,6 +410,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       class_id: { label: 'Class ID', filterable: true },
       profile_id: { label: 'Profile ID', filterable: true },
       id: { label: 'Attendance ID', filterable: true },
+      delete_row: { label: 'Delete', filterable: false },
     },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
   }
@@ -641,6 +643,28 @@ export async function action({ request }: Route.ActionArgs) {
         profile_id: profileId,
         error: error instanceof Error ? error.message : 'Failed to register student.',
       }
+    }
+  }
+
+  if (intent === 'delete-attendance-row') {
+    const classId = formData.get('class_id') as string
+    const profileId = formData.get('profile_id') as string
+    if (!classId || !profileId) {
+      return new Response('Missing identifiers', { status: 400, headers: auth.headers })
+    }
+
+    const { supabase } = createClient(request)
+    const { error } = await supabase.from('class_attendance').delete().eq('class_id', classId).eq('profile_id', profileId)
+
+    if (error) {
+      return new Response(error.message, { status: 500, headers: auth.headers })
+    }
+
+    return {
+      ok: true,
+      intent: 'delete-attendance-row',
+      class_id: classId,
+      profile_id: profileId,
     }
   }
 
