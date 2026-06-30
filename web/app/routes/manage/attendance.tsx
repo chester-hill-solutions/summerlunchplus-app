@@ -68,6 +68,17 @@ type SyncRunRow = {
   created_at: string
 }
 
+const IN_CLAUSE_BATCH_SIZE = 150
+
+const chunkArray = <T,>(items: T[], size: number) => {
+  if (size <= 0 || !items.length) return [] as T[][]
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
 const displayName = (profile: ProfileRow | null) => {
   const first = (profile?.firstname ?? '').trim()
   const last = (profile?.surname ?? '').trim()
@@ -79,7 +90,7 @@ const displayName = (profile: ProfileRow | null) => {
 
 const displayNameOrId = (profile: ProfileRow | null, fallbackId: string) => {
   const label = displayName(profile)
-  return label || `ID ${fallbackId}`
+  return label || `Unknown student (${fallbackId.slice(0, 8)})`
 }
 
 const statusLabel = ({ done, total }: { done: number; total: number }) => {
@@ -105,37 +116,56 @@ export async function loader({ request }: Route.LoaderArgs) {
   const profileIds = Array.from(new Set(attendanceRows.map(row => row.profile_id).filter(Boolean)))
   const recordedByIds = Array.from(new Set(attendanceRows.map(row => row.recorded_by).filter((id): id is string => Boolean(id))))
 
-  const profileLookupIds = Array.from(new Set([...profileIds, ...recordedByIds]))
-
-  const [{ data: classRows }, { data: profileRows }, { data: meetingRows }, { data: registrantRows }] = await Promise.all([
+  const [{ data: classRows, error: classError }, { data: meetingRows, error: meetingError }, { data: registrantRows, error: registrantError }] = await Promise.all([
     classIds.length
       ? adminClient.from('class').select('id, workshop_id, starts_at, ends_at').in('id', classIds)
-      : Promise.resolve({ data: [] as ClassRow[] }),
-    profileLookupIds.length
-      ? adminClient.from('profile').select('id, firstname, surname, email, user_id').in('id', profileLookupIds)
-      : Promise.resolve({ data: [] as ProfileRow[] }),
+      : Promise.resolve({ data: [] as ClassRow[], error: null }),
     classIds.length
       ? adminClient
           .from('class_zoom_meeting')
           .select('id, class_id, status, zoom_meeting_id, topic, start_time, duration_minutes, join_url, host_zoom_user_email')
           .in('class_id', classIds)
-      : Promise.resolve({ data: [] as MeetingRow[] }),
+      : Promise.resolve({ data: [] as MeetingRow[], error: null }),
     classIds.length
       ? adminClient
           .from('class_zoom_registrant')
           .select('class_id, profile_id, zoom_registrant_id, zoom_join_url, last_sent_at')
           .in('class_id', classIds)
-      : Promise.resolve({ data: [] as RegistrantRow[] }),
+      : Promise.resolve({ data: [] as RegistrantRow[], error: null }),
   ])
+
+  if (classError) throw new Response(classError.message, { status: 500 })
+  if (meetingError) throw new Response(meetingError.message, { status: 500 })
+  if (registrantError) throw new Response(registrantError.message, { status: 500 })
+
+  const profilesByIdRows: Array<ProfileRow & { user_id?: string | null }> = []
+  for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: profileChunk, error: profileError } = await adminClient
+      .from('profile')
+      .select('id, firstname, surname, email, user_id')
+      .in('id', chunk)
+    if (profileError) throw new Response(profileError.message, { status: 500 })
+    profilesByIdRows.push(...((profileChunk ?? []) as Array<ProfileRow & { user_id?: string | null }>))
+  }
+
+  const profilesByUserRows: Array<ProfileRow & { user_id?: string | null }> = []
+  for (const chunk of chunkArray(recordedByIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: profileChunk, error: profileError } = await adminClient
+      .from('profile')
+      .select('id, firstname, surname, email, user_id')
+      .in('user_id', chunk)
+    if (profileError) throw new Response(profileError.message, { status: 500 })
+    profilesByUserRows.push(...((profileChunk ?? []) as Array<ProfileRow & { user_id?: string | null }>))
+  }
 
   const classes = (classRows ?? []) as ClassRow[]
   const workshopsIds = Array.from(new Set(classes.map(row => row.workshop_id).filter((id): id is string => Boolean(id))))
   const meetingIds = Array.from(new Set(((meetingRows ?? []) as MeetingRow[]).map(row => row.id)))
 
-  const [{ data: workshopRows }, { data: enrollmentRows }, { data: syncRows }] = await Promise.all([
+  const [{ data: workshopRows, error: workshopError }, { data: enrollmentRows, error: enrollmentError }, { data: syncRows, error: syncError }] = await Promise.all([
     workshopsIds.length
       ? adminClient.from('workshop').select('id, description').in('id', workshopsIds)
-      : Promise.resolve({ data: [] as WorkshopRow[] }),
+      : Promise.resolve({ data: [] as WorkshopRow[], error: null }),
     workshopsIds.length
       ? adminClient
           .from('workshop_enrollment')
@@ -143,19 +173,23 @@ export async function loader({ request }: Route.LoaderArgs) {
           .in('workshop_id', workshopsIds)
           .eq('status', 'approved')
           .not('profile_id', 'is', null)
-      : Promise.resolve({ data: [] as EnrollmentRow[] }),
+      : Promise.resolve({ data: [] as EnrollmentRow[], error: null }),
     meetingIds.length
       ? adminClient
           .from('class_zoom_participant_sync')
           .select('class_zoom_meeting_id, status, created_at')
           .in('class_zoom_meeting_id', meetingIds)
           .order('created_at', { ascending: false })
-      : Promise.resolve({ data: [] as SyncRunRow[] }),
+      : Promise.resolve({ data: [] as SyncRunRow[], error: null }),
   ])
+
+  if (workshopError) throw new Response(workshopError.message, { status: 500 })
+  if (enrollmentError) throw new Response(enrollmentError.message, { status: 500 })
+  if (syncError) throw new Response(syncError.message, { status: 500 })
 
   const classById = new Map(classes.map(row => [row.id, row]))
   const workshopById = new Map(((workshopRows ?? []) as WorkshopRow[]).map(row => [row.id, row]))
-  const profileRowsTyped = (profileRows ?? []) as Array<ProfileRow & { user_id?: string | null }>
+  const profileRowsTyped = [...profilesByIdRows, ...profilesByUserRows]
   const profileById = new Map(profileRowsTyped.map(row => [row.id, row]))
   const profileByUserId = new Map(
     profileRowsTyped
@@ -307,10 +341,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     ],
     rows,
     columnMeta: {
-      workshop_description: { label: 'Workshop', filterable: true },
-      class_starts_at: { label: 'Class starts', filterable: true },
+      workshop_description: { label: 'Workshop', filterable: true, fitContentOnLoad: true },
+      class_starts_at: { label: 'Class starts', filterable: true, fitContentOnLoad: true },
       class_ends_at: { label: 'Class ends', filterable: true },
-      profile_display: { label: 'Profile', filterable: true },
+      profile_display: { label: 'Profile', filterable: true, fitContentOnLoad: true },
       status: { label: 'Attendance', filterable: true },
       photo_status: { label: 'Photo status', filterable: true },
       camera_on: { label: 'Camera on', filterable: true },
