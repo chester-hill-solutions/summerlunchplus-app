@@ -23,6 +23,8 @@ create type app_permissions as enum (
   'workshop.create', 'workshop.read', 'workshop.update', 'workshop.delete',
   'workshop_enrollment.create', 'workshop_enrollment.read', 'workshop_enrollment.update', 'workshop_enrollment.update_status',
   'class_attendance.create', 'class_attendance.read', 'class_attendance.update', 'class_attendance.delete',
+  'class_attendance_photo.create', 'class_attendance_photo.read', 'class_attendance_photo.update', 'class_attendance_photo.delete',
+  'class_attendance_photo_upload_attempt.create', 'class_attendance_photo_upload_attempt.read', 'class_attendance_photo_upload_attempt.update', 'class_attendance_photo_upload_attempt.delete',
   'zoom_host.create', 'zoom_host.read', 'zoom_host.update', 'zoom_host.delete',
   'class_zoom_meeting.create', 'class_zoom_meeting.read', 'class_zoom_meeting.update', 'class_zoom_meeting.delete',
   'class_zoom_registrant.create', 'class_zoom_registrant.read', 'class_zoom_registrant.update', 'class_zoom_registrant.delete',

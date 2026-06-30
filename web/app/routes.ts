@@ -3,6 +3,7 @@ import { type RouteConfig, route, index } from "@react-router/dev/routes";
 export default [
   index("routes/_index.tsx"),
   route("home", "routes/home.tsx"),
+  route("home/class-photos/upload", "routes/home.class-photos.upload.ts"),
   route("info", "routes/info.tsx"),
   route("forms", "routes/forms.tsx"),
   route("enroll", "routes/enroll.tsx"),
@@ -55,6 +56,8 @@ export default [
     route("workshop/setup", "routes/manage/workshop.setup.tsx"),
     route("class", "routes/manage/class.tsx"),
     route("class-attendance", "routes/manage/class-attendance.tsx"),
+    route("class-attendance/photos", "routes/manage/class-attendance.photos.ts"),
+    route("class-attendance-photo-upload-attempt", "routes/manage/class-attendance-photo-upload-attempt.tsx"),
     route("zoom-host", "routes/manage/zoom-host.tsx"),
     route("zoom-connect-test", "routes/manage/zoom-connect-test.tsx"),
     route("zoom-reset", "routes/manage/zoom-reset.tsx"),

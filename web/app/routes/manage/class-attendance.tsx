@@ -12,7 +12,7 @@ type AttendanceRow = {
   class_id: string
   profile_id: string
   status: 'unknown' | 'present' | 'absent' | null
-  photo_status: 'accepted' | 'declined' | null
+  photo_status: 'uploaded' | 'accepted' | 'rejected' | null
   camera_on: boolean | null
   recorded_by: string | null
   created_at: string
@@ -58,6 +58,12 @@ type RegistrantRow = {
   zoom_registrant_id: string | null
   zoom_join_url: string | null
   last_sent_at: string | null
+}
+
+type AttendancePhotoRow = {
+  class_id: string
+  profile_id: string
+  uploaded_at: string
 }
 
 type SyncRunRow = {
@@ -112,7 +118,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   const profileIds = Array.from(new Set(attendanceRows.map(row => row.profile_id).filter(Boolean)))
   const recordedByIds = Array.from(new Set(attendanceRows.map(row => row.recorded_by).filter((id): id is string => Boolean(id))))
 
-  const [{ data: classRows, error: classError }, { data: meetingRows, error: meetingError }, { data: registrantRows, error: registrantError }] =
+  const [
+    { data: classRows, error: classError },
+    { data: meetingRows, error: meetingError },
+    { data: registrantRows, error: registrantError },
+    { data: photoRows, error: photoError },
+  ] =
     await Promise.all([
       classIds.length
         ? adminClient.from('class').select('id, workshop_id, starts_at, ends_at').in('id', classIds)
@@ -129,11 +140,18 @@ export async function loader({ request }: Route.LoaderArgs) {
             .select('class_id, profile_id, zoom_registrant_id, zoom_join_url, last_sent_at')
             .in('class_id', classIds)
         : Promise.resolve({ data: [] as RegistrantRow[], error: null }),
+      classIds.length
+        ? adminClient
+            .from('class_attendance_photo' as any)
+            .select('class_id, profile_id, uploaded_at')
+            .in('class_id', classIds)
+        : Promise.resolve({ data: [] as AttendancePhotoRow[], error: null }),
     ])
 
   if (classError) throw new Response(classError.message, { status: 500 })
   if (meetingError) throw new Response(meetingError.message, { status: 500 })
   if (registrantError) throw new Response(registrantError.message, { status: 500 })
+  if (photoError) throw new Response(photoError.message, { status: 500 })
 
   const profilesByIdRows: Array<ProfileRow & { user_id?: string | null }> = []
   for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
@@ -223,6 +241,26 @@ export async function loader({ request }: Route.LoaderArgs) {
     registrantsByClassId.set(row.class_id, bucket)
   }
 
+  const photoSummaryByAttendanceKey = new Map<string, { count: number; latestUploadedAt: string | null }>()
+  for (const row of (photoRows ?? []) as AttendancePhotoRow[]) {
+    const key = `${row.class_id}::${row.profile_id}`
+    const current = photoSummaryByAttendanceKey.get(key)
+    if (!current) {
+      photoSummaryByAttendanceKey.set(key, { count: 1, latestUploadedAt: row.uploaded_at })
+      continue
+    }
+
+    const currentMs = current.latestUploadedAt ? new Date(current.latestUploadedAt).getTime() : Number.NaN
+    const nextMs = row.uploaded_at ? new Date(row.uploaded_at).getTime() : Number.NaN
+    photoSummaryByAttendanceKey.set(key, {
+      count: current.count + 1,
+      latestUploadedAt:
+        Number.isFinite(nextMs) && (!Number.isFinite(currentMs) || nextMs > currentMs)
+          ? row.uploaded_at
+          : current.latestUploadedAt,
+    })
+  }
+
   const rows = attendanceRows.map(row => {
     const classRow = classById.get(row.class_id) ?? null
     const workshop = classRow?.workshop_id ? workshopById.get(classRow.workshop_id) ?? null : null
@@ -240,6 +278,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         : null
 
     const studentRegistrant = registrants.find(item => item.profile_id === row.profile_id)
+    const photoSummary = photoSummaryByAttendanceKey.get(`${row.class_id}::${row.profile_id}`)
     const registrantReady = Boolean(studentRegistrant?.zoom_registrant_id && studentRegistrant.zoom_join_url)
     const reminderSent = Boolean(studentRegistrant?.last_sent_at)
 
@@ -318,6 +357,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       step_attendance_sync_detail: stepAttendanceSyncDetail,
       latest_sync_payload: latestSyncPayload,
       latest_sync_error: latestSync?.error_message ?? null,
+      photo_count: photoSummary?.count ?? 0,
+      latest_photo_uploaded_at: photoSummary?.latestUploadedAt ?? null,
       recorded_by_email:
         typeof row.recorded_by === 'string' && row.recorded_by
           ? displayName(profileByUserId.get(row.recorded_by) ?? null) || row.recorded_by
@@ -350,6 +391,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       'profile_display',
       'status',
       'photo_status',
+      'photo_count',
+      'latest_photo_uploaded_at',
       'camera_on',
       'student_join_url',
       'zoom_meeting_id',
@@ -385,6 +428,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       profile_display: { label: 'Profile', filterable: true, fitContentOnLoad: true },
       status: { label: 'Attendance', filterable: true },
       photo_status: { label: 'Photo status', filterable: true },
+      photo_count: { label: 'Photos', filterable: true },
+      latest_photo_uploaded_at: { label: 'Latest photo upload', filterable: true },
       camera_on: { label: 'Camera on', filterable: true },
       student_join_url: { label: 'Student join link', truncate: true, filterable: true },
       zoom_meeting_id: { label: 'Zoom meeting ID', filterable: true },
