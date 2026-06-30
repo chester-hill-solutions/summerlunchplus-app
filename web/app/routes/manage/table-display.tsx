@@ -1739,6 +1739,18 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     statusFetcher.submit(formData, { method: 'post' })
   }
 
+  const registerAttendanceStudent = (row: Record<string, unknown>) => {
+    if (!isClassAttendance || !canEditStatus) return
+    const classId = typeof row.class_id === 'string' ? row.class_id : ''
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!classId || !profileId) return
+    const formData = new FormData()
+    formData.set('intent', 'register-student')
+    formData.set('class_id', classId)
+    formData.set('profile_id', profileId)
+    statusFetcher.submit(formData, { method: 'post' })
+  }
+
   const updateWorkshopEnrollmentStatus = (row: Record<string, unknown>, value: string) => {
     if (!isWorkshopEnrollment || !canEditStatus || !value) return
     const enrollmentId = typeof row.id === 'string' ? row.id : ''
@@ -2249,6 +2261,39 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                               <option value="true">true</option>
                               <option value="false">false</option>
                             </select>
+                          </td>
+                        )
+                      }
+
+                      if (isClassAttendance && column === 'register_student_action') {
+                        const classId = typeof row.class_id === 'string' ? row.class_id : ''
+                        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+                        const showButton =
+                          typeof row.register_student_action === 'string' &&
+                          row.register_student_action === 'Register'
+                        const isRegistering =
+                          statusFetcher.state === 'submitting' &&
+                          statusFetcher.formData?.get('intent') === 'register-student' &&
+                          statusFetcher.formData?.get('class_id') === classId &&
+                          statusFetcher.formData?.get('profile_id') === profileId
+
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="Create missing registrant and join link">
+                            {showButton ? (
+                              <button
+                                type="button"
+                                disabled={!classId || !profileId || isRegistering}
+                                onClick={event => {
+                                  event.stopPropagation()
+                                  registerAttendanceStudent(row)
+                                }}
+                                className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isRegistering ? 'Registering...' : 'Register'}
+                              </button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </td>
                         )
                       }
