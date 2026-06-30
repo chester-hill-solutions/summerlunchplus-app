@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation, useSearchParams } from 'react-router'
 
 import type { Route } from './+types/home'
@@ -66,6 +67,7 @@ type LoaderData = {
   enrollments: EnrollmentRow[]
   classesByWorkshop: Record<string, ClassRow[]>
   joinUrlByClass: Record<string, string>
+  selectedProfileIdByClass: Record<string, string>
   nextClass:
       | {
         classId: string
@@ -300,6 +302,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     return acc
   }, {})
 
+  const selectedProfileIdByClass = classes.reduce<Record<string, string>>((acc, classRow) => {
+    if (!classRow.workshop_id) return acc
+    const approvedSet = approvedProfileIdsByWorkshopId[classRow.workshop_id]
+    if (!approvedSet?.size) return acc
+
+    for (const profileId of orderedFamilyProfileIds) {
+      if (!approvedSet.has(profileId)) continue
+      acc[classRow.id] = profileId
+      break
+    }
+
+    return acc
+  }, {})
+
   const nextClassCandidate = classes
     .filter(classRow => Boolean(classRow.workshop_id) && approvedWorkshopIds.has(classRow.workshop_id) && new Date(classRow.starts_at).getTime() > now)
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0]
@@ -323,6 +339,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     enrollments,
     classesByWorkshop,
     joinUrlByClass,
+    selectedProfileIdByClass,
     nextClass,
   } satisfies LoaderData
 }
@@ -541,6 +558,7 @@ export default function Home() {
     enrollments,
     classesByWorkshop,
     joinUrlByClass,
+    selectedProfileIdByClass,
     nextClass,
   } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
@@ -581,6 +599,99 @@ export default function Home() {
       return [workshopId, joinable]
     })
   ) as Record<string, ClassRow[]>
+
+  const [uploadModalState, setUploadModalState] = useState<{
+    open: boolean
+    classId: string
+    profileId: string
+    workshopLabel: string
+    startsAt: string
+  }>({
+    open: false,
+    classId: '',
+    profileId: '',
+    workshopLabel: '',
+    startsAt: '',
+  })
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploading, setUploading] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadResults, setUploadResults] = useState<Array<{ fileName: string; ok: boolean; error?: string }>>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const resetUploadModal = () => {
+    setUploadFiles([])
+    setUploadProgress(0)
+    setUploading(false)
+    setUploadMessage(null)
+    setUploadError(null)
+    setUploadResults([])
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  useEffect(() => {
+    if (!uploadModalState.open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !uploading) {
+        setUploadModalState(prev => ({ ...prev, open: false }))
+        resetUploadModal()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [uploadModalState.open, uploading])
+
+  const uploadSelectedPhotos = async () => {
+    if (!uploadFiles.length || !uploadModalState.classId || !uploadModalState.profileId || uploading) return
+
+    setUploadError(null)
+    setUploadMessage(null)
+    setUploadResults([])
+    setUploading(true)
+    setUploadProgress(0)
+
+    const formData = new FormData()
+    formData.set('class_id', uploadModalState.classId)
+    formData.set('profile_id', uploadModalState.profileId)
+    for (const file of uploadFiles) {
+      formData.append('photos', file)
+    }
+
+    const response = await new Promise<{ status: number; body: unknown }>(resolve => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/home/class-photos/upload')
+      xhr.responseType = 'json'
+      xhr.upload.onprogress = event => {
+        if (!event.lengthComputable) return
+        setUploadProgress(Math.round((event.loaded / event.total) * 100))
+      }
+      xhr.onload = () => resolve({ status: xhr.status, body: xhr.response })
+      xhr.onerror = () => resolve({ status: 0, body: { error: 'Network error while uploading images.' } })
+      xhr.send(formData)
+    })
+
+    const body = response.body as {
+      message?: string
+      error?: string
+      results?: Array<{ fileName: string; ok: boolean; error?: string }>
+    }
+
+    if (response.status < 200 || response.status >= 300 || body.error) {
+      setUploadError(body.error ?? 'Failed to upload photos.')
+      setUploadResults(body.results ?? [])
+      setUploading(false)
+      return
+    }
+
+    setUploadProgress(100)
+    setUploadMessage(body.message ?? 'Photos uploaded.')
+    setUploadResults(body.results ?? [])
+    setUploading(false)
+  }
 
   const sortedWorkshopEnrollments = workshopEnrollments
     .slice()
@@ -702,16 +813,16 @@ export default function Home() {
               {sortedWorkshopEnrollments.map(enrollment => {
                 const workshopId = enrollment.workshop_id as string
                 const workshop = workshopsById[workshopId]
-                const joinable = joinableByWorkshop[workshopId] ?? []
+                const classSchedule = classesByWorkshop[workshopId] ?? []
 
                 return (
                   <section key={`detail-${enrollment.id}`} id={`workshop-${workshopId}`} className="rounded-lg border bg-card p-4 shadow-sm space-y-4">
                     <h3 className="text-lg font-semibold">{workshop?.description ?? 'Workshop'} classes</h3>
 
                     <div className="space-y-2">
-                      <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Upcoming classes</h4>
-                      {joinable.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No upcoming classes scheduled.</p>
+                      <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Class schedule</h4>
+                      {classSchedule.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No classes scheduled.</p>
                       ) : (
                         <Table>
                           <TableHeader>
@@ -719,27 +830,85 @@ export default function Home() {
                               <TableHead>Starts</TableHead>
                               <TableHead>Ends</TableHead>
                               <TableHead>Join</TableHead>
+                              <TableHead>Photos</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {joinable.map(classRow => (
+                            {classSchedule.map(classRow => (
                               <TableRow key={classRow.id}>
                                 <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
                                 <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
                                 <TableCell>
-                                  {enrollment.status === 'approved' ? (
-                                    joinUrlByClass[classRow.id] ? (
+                                  {(() => {
+                                    const now = Date.now()
+                                    const startsAtMs = new Date(classRow.starts_at).getTime()
+                                    const endsAtMs = new Date(classRow.ends_at).getTime()
+                                    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + 15 * 60_000
+                                    const joinOpen =
+                                      Number.isFinite(startsAtMs) &&
+                                      Number.isFinite(endsAtMs) &&
+                                      now >= startsAtMs - 15 * 60_000 &&
+                                      now <= endsAtMs + 15 * 60_000
+
+                                    if (enrollment.status !== 'approved') {
+                                      return <span className="text-xs text-muted-foreground">Available after acceptance</span>
+                                    }
+
+                                    if (closed) {
+                                      return (
+                                        <Button size="sm" variant="outline" disabled>
+                                          CLOSED
+                                        </Button>
+                                      )
+                                    }
+
+                                    if (!joinOpen) {
+                                      return <span className="text-xs text-muted-foreground">Opens 15 min before class</span>
+                                    }
+
+                                    if (!joinUrlByClass[classRow.id]) {
+                                      return <span className="text-xs text-muted-foreground">Link pending</span>
+                                    }
+
+                                    return (
                                       <Button asChild size="sm">
                                         <a href={joinUrlByClass[classRow.id]} target="_blank" rel="noreferrer">
                                           JOIN CLASS
                                         </a>
                                       </Button>
-                                    ) : (
-                                      <span className="text-xs text-muted-foreground">Link pending</span>
                                     )
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground">Available after acceptance</span>
-                                  )}
+                                  })()}
+                                </TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    const now = Date.now()
+                                    const endsAtMs = new Date(classRow.ends_at).getTime()
+                                    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + 15 * 60_000
+                                    const selectedProfileId = selectedProfileIdByClass[classRow.id]
+
+                                    if (enrollment.status !== 'approved' || !closed || !selectedProfileId) {
+                                      return <span className="text-xs text-muted-foreground">-</span>
+                                    }
+
+                                    return (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          resetUploadModal()
+                                          setUploadModalState({
+                                            open: true,
+                                            classId: classRow.id,
+                                            profileId: selectedProfileId,
+                                            workshopLabel: workshop?.description ?? 'Workshop',
+                                            startsAt: classRow.starts_at,
+                                          })
+                                        }}
+                                      >
+                                        Upload Images
+                                      </Button>
+                                    )
+                                  })()}
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -895,6 +1064,113 @@ export default function Home() {
           </section>
         </div>
       )}
+
+      {uploadModalState.open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg rounded-lg border bg-card p-5 shadow-xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Upload class photos</h2>
+                <p className="text-xs text-muted-foreground">
+                  {uploadModalState.workshopLabel} - {formatDateTime(uploadModalState.startsAt)}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={uploading}
+                onClick={() => {
+                  setUploadModalState(prev => ({ ...prev, open: false }))
+                  resetUploadModal()
+                }}
+              >
+                Close
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={event => {
+                  const picked = Array.from(event.target.files ?? [])
+                  setUploadFiles(picked)
+                  setUploadError(null)
+                  setUploadMessage(null)
+                  setUploadResults([])
+                }}
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  Choose images
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  {uploadFiles.length === 0
+                    ? 'No files selected'
+                    : `${uploadFiles.length} file${uploadFiles.length === 1 ? '' : 's'} selected`}
+                </p>
+              </div>
+              {uploadFiles.length > 0 ? (
+                <div className="max-h-28 overflow-auto rounded border p-2 text-xs text-muted-foreground space-y-1">
+                  {uploadFiles.map(file => (
+                    <p key={`${file.name}-${file.size}`}>{file.name}</p>
+                  ))}
+                </div>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                On mobile, this supports camera roll and direct camera capture where available.
+              </p>
+            </div>
+
+            {uploading || uploadProgress > 0 ? (
+              <div className="space-y-2">
+                <div className="h-2 w-full overflow-hidden rounded bg-muted">
+                  <div className="h-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(uploadProgress, 100))}%` }} />
+                </div>
+                <p className="text-xs text-muted-foreground">Upload progress: {uploadProgress}%</p>
+              </div>
+            ) : null}
+
+            {uploadError ? <p className="text-sm text-destructive">{uploadError}</p> : null}
+            {uploadMessage ? <p className="text-sm text-emerald-700">{uploadMessage}</p> : null}
+
+            {uploadResults.length > 0 ? (
+              <div className="max-h-40 overflow-auto rounded border p-2 text-xs space-y-1">
+                {uploadResults.map(result => (
+                  <p key={`${result.fileName}-${result.ok ? 'ok' : 'err'}`} className={result.ok ? 'text-emerald-700' : 'text-destructive'}>
+                    {result.ok ? 'Uploaded' : 'Failed'}: {result.fileName}
+                    {result.error ? ` (${result.error})` : ''}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                disabled={uploading}
+                onClick={() => {
+                  setUploadModalState(prev => ({ ...prev, open: false }))
+                  resetUploadModal()
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={() => void uploadSelectedPhotos()} disabled={uploading || uploadFiles.length === 0}>
+                {uploading ? 'Uploading...' : `Upload ${uploadFiles.length > 0 ? uploadFiles.length : ''} image${uploadFiles.length === 1 ? '' : 's'}`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   )
 }

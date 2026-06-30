@@ -15,7 +15,15 @@ cross join (
       ('workshop_enrollment.update'::public.app_permissions),
       ('workshop_enrollment.update_status'::public.app_permissions),
       ('class_attendance.read'::public.app_permissions),
-      ('class_attendance.update'::public.app_permissions)
+      ('class_attendance.update'::public.app_permissions),
+      ('class_attendance_photo.create'::public.app_permissions),
+      ('class_attendance_photo.read'::public.app_permissions),
+      ('class_attendance_photo.update'::public.app_permissions),
+      ('class_attendance_photo.delete'::public.app_permissions),
+      ('class_attendance_photo_upload_attempt.create'::public.app_permissions),
+      ('class_attendance_photo_upload_attempt.read'::public.app_permissions),
+      ('class_attendance_photo_upload_attempt.update'::public.app_permissions),
+      ('class_attendance_photo_upload_attempt.delete'::public.app_permissions)
 ) as p(permission)
 on conflict do nothing;
 
@@ -25,6 +33,9 @@ from (values ('staff'::public.app_role)) as r(role)
 cross join (
     values
       ('class_attendance.read'::public.app_permissions),
-      ('class_attendance.update'::public.app_permissions)
+      ('class_attendance.update'::public.app_permissions),
+      ('class_attendance_photo.read'::public.app_permissions),
+      ('class_attendance_photo.update'::public.app_permissions),
+      ('class_attendance_photo_upload_attempt.read'::public.app_permissions)
 ) as p(permission)
 on conflict do nothing;

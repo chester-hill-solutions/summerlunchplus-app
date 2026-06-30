@@ -149,6 +149,21 @@ type RegisterStudentActionResult = {
   error?: string
 }
 
+type AttendancePhotoResource = {
+  id: string
+  file_name: string | null
+  mime_type: string | null
+  byte_size: number | null
+  uploaded_at: string
+  signed_url: string | null
+  signed_url_error: string | null
+}
+
+type AttendancePhotoResponse = {
+  photos?: AttendancePhotoResource[]
+  error?: string
+}
+
 const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500, 1000, 1500] as const
 const FILTER_EMPTY_TOKEN = '__none__'
@@ -735,6 +750,15 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [attendanceRegisterFeedback, setAttendanceRegisterFeedback] = useState<
     Record<string, { type: 'success' | 'error'; message: string }>
   >({})
+  const [attendancePhotoModalRow, setAttendancePhotoModalRow] = useState<Record<string, unknown> | null>(null)
+  const [attendancePhotoCache, setAttendancePhotoCache] = useState<Record<string, AttendancePhotoResource[]>>({})
+  const [attendancePhotoLoading, setAttendancePhotoLoading] = useState(false)
+  const [attendancePhotoError, setAttendancePhotoError] = useState<string | null>(null)
+  const [attendancePhotoIndex, setAttendancePhotoIndex] = useState(0)
+  const [attendancePhotoStatusOverrides, setAttendancePhotoStatusOverrides] = useState<Record<string, string>>({})
+  const [attendanceModalPhotoStatus, setAttendanceModalPhotoStatus] = useState('')
+  const [attendanceModalInitialPhotoStatus, setAttendanceModalInitialPhotoStatus] = useState('')
+  const [attendanceModalSavingStatus, setAttendanceModalSavingStatus] = useState(false)
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
   const debugPerf = searchParams.get('debugPerf') === '1'
@@ -1760,12 +1784,99 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     const classId = typeof row.class_id === 'string' ? row.class_id : ''
     const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
     if (!classId || !profileId) return
+    setAttendancePhotoStatusOverrides(prev => ({ ...prev, [`${classId}::${profileId}`]: value }))
     const formData = new FormData()
     formData.set('intent', 'update-photo-status')
     formData.set('class_id', classId)
     formData.set('profile_id', profileId)
     formData.set('photo_status', value)
     statusFetcher.submit(formData, { method: 'post' })
+  }
+
+  const attendancePhotoModalKey = (row: Record<string, unknown> | null) => {
+    if (!row) return ''
+    const classId = typeof row.class_id === 'string' ? row.class_id : ''
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    return classId && profileId ? `${classId}::${profileId}` : ''
+  }
+
+  const openAttendancePhotoModal = async (row: Record<string, unknown>) => {
+    const classId = typeof row.class_id === 'string' ? row.class_id : ''
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!classId || !profileId) return
+
+    const key = `${classId}::${profileId}`
+    setAttendancePhotoModalRow(row)
+    setAttendancePhotoError(null)
+    setAttendancePhotoIndex(0)
+
+    const initialPhotoStatus = typeof row.photo_status === 'string' ? row.photo_status : ''
+    setAttendanceModalPhotoStatus(initialPhotoStatus)
+    setAttendanceModalInitialPhotoStatus(initialPhotoStatus)
+
+    if (attendancePhotoCache[key]) return
+
+    setAttendancePhotoLoading(true)
+    try {
+      const query = new URLSearchParams({ classId, profileId })
+      const response = await fetch(`/manage/class-attendance/photos?${query.toString()}`)
+      const payload = (await response.json()) as AttendancePhotoResponse
+      if (!response.ok || payload.error) {
+        setAttendancePhotoError(payload.error ?? 'Failed to load photos.')
+        return
+      }
+      setAttendancePhotoCache(prev => ({ ...prev, [key]: payload.photos ?? [] }))
+    } catch (error) {
+      setAttendancePhotoError(error instanceof Error ? error.message : 'Failed to load photos.')
+    } finally {
+      setAttendancePhotoLoading(false)
+    }
+  }
+
+  const closeAttendancePhotoModal = () => {
+    if (attendanceModalSavingStatus) return
+    if (attendanceModalPhotoStatus !== attendanceModalInitialPhotoStatus) {
+      setAttendancePhotoError('Save photo status before closing this modal.')
+      return
+    }
+    setAttendancePhotoModalRow(null)
+    setAttendancePhotoError(null)
+    setAttendancePhotoIndex(0)
+  }
+
+  const saveAttendanceModalPhotoStatus = async () => {
+    if (!attendancePhotoModalRow) return
+    const classId = typeof attendancePhotoModalRow.class_id === 'string' ? attendancePhotoModalRow.class_id : ''
+    const profileId = typeof attendancePhotoModalRow.profile_id === 'string' ? attendancePhotoModalRow.profile_id : ''
+    if (!classId || !profileId) return
+
+    setAttendanceModalSavingStatus(true)
+    setAttendancePhotoError(null)
+    const formData = new FormData()
+    formData.set('intent', 'update-photo-status')
+    formData.set('class_id', classId)
+    formData.set('profile_id', profileId)
+    formData.set('photo_status', attendanceModalPhotoStatus)
+
+    try {
+      const response = await fetch(location.pathname + location.search, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || 'Failed to update photo status.')
+      }
+
+      setAttendanceModalInitialPhotoStatus(attendanceModalPhotoStatus)
+      setAttendancePhotoModalRow(prev => (prev ? { ...prev, photo_status: attendanceModalPhotoStatus || null } : prev))
+      const key = `${classId}::${profileId}`
+      setAttendancePhotoStatusOverrides(prev => ({ ...prev, [key]: attendanceModalPhotoStatus }))
+    } catch (error) {
+      setAttendancePhotoError(error instanceof Error ? error.message : 'Failed to update photo status.')
+    } finally {
+      setAttendanceModalSavingStatus(false)
+    }
   }
 
   const updateAttendanceCameraOn = (row: Record<string, unknown>, value: string) => {
@@ -2310,6 +2421,31 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                         )
                       }
 
+                      if (isClassAttendance && column === 'photo_count') {
+                        const rawCount = row.photo_count
+                        const count = typeof rawCount === 'number' ? rawCount : Number(rawCount ?? 0)
+                        const hasPhotos = Number.isFinite(count) && count > 0
+
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={String(count || 0)}>
+                            <div className="flex items-center gap-2">
+                              <span>{Number.isFinite(count) ? count : 0}</span>
+                              <button
+                                type="button"
+                                disabled={!hasPhotos}
+                                onClick={event => {
+                                  event.stopPropagation()
+                                  void openAttendancePhotoModal(row)
+                                }}
+                                className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                View photos
+                              </button>
+                            </div>
+                          </td>
+                        )
+                      }
+
                       if (isClassAttendance && column === 'status' && canEditStatus) {
                         const statusValue = typeof row.status === 'string' ? row.status : ''
                         return (
@@ -2333,7 +2469,14 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                       }
 
                       if (isClassAttendance && column === 'photo_status' && canEditStatus) {
-                        const photoStatusValue = typeof row.photo_status === 'string' ? row.photo_status : ''
+                        const rowKey = attendanceRowKey(row)
+                        const override = rowKey ? attendancePhotoStatusOverrides[rowKey] : undefined
+                        const photoStatusValue =
+                          typeof override === 'string'
+                            ? override
+                            : typeof row.photo_status === 'string'
+                              ? row.photo_status
+                              : ''
                         return (
                           <td key={`cell-${absoluteRowIndex}-${column}`} className="overflow-hidden px-4 py-2 font-mono" title={photoStatusValue || '(empty)'}>
                             <select
@@ -2698,6 +2841,124 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           </tbody>
         </table>
       </div>
+
+      {attendancePhotoModalRow
+        ? (() => {
+            const modalKey = attendancePhotoModalKey(attendancePhotoModalRow)
+            const photos = modalKey ? attendancePhotoCache[modalKey] ?? [] : []
+            const boundedIndex = Math.max(0, Math.min(attendancePhotoIndex, Math.max(photos.length - 1, 0)))
+            const currentPhoto = photos[boundedIndex]
+            const profileLabel =
+              typeof attendancePhotoModalRow.profile_display === 'string'
+                ? attendancePhotoModalRow.profile_display
+                : 'Student'
+            const classStart =
+              typeof attendancePhotoModalRow.class_starts_at === 'string' && attendancePhotoModalRow.class_starts_at
+                ? formatTimestamp(attendancePhotoModalRow.class_starts_at)
+                : 'Class'
+
+            return createPortal(
+              <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+                <div className="w-full max-w-4xl rounded-md border bg-card p-4 shadow-2xl">
+                  <div className="mb-3 flex items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-lg font-semibold">Class photos</h2>
+                      <p className="text-xs text-muted-foreground">{profileLabel} - {classStart}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeAttendancePhotoModal}
+                      className="rounded border border-input px-2 py-1 text-xs hover:bg-muted"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="mb-3 grid gap-4 md:grid-cols-[1fr_220px]">
+                    <div className="rounded border bg-muted/20 p-2">
+                      {attendancePhotoLoading ? (
+                        <p className="p-8 text-center text-sm text-muted-foreground">Loading photos...</p>
+                      ) : currentPhoto?.signed_url ? (
+                        <img
+                          src={currentPhoto.signed_url}
+                          alt={currentPhoto.file_name ?? 'Class photo'}
+                          className="max-h-[60vh] w-full rounded object-contain"
+                        />
+                      ) : (
+                        <p className="p-8 text-center text-sm text-muted-foreground">
+                          {photos.length === 0 ? 'No photos uploaded yet.' : currentPhoto?.signed_url_error ?? 'Photo URL unavailable.'}
+                        </p>
+                      )}
+
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          disabled={attendancePhotoLoading || photos.length <= 1 || boundedIndex === 0}
+                          onClick={() => setAttendancePhotoIndex(prev => Math.max(0, prev - 1))}
+                          className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Previous
+                        </button>
+                        <p className="text-xs text-muted-foreground">
+                          {photos.length === 0 ? '0 / 0' : `${boundedIndex + 1} / ${photos.length}`}
+                        </p>
+                        <button
+                          type="button"
+                          disabled={attendancePhotoLoading || photos.length <= 1 || boundedIndex >= photos.length - 1}
+                          onClick={() => setAttendancePhotoIndex(prev => Math.min(photos.length - 1, prev + 1))}
+                          className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 rounded border bg-background p-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Photo status</p>
+                        <select
+                          value={attendanceModalPhotoStatus}
+                          onChange={event => setAttendanceModalPhotoStatus(event.target.value)}
+                          className={`${TABLE_SELECT_CLASS_NAME} mt-1`}
+                        >
+                          <option value="">(none)</option>
+                          {Constants.public.Enums.class_attendance_photo_status.map(
+                            (status: Database['public']['Enums']['class_attendance_photo_status']) => (
+                              <option key={status} value={status}>
+                                {status}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={attendanceModalSavingStatus || attendanceModalPhotoStatus === attendanceModalInitialPhotoStatus}
+                        onClick={() => void saveAttendanceModalPhotoStatus()}
+                        className="rounded border border-input px-3 py-2 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {attendanceModalSavingStatus ? 'Saving...' : 'Save status'}
+                      </button>
+
+                      {currentPhoto ? (
+                        <div className="space-y-1 text-xs text-muted-foreground">
+                          <p>File: {currentPhoto.file_name ?? 'Untitled'}</p>
+                          <p>MIME: {currentPhoto.mime_type ?? 'unknown'}</p>
+                          <p>Size: {typeof currentPhoto.byte_size === 'number' ? `${currentPhoto.byte_size} bytes` : 'unknown'}</p>
+                          <p>Uploaded: {formatTimestamp(currentPhoto.uploaded_at)}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {attendancePhotoError ? <p className="text-xs text-destructive">{attendancePhotoError}</p> : null}
+                </div>
+              </div>,
+              document.body
+            )
+          })()
+        : null}
 
       {visibleHoverCardCellId &&
       activeHoverCard?.cellId === visibleHoverCardCellId &&
