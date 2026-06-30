@@ -17,7 +17,7 @@ values
   (
     '11111111-aaaa-aaaa-aaaa-111111111111'::uuid,
     'guardian',
-    'guardian1@example.com',
+    'guardian1@chsolutions.ca',
     'Amina',
     'Khan',
     '4165550101',
@@ -45,7 +45,7 @@ values
   (
     '33333333-cccc-cccc-cccc-333333333333'::uuid,
     'guardian',
-    'guardian2@example.com',
+    'guardian2@chsolutions.ca',
     'Marco',
     'Silva',
     '4165550102',
