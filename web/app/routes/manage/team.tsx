@@ -12,7 +12,6 @@ import { manageSections, overviewPage } from './nav'
 
 const STAFF_ALLOWED_MANAGE_PATHS = new Set([
   '/manage',
-  '/manage/attendance',
   '/manage/class-attendance',
   '/manage/class',
   '/manage/workshop',
@@ -30,7 +29,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   if (isStaff && !STAFF_ALLOWED_MANAGE_PATHS.has(pathname)) {
-    throw redirect('/manage/attendance', { headers: auth.headers })
+    throw redirect('/manage/class-attendance', { headers: auth.headers })
   }
 
   return { role: auth.claims.role }
