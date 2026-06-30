@@ -19,6 +19,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const url = new URL(request.url);
   const pathname = url.pathname;
+  const hasAuthCode = Boolean(url.searchParams.get('code'))
+  const hasOtpToken = Boolean(url.searchParams.get('token_hash') && url.searchParams.get('type'))
+
+  if (pathname !== '/auth/confirm' && (hasAuthCode || hasOtpToken)) {
+    throw redirect(`/auth/confirm${url.search}`, { status: 302 })
+  }
+
   const allowlist = new Set([
     "/login",
     "/sign-up",
