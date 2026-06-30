@@ -275,7 +275,10 @@ export default function WorkshopSetupPage() {
   const [workshopTimezone, setWorkshopTimezone] = useState(actionData?.values?.timezone ?? '')
   const [timezoneRegion, setTimezoneRegion] = useState('')
   const [timezoneLocation, setTimezoneLocation] = useState('')
-  const isSubmitting = navigation.state === 'submitting'
+  const isSubmitting =
+    navigation.state !== 'idle' &&
+    typeof navigation.formMethod === 'string' &&
+    navigation.formMethod.toLowerCase() === 'post'
 
   const [selectedSemesterId, setSelectedSemesterId] = useState(actionData?.values?.semester_id ?? '')
   const [enrollmentOpenAtValue, setEnrollmentOpenAtValue] = useState(actionData?.values?.enrollment_open_at ?? '')
