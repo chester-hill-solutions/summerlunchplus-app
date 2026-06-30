@@ -437,9 +437,122 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     try {
+      const [{ data: classRow, error: classError }, { data: profileRow, error: profileError }, { data: registrantBefore, error: registrantBeforeError }] =
+        await Promise.all([
+          adminClient.from('class').select('workshop_id').eq('id', classId).maybeSingle<{ workshop_id: string | null }>(),
+          adminClient.from('profile').select('email').eq('id', profileId).maybeSingle<{ email: string | null }>(),
+          adminClient
+            .from('class_zoom_registrant')
+            .select('zoom_registrant_id, zoom_join_url')
+            .eq('class_id', classId)
+            .eq('profile_id', profileId)
+            .maybeSingle<{ zoom_registrant_id: string | null; zoom_join_url: string | null }>(),
+        ])
+
+      if (classError) {
+        return {
+          ok: false,
+          intent: 'register-student',
+          class_id: classId,
+          profile_id: profileId,
+          error: `Failed to load class context: ${classError.message}`,
+        }
+      }
+
+      if (profileError) {
+        return {
+          ok: false,
+          intent: 'register-student',
+          class_id: classId,
+          profile_id: profileId,
+          error: `Failed to load profile context: ${profileError.message}`,
+        }
+      }
+
+      if (registrantBeforeError) {
+        return {
+          ok: false,
+          intent: 'register-student',
+          class_id: classId,
+          profile_id: profileId,
+          error: `Failed to load existing registrant context: ${registrantBeforeError.message}`,
+        }
+      }
+
+      const workshopId = classRow?.workshop_id ?? null
+      const { data: approvedEnrollment, error: enrollmentError } = workshopId
+        ? await adminClient
+            .from('workshop_enrollment')
+            .select('id')
+            .eq('workshop_id', workshopId)
+            .eq('profile_id', profileId)
+            .eq('status', 'approved')
+            .limit(1)
+            .maybeSingle<{ id: string }>()
+        : { data: null, error: null }
+
+      if (enrollmentError) {
+        return {
+          ok: false,
+          intent: 'register-student',
+          class_id: classId,
+          profile_id: profileId,
+          error: `Failed to verify approved enrollment: ${enrollmentError.message}`,
+        }
+      }
+
+      const profileEmail = (profileRow?.email ?? '').trim().toLowerCase()
+      const hasProfileEmail = Boolean(profileEmail)
+
+      const { data: guardianEdges, error: guardianEdgeError } = await adminClient
+        .from('person_guardian_child')
+        .select('guardian_profile_id')
+        .eq('child_profile_id', profileId)
+
+      if (guardianEdgeError) {
+        return {
+          ok: false,
+          intent: 'register-student',
+          class_id: classId,
+          profile_id: profileId,
+          error: `Failed to load guardian relation context: ${guardianEdgeError.message}`,
+        }
+      }
+
+      const guardianIds = Array.from(
+        new Set((guardianEdges ?? []).map(edge => edge.guardian_profile_id).filter((id): id is string => Boolean(id)))
+      )
+
+      const { data: guardians, error: guardianError } = guardianIds.length
+        ? await adminClient.from('profile').select('email').in('id', guardianIds)
+        : { data: [] as Array<{ email: string | null }>, error: null }
+
+      if (guardianError) {
+        return {
+          ok: false,
+          intent: 'register-student',
+          class_id: classId,
+          profile_id: profileId,
+          error: `Failed to load guardian email context: ${guardianError.message}`,
+        }
+      }
+
+      const guardianEmailCount = (guardians ?? []).filter(guardian => Boolean((guardian.email ?? '').trim().toLowerCase())).length
+      const hasGuardianFallbackEmail = guardianEmailCount > 0
+      const identitySource = hasProfileEmail ? 'profile' : hasGuardianFallbackEmail ? 'guardian_fallback' : 'none'
+
       const appOrigin = new URL(request.url).origin
       const runResult = await runZoomJobsForClass({ classId, appOrigin, runId: `manual-row-${Date.now().toString(36)}` })
       const provision = runResult.provision
+      const candidateCountFromProvision =
+        provision && typeof provision === 'object'
+          ? Number('registrantsCreated' in provision ? provision.registrantsCreated : 0) +
+            Number('registrantsUpdated' in provision ? provision.registrantsUpdated : 0) +
+            Number('registrantsSkipped' in provision ? provision.registrantsSkipped : 0)
+          : 0
+      const provisionSkipped = Boolean(provision && typeof provision === 'object' && 'skipped' in provision && provision.skipped)
+      const provisionSkipReason =
+        provision && typeof provision === 'object' && 'skipReason' in provision ? String(provision.skipReason ?? 'none') : 'none'
       const provisionSummary =
         provision && typeof provision === 'object'
           ? [
@@ -448,6 +561,8 @@ export async function action({ request }: Route.ActionArgs) {
               `registrants_created=${'registrantsCreated' in provision ? String(provision.registrantsCreated) : 'n/a'}`,
               `registrants_updated=${'registrantsUpdated' in provision ? String(provision.registrantsUpdated) : 'n/a'}`,
               `registrants_skipped=${'registrantsSkipped' in provision ? String(provision.registrantsSkipped) : 'n/a'}`,
+              `provision_skipped=${String(provisionSkipped)}`,
+              `provision_skip_reason=${provisionSkipReason}`,
             ].join(' | ')
           : 'provision=unknown'
 
@@ -470,12 +585,41 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       if (!registrant?.zoom_registrant_id || !registrant.zoom_join_url) {
+        const profileApproved = Boolean(approvedEnrollment?.id)
+        const registrantBeforeState =
+          registrantBefore && (registrantBefore.zoom_registrant_id || registrantBefore.zoom_join_url)
+            ? `before_registrant_id=${registrantBefore.zoom_registrant_id ?? 'none'} before_join_url=${registrantBefore.zoom_join_url ?? 'none'}`
+            : 'before_registrant=none'
+        const registrantAfterState = registrant
+          ? `after_registrant_id=${registrant.zoom_registrant_id ?? 'none'} after_join_url=${registrant.zoom_join_url ?? 'none'}`
+          : 'after_registrant=none'
+
+        let rootCause = 'unknown_registration_failure'
+        if (!workshopId) rootCause = 'class_missing_workshop'
+        else if (!profileApproved) rootCause = 'profile_not_approved_for_class_workshop'
+        else if (identitySource === 'none') rootCause = 'no_student_or_guardian_email_for_zoom_identity'
+        else if (provisionSkipped && provisionSkipReason === 'lock_not_acquired') rootCause = 'class_provision_lock_not_acquired'
+        else if (registrant?.zoom_registrant_id && !registrant.zoom_join_url) rootCause = 'zoom_registrant_created_without_join_url'
+        else if (!registrant) rootCause = 'registrant_row_not_created_for_profile'
+
         return {
           ok: false,
           intent: 'register-student',
           class_id: classId,
           profile_id: profileId,
-          error: `Sync ran but this student still has no join link. | ${provisionSummary}`,
+          error: [
+            'Register run completed but this student still has no join link.',
+            `root_cause=${rootCause}`,
+            `candidate_scope=class_wide_approved_profiles`,
+            `candidate_count=${candidateCountFromProvision}`,
+            `profile_approved_for_class_workshop=${String(profileApproved)}`,
+            `identity_source=${identitySource}`,
+            `profile_email_present=${String(hasProfileEmail)}`,
+            `guardian_email_count=${guardianEmailCount}`,
+            registrantBeforeState,
+            registrantAfterState,
+            provisionSummary,
+          ].join(' | '),
           run_result: runResult,
         }
       }
