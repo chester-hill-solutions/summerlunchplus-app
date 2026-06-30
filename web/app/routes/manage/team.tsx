@@ -10,13 +10,27 @@ import { cn } from '@/lib/utils'
 import type { Route } from './+types/team'
 import { manageSections, overviewPage } from './nav'
 
+const STAFF_ALLOWED_MANAGE_PATHS = new Set([
+  '/manage',
+  '/manage/attendance',
+  '/manage/class-attendance',
+  '/manage/class',
+  '/manage/workshop',
+  '/manage/workshop/setup',
+])
+
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   const pathname = new URL(request.url).pathname
   const isTeamRoute = pathname === '/manage/team'
+  const isStaff = auth.claims.role === 'staff'
 
   if (!isRoleAtLeast(auth.claims.role, 'staff') && !(isRoleAtLeast(auth.claims.role, 'instructor') && isTeamRoute)) {
     throw redirect('/home', { headers: auth.headers })
+  }
+
+  if (isStaff && !STAFF_ALLOWED_MANAGE_PATHS.has(pathname)) {
+    throw redirect('/manage/attendance', { headers: auth.headers })
   }
 
   return { role: auth.claims.role }
@@ -24,11 +38,24 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export default function TeamLayout() {
   const { role } = useLoaderData<typeof loader>()
-  const isStaff = isRoleAtLeast(role, 'staff')
+  const isManagerOrAdmin = isRoleAtLeast(role, 'manager')
+  const isStaff = role === 'staff'
   const teamNavSections = useMemo(
     () =>
-      isStaff
+      isManagerOrAdmin
         ? manageSections
+        : isStaff
+          ? [
+              {
+                key: 'class-management' as const,
+                label: 'Class Management',
+                stickerSrc: '/stickers/salad_on_plate.png',
+                defaultCollapsed: false,
+                items: manageSections
+                  .find(section => section.key === 'class-management')
+                  ?.items.filter(item => STAFF_ALLOWED_MANAGE_PATHS.has(item.to)) ?? [],
+              },
+            ]
         : [
             {
               key: 'user-management' as const,
@@ -40,7 +67,7 @@ export default function TeamLayout() {
                 ?.items.filter(item => item.to === '/manage/team') ?? [],
             },
           ],
-    [isStaff]
+    [isManagerOrAdmin, isStaff]
   )
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)

@@ -25,9 +25,9 @@ const TEAM_ROLES = ['instructor', 'staff', 'manager', 'admin'] as const
 const TEAM_ROLE_SET = new Set<string>(TEAM_ROLES)
 
 const allowedInviteRolesFor = (role: string | null | undefined): string[] => {
-  if (role === 'admin') return ['staff', 'manager', 'admin']
-  if (role === 'manager') return ['staff']
-  if (role === 'staff') return ['staff']
+  if (role === 'admin') return ['instructor', 'staff', 'manager', 'admin']
+  if (role === 'manager') return ['instructor', 'staff']
+  if (role === 'staff') return ['instructor']
   return []
 }
 
@@ -177,7 +177,7 @@ export default function TeamMembersTablePage({ loaderData }: Route.ComponentProp
                 id="team-invite-role"
                 name="role"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                defaultValue={loaderData.allowedInviteRoles[0] ?? 'staff'}
+                defaultValue={loaderData.allowedInviteRoles[0] ?? 'instructor'}
                 required
               >
                 {loaderData.allowedInviteRoles.map(role => (
