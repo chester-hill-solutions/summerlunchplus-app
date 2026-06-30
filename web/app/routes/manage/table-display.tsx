@@ -1982,7 +1982,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         </div>
       </div>
 
-      <div className="min-w-0 overflow-x-auto border-y">
+      <div className="min-w-0 overflow-auto border-y max-h-[calc(100svh-19rem)]">
         <table className="w-max table-fixed text-sm" style={{ width: `${tableWidth}px`, minWidth: `${tableWidth}px` }}>
           <colgroup>
             {columns.map(column => (

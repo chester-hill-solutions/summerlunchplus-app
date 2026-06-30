@@ -57,12 +57,6 @@ type ClassRow = {
   ends_at: string
 }
 
-type AttendanceRow = {
-  class_id: string
-  profile_id: string
-  status: 'unknown' | 'present' | 'absent' | null
-}
-
 type LoaderData = {
   family: Awaited<ReturnType<typeof resolveFamilyGraph>>
   familyProfiles: FamilyProfile[]
@@ -71,7 +65,6 @@ type LoaderData = {
   semesterById: Record<string, { id: string; name: string | null; starts_at: string; ends_at: string }>
   enrollments: EnrollmentRow[]
   classesByWorkshop: Record<string, ClassRow[]>
-  attendanceByClass: Record<string, AttendanceRow[]>
   joinUrlByClass: Record<string, string>
   nextClass:
       | {
@@ -251,18 +244,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   }, {})
 
   const classIds = classes.map(classRow => classRow.id)
-  const { data: attendanceRaw } = classIds.length
-    ? await adminClient
-        .from('class_attendance')
-        .select('class_id, profile_id, status')
-        .in('class_id', classIds)
-        .in('profile_id', family.familyProfileIds)
-    : { data: [] }
-  const attendanceByClass = ((attendanceRaw ?? []) as AttendanceRow[]).reduce<Record<string, AttendanceRow[]>>((acc, row) => {
-    if (!acc[row.class_id]) acc[row.class_id] = []
-    acc[row.class_id].push(row)
-    return acc
-  }, {})
 
   const { data: registrantsRaw } = classIds.length
     ? await adminClient
@@ -341,7 +322,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     semesterById,
     enrollments,
     classesByWorkshop,
-    attendanceByClass,
     joinUrlByClass,
     nextClass,
   } satisfies LoaderData
@@ -560,7 +540,6 @@ export default function Home() {
     semesterById,
     enrollments,
     classesByWorkshop,
-    attendanceByClass,
     joinUrlByClass,
     nextClass,
   } = useLoaderData<LoaderData>()
@@ -591,28 +570,17 @@ export default function Home() {
 
   const workshopEnrollments = enrollments.filter(enrollment => Boolean(enrollment.workshop_id))
   const hasWorkshopEnrollment = workshopEnrollments.length > 0
+  const hasPendingWorkshopEnrollment = workshopEnrollments.some(enrollment => enrollment.status === 'pending')
+  const shouldShowEnrollmentBanner =
+    enrollmentStatus === 'error' || (enrollmentStatus === 'success' && hasPendingWorkshopEnrollment)
 
-  const upcomingAndPastByWorkshop = Object.fromEntries(
+  const joinableByWorkshop = Object.fromEntries(
     Object.entries(classesByWorkshop).map(([workshopId, classes]) => {
       const now = Date.now()
-      const upcoming = classes.filter(classRow => new Date(classRow.starts_at).getTime() > now)
-      const past = classes.filter(classRow => new Date(classRow.starts_at).getTime() <= now)
-      return [workshopId, { upcoming, past }]
+      const joinable = classes.filter(classRow => new Date(classRow.ends_at).getTime() + 15 * 60_000 > now)
+      return [workshopId, joinable]
     })
-  ) as Record<string, { upcoming: ClassRow[]; past: ClassRow[] }>
-
-  const attendanceSummaryForWorkshop = (workshopId: string) => {
-    const classes = classesByWorkshop[workshopId] ?? []
-    let present = 0
-    let absent = 0
-    for (const classRow of classes) {
-      for (const record of attendanceByClass[classRow.id] ?? []) {
-        if (record.status === 'present') present += 1
-        if (record.status === 'absent') absent += 1
-      }
-    }
-    return { present, absent }
-  }
+  ) as Record<string, ClassRow[]>
 
   const sortedWorkshopEnrollments = workshopEnrollments
     .slice()
@@ -620,8 +588,8 @@ export default function Home() {
       const workshopIdA = a.workshop_id as string
       const workshopIdB = b.workshop_id as string
 
-      const nextA = upcomingAndPastByWorkshop[workshopIdA]?.upcoming?.[0]?.starts_at ?? null
-      const nextB = upcomingAndPastByWorkshop[workshopIdB]?.upcoming?.[0]?.starts_at ?? null
+      const nextA = joinableByWorkshop[workshopIdA]?.[0]?.starts_at ?? null
+      const nextB = joinableByWorkshop[workshopIdB]?.[0]?.starts_at ?? null
 
       if (nextA && nextB) {
         const byNextClass = new Date(nextA).getTime() - new Date(nextB).getTime()
@@ -654,7 +622,7 @@ export default function Home() {
         <p className="text-sm text-muted-foreground">{subtitle}</p>
       </header>
 
-      {enrollmentMessage && enrollmentStatus ? (
+      {enrollmentMessage && enrollmentStatus && shouldShowEnrollmentBanner ? (
         <p className={enrollmentStatus === 'error' ? 'text-sm text-destructive' : 'text-sm text-emerald-600'}>{enrollmentMessage}</p>
       ) : null}
 
@@ -699,9 +667,8 @@ export default function Home() {
                       const workshopId = enrollment.workshop_id as string
                       const workshop = workshopsById[workshopId]
                       const semester = semesterById[enrollment.semester_id]
-                      const upcoming = upcomingAndPastByWorkshop[workshopId]?.upcoming ?? []
+                      const upcoming = joinableByWorkshop[workshopId] ?? []
                       const next = upcoming[0]
-                      const attendance = attendanceSummaryForWorkshop(workshopId)
 
                       return (
                         <TableRow key={enrollment.id}>
@@ -724,7 +691,7 @@ export default function Home() {
                             )}
                           </TableCell>
                           <TableCell>{next ? formatDateTime(next.starts_at) : 'No upcoming class'}</TableCell>
-                          <TableCell>{`Present: ${attendance.present} · Absent: ${attendance.absent}`}</TableCell>
+                          <TableCell>{next ? 'Join from class list below' : '-'}</TableCell>
                         </TableRow>
                       )
                     })}
@@ -735,7 +702,7 @@ export default function Home() {
               {sortedWorkshopEnrollments.map(enrollment => {
                 const workshopId = enrollment.workshop_id as string
                 const workshop = workshopsById[workshopId]
-                const grouped = upcomingAndPastByWorkshop[workshopId] ?? { upcoming: [], past: [] }
+                const joinable = joinableByWorkshop[workshopId] ?? []
 
                 return (
                   <section key={`detail-${enrollment.id}`} id={`workshop-${workshopId}`} className="rounded-lg border bg-card p-4 shadow-sm space-y-4">
@@ -743,7 +710,7 @@ export default function Home() {
 
                     <div className="space-y-2">
                       <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Upcoming classes</h4>
-                      {grouped.upcoming.length === 0 ? (
+                      {joinable.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No upcoming classes scheduled.</p>
                       ) : (
                         <Table>
@@ -755,7 +722,7 @@ export default function Home() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {grouped.upcoming.map(classRow => (
+                            {joinable.map(classRow => (
                               <TableRow key={classRow.id}>
                                 <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
                                 <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
@@ -781,40 +748,6 @@ export default function Home() {
                       )}
                     </div>
 
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Past classes & attendance</h4>
-                      {grouped.past.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No past classes yet.</p>
-                      ) : (
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Class date</TableHead>
-                              <TableHead>Present</TableHead>
-                              <TableHead>Absent</TableHead>
-                              <TableHead>Unknown</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {grouped.past.map(classRow => {
-                              const records = attendanceByClass[classRow.id] ?? []
-                              const present = records.filter(record => record.status === 'present').length
-                              const absent = records.filter(record => record.status === 'absent').length
-                              const unknown = records.filter(record => record.status === 'unknown' || record.status === null).length
-
-                              return (
-                                <TableRow key={classRow.id}>
-                                  <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
-                                  <TableCell>{present}</TableCell>
-                                  <TableCell>{absent}</TableCell>
-                                  <TableCell>{unknown}</TableCell>
-                                </TableRow>
-                              )
-                            })}
-                          </TableBody>
-                        </Table>
-                      )}
-                    </div>
                   </section>
                 )
               })}

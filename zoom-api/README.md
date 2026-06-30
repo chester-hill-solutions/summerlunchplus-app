@@ -80,10 +80,17 @@ All endpoints except `/health` require `Authorization: Bearer <api_key>`.
 | `GET` | `/meetings/{uuid}/participants` | Attendance report for a meeting (`?force_refresh=false`) |
 | `POST` | `/meetings` | Create a scheduled meeting (`host_zoom_user_id` or `host_zoom_user_email` optional) |
 | `PATCH` | `/meetings/{id}` | Update a scheduled meeting (`topic`, `start_time`, `duration`) |
+| `DELETE` | `/meetings/{id}` | Delete a scheduled meeting |
 | `POST` | `/meetings/{id}/registrants` | Bulk register participants |
 | `DELETE` | `/meetings/{id}/registrants/{registrant_id}` | Remove a registrant from meeting |
 
 Full request/response schemas are documented in Swagger UI at `/docs`.
+
+### Timezone requirement for `start_time`
+
+- `start_time` must be ISO 8601 with timezone offset or `Z` (UTC).
+- Naive datetimes (no timezone) are rejected.
+- The API normalizes accepted timestamps to UTC (`Z`) before sending to Zoom.
 
 ## Notes
 

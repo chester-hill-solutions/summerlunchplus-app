@@ -89,8 +89,8 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
   workshop: {
     label: 'Workshops',
     table: 'workshop',
-    select: 'id, semester_id, description, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity',
-    columns: ['semester_range', 'description', 'enrollment_open_at', 'enrollment_close_at', 'capacity', 'wait_list_capacity'],
+    select: 'id, semester_id, description, timezone, enrollment_open_at, enrollment_close_at, capacity, wait_list_capacity',
+    columns: ['semester_range', 'description', 'timezone', 'enrollment_open_at', 'enrollment_close_at', 'capacity', 'wait_list_capacity'],
     lookupMappings: [
       {
         keyColumn: 'semester_id',
@@ -108,6 +108,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
       fields: {
         semester_id: { label: 'Semester', type: 'foreign_key', required: true, foreignKeyTable: 'semester' },
         description: { label: 'Description', type: 'text', nullable: true },
+        timezone: { label: 'Timezone', type: 'text', required: true },
         enrollment_open_at: { label: 'Enrollment Open', type: 'datetime', nullable: true },
         enrollment_close_at: { label: 'Enrollment Close', type: 'datetime', nullable: true },
         capacity: { label: 'Capacity', type: 'number', required: true },

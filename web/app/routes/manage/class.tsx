@@ -217,22 +217,34 @@ export async function loader(args: Route.LoaderArgs) {
     }
   })
 
+  const displayColumns = [
+    ...(base.columns ?? []).filter(
+      column =>
+        column !== 'id' &&
+        column !== 'class_zoom_meeting_id' &&
+        column !== 'class_zoom_meeting_display'
+    ),
+    'zoom_topic',
+    'zoom_start_at',
+    'zoom_end_at',
+    'zoom_schedule_match',
+  ]
+
+  const fitAllColumnsMeta = Object.fromEntries(
+    displayColumns.map(column => [
+      column,
+      {
+        fitContentOnLoad: true,
+      },
+    ])
+  )
+
   return {
     ...base,
-    columns: [
-      ...(base.columns ?? []).filter(
-        column =>
-          column !== 'id' &&
-          column !== 'class_zoom_meeting_id' &&
-          column !== 'class_zoom_meeting_display'
-      ),
-      'zoom_topic',
-      'zoom_start_at',
-      'zoom_end_at',
-      'zoom_schedule_match',
-    ],
+    columns: displayColumns,
     rows: nextRows,
     columnMeta: {
+      ...fitAllColumnsMeta,
       ...(base.columnMeta ?? {}),
       workshop_description: {
         label: 'Workshop',

@@ -1770,6 +1770,7 @@ export type Database = {
           enrollment_open_at: string | null
           id: string
           semester_id: string
+          timezone: string
           updated_at: string
           wait_list_capacity: number
         }
@@ -1781,6 +1782,7 @@ export type Database = {
           enrollment_open_at?: string | null
           id?: string
           semester_id: string
+          timezone?: string
           updated_at?: string
           wait_list_capacity?: number
         }
@@ -1792,6 +1794,7 @@ export type Database = {
           enrollment_open_at?: string | null
           id?: string
           semester_id?: string
+          timezone?: string
           updated_at?: string
           wait_list_capacity?: number
         }
@@ -2411,4 +2414,3 @@ export const Constants = {
     },
   },
 } as const
-

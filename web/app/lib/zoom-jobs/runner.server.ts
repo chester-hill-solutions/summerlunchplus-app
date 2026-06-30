@@ -1,5 +1,4 @@
-import { resolvePublishedDraftByKey } from '@/lib/email/drafts/service.server'
-import { sendTransactionalEmail } from '@/lib/email/send-email.server'
+import { sendTemplateEmail } from '@/lib/email/send-email.server'
 import { resolveFamilyContactsByProfileId } from '@/lib/family.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { getClassesInWindow, provisionClassById } from '@/lib/zoom-jobs/provision.server'
@@ -14,13 +13,18 @@ const normalizeEmail = (value: string | null) => (value ?? '').trim().toLowerCas
 const ensureOrigin = (origin: string) => origin.replace(/\/+$/, '')
 
 const resolvePublicAppOrigin = (fallbackOrigin: string) => {
-  const explicitOrigin = (
-    process.env.PUBLIC_APP_ORIGIN ??
-    process.env.APP_BASE_URL ??
-    process.env.VITE_PUBLIC_APP_ORIGIN ??
-    process.env.VITE_APP_ORIGIN ??
-    ''
-  ).trim()
+  const railwayPublicDomain = (process.env.RAILWAY_PUBLIC_DOMAIN ?? '').trim()
+  const railwayPublicOrigin = railwayPublicDomain ? `https://${railwayPublicDomain}` : ''
+  const explicitOrigin = [
+    process.env.PUBLIC_APP_ORIGIN,
+    process.env.APP_BASE_URL,
+    railwayPublicOrigin,
+    process.env.VITE_PUBLIC_APP_ORIGIN,
+    process.env.VITE_APP_ORIGIN,
+  ]
+    .map(value => (value ?? '').trim())
+    .find(Boolean)
+    ?? ''
   return ensureOrigin(explicitOrigin || fallbackOrigin)
 }
 
@@ -253,34 +257,15 @@ const sendReminderCoverage = async ({ now, appOrigin }: { now: Date; appOrigin: 
         timeStyle: 'short',
       }).format(new Date(classRow.starts_at))
 
-      const templateKey = 'class_reminder_login_v1'
       const templateData: { workshopName: string; classStartsAt: string; loginUrl: string } = {
         workshopName,
         classStartsAt: startsAtText,
         loginUrl,
       }
 
-      const draftRendered = await resolvePublishedDraftByKey({
-        draftKey: templateKey,
-        variables: templateData,
-      })
-
-      if (!draftRendered) {
-        console.error('[zoom-jobs][reminder] missing published email draft', {
-          templateKey,
-          classId,
-          profileId: registrant.profile_id,
-        })
-        failed += 1
-        continue
-      }
-
-      const result = await sendTransactionalEmail({
+      const result = await sendTemplateEmail({
         toEmail: email,
-        subject: draftRendered.subject,
-        html: draftRendered.html,
-        text: draftRendered.text,
-        templateKey,
+        templateKey: 'class_reminder_login_v1',
         templateData,
         eventKey: `class:${classId}:registrant:${registrant.id}:reminder_login_v1`,
         profileId: registrant.profile_id,
