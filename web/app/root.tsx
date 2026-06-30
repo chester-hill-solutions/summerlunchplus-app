@@ -25,6 +25,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     "/sign-up/terms",
     "/sign-up/invite",
     "/forgot-password",
+    "/update-password",
     "/auth/sign-up-details",
     "/auth/waiting-on-guardian",
     "/auth/confirm",
