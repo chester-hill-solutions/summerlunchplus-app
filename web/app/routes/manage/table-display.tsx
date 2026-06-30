@@ -140,7 +140,7 @@ type LoaderData = {
 }
 
 const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
-const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500] as const
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500, 1000, 1500] as const
 const FILTER_EMPTY_TOKEN = '__none__'
 const FILTER_POPOVER_WIDTH = 256
 const FILTER_POPOVER_MARGIN = 8
@@ -148,7 +148,7 @@ const FILTER_POPOVER_ESTIMATED_HEIGHT = 340
 const FILTER_LOAD_CHUNK_SIZE = 300
 const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
-const FILTER_OPTION_MAX_VISIBLE_LIST = 500
+const FILTER_OPTION_MAX_VISIBLE_LIST = 1500
 const FILTER_EMPTY_LABEL = '(empty)'
 const ENABLE_PERSISTED_COLUMN_WIDTHS = false
 const WORKSHOP_ENRICHMENT_BATCH_SIZE = 40
@@ -416,6 +416,23 @@ const personLinkForCell = (
     row.id
   ) {
     return withReturnTo('/manage/class-attendance', { f_class_id: row.id })
+  }
+  if (tableName === 'class' && column === 'step_meeting' && typeof row.id === 'string' && row.id) {
+    return withReturnTo('/manage/class-zoom-meeting', { f_class_id: row.id })
+  }
+  if (tableName === 'class' && column === 'step_registrants' && typeof row.id === 'string' && row.id) {
+    return withReturnTo('/manage/class-attendance', { f_class_id: row.id })
+  }
+  if (tableName === 'class' && column === 'step_reminder' && typeof row.id === 'string' && row.id) {
+    return withReturnTo('/manage/class-zoom-registrant', { f_class_id: row.id })
+  }
+  if (
+    tableName === 'class' &&
+    column === 'step_attendance' &&
+    typeof row.class_zoom_meeting_id === 'string' &&
+    row.class_zoom_meeting_id
+  ) {
+    return withReturnTo('/manage/class-zoom-participant-sync', { f_class_zoom_meeting_id: row.class_zoom_meeting_id })
   }
   if (column === 'subject_profile_display' && typeof row.subject_profile_id === 'string') {
     return withReturnTo('/manage/person', { profileId: row.subject_profile_id })
@@ -1808,7 +1825,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const openFilterStatusText = isOpenFilterLoading
     ? 'Loading...'
     : shouldHideOptionsList
-      ? 'there are over 500 unique values, search to narrow'
+      ? 'there are over 1500 unique values, search to narrow'
       : `Showing ${visibleFilterOptions.length} of ${openFilterCacheEntry?.totalCount ?? 0} options`
   const openFilterSelectedValues = openFilterColumn
     ? effectiveSelectedValuesForColumn(openFilterColumn, openFilterOptions)
