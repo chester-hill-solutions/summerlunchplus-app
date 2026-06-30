@@ -85,6 +85,11 @@ type ActionData = {
   message?: string
 }
 
+type ToastState = {
+  tone: 'success' | 'error'
+  message: string
+} | null
+
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
 
@@ -619,6 +624,7 @@ export default function Home() {
   const [uploadMessage, setUploadMessage] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadResults, setUploadResults] = useState<Array<{ fileName: string; ok: boolean; error?: string }>>([])
+  const [toast, setToast] = useState<ToastState>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const resetUploadModal = () => {
@@ -644,6 +650,12 @@ export default function Home() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [uploadModalState.open, uploading])
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), 3500)
+    return () => window.clearTimeout(timer)
+  }, [toast])
 
   const uploadSelectedPhotos = async () => {
     if (!uploadFiles.length || !uploadModalState.classId || !uploadModalState.profileId || uploading) return
@@ -683,6 +695,7 @@ export default function Home() {
     if (response.status < 200 || response.status >= 300 || body.error) {
       setUploadError(body.error ?? 'Failed to upload photos.')
       setUploadResults(body.results ?? [])
+      setToast({ tone: 'error', message: body.error ?? 'Failed to upload photos.' })
       setUploading(false)
       return
     }
@@ -691,6 +704,9 @@ export default function Home() {
     setUploadMessage(body.message ?? 'Photos uploaded.')
     setUploadResults(body.results ?? [])
     setUploading(false)
+    setToast({ tone: 'success', message: body.message ?? 'Photos uploaded.' })
+    setUploadModalState(prev => ({ ...prev, open: false }))
+    resetUploadModal()
   }
 
   const sortedWorkshopEnrollments = workshopEnrollments
@@ -716,6 +732,18 @@ export default function Home() {
 
   return (
     <main className="w-full px-6 pt-6 pb-10 space-y-6">
+      {toast ? (
+        <div
+          className={`fixed bottom-4 right-4 z-50 rounded border px-3 py-2 text-sm shadow-md ${
+            toast.tone === 'success'
+              ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+              : 'border-destructive/40 bg-destructive/10 text-destructive'
+          }`}
+        >
+          {toast.message}
+        </div>
+      ) : null}
+
       <div className="flex gap-2">
         <Button asChild variant={tab === 'family-workshops' ? 'default' : 'outline'}>
           <Link to="/home">Family Workshops</Link>
