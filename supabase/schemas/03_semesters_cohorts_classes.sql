@@ -345,7 +345,7 @@ begin
   select c.id, we.profile_id, null
   from public.class c
   join public.workshop_enrollment we on we.workshop_id = c.workshop_id
-  where c.ends_at < now()
+  where c.starts_at <= now() + interval '36 hours'
     and we.status = 'approved'
   on conflict (class_id, profile_id) do nothing;
 end;
