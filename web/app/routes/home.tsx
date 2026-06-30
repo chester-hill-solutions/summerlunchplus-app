@@ -68,6 +68,7 @@ type LoaderData = {
   classesByWorkshop: Record<string, ClassRow[]>
   joinUrlByClass: Record<string, string>
   selectedProfileIdByClass: Record<string, string>
+  selectedPhotoStatusByClass: Record<string, string>
   nextClass:
       | {
         classId: string
@@ -321,6 +322,30 @@ export async function loader({ request }: Route.LoaderArgs) {
     return acc
   }, {})
 
+  const { data: attendanceRowsRaw } = classIds.length
+    ? await adminClient
+        .from('class_attendance')
+        .select('class_id, profile_id, photo_status')
+        .in('class_id', classIds)
+        .in('profile_id', family.familyProfileIds)
+    : { data: [] }
+
+  const attendanceRows = (attendanceRowsRaw ?? []) as Array<{
+    class_id: string
+    profile_id: string
+    photo_status: string | null
+  }>
+  const attendanceByClassAndProfile = new Map(attendanceRows.map(row => [`${row.class_id}::${row.profile_id}`, row]))
+
+  const selectedPhotoStatusByClass = Object.entries(selectedProfileIdByClass).reduce<Record<string, string>>((acc, [classId, profileId]) => {
+    const key = `${classId}::${profileId}`
+    const status = attendanceByClassAndProfile.get(key)?.photo_status
+    if (typeof status === 'string' && status) {
+      acc[classId] = status
+    }
+    return acc
+  }, {})
+
   const nextClassCandidate = classes
     .filter(classRow => Boolean(classRow.workshop_id) && approvedWorkshopIds.has(classRow.workshop_id) && new Date(classRow.starts_at).getTime() > now)
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0]
@@ -345,6 +370,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     classesByWorkshop,
     joinUrlByClass,
     selectedProfileIdByClass,
+    selectedPhotoStatusByClass,
     nextClass,
   } satisfies LoaderData
 }
@@ -564,6 +590,7 @@ export default function Home() {
     classesByWorkshop,
     joinUrlByClass,
     selectedProfileIdByClass,
+    selectedPhotoStatusByClass,
     nextClass,
   } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
@@ -625,6 +652,7 @@ export default function Home() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadResults, setUploadResults] = useState<Array<{ fileName: string; ok: boolean; error?: string }>>([])
   const [toast, setToast] = useState<ToastState>(null)
+  const [photoStatusOverrideByClass, setPhotoStatusOverrideByClass] = useState<Record<string, string>>({})
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const resetUploadModal = () => {
@@ -689,6 +717,7 @@ export default function Home() {
     const body = response.body as {
       message?: string
       error?: string
+      uploadedCount?: number
       results?: Array<{ fileName: string; ok: boolean; error?: string }>
     }
 
@@ -703,6 +732,9 @@ export default function Home() {
     setUploadProgress(100)
     setUploadMessage(body.message ?? 'Photos uploaded.')
     setUploadResults(body.results ?? [])
+    if (typeof body.uploadedCount === 'number' && body.uploadedCount > 0 && uploadModalState.classId) {
+      setPhotoStatusOverrideByClass(prev => ({ ...prev, [uploadModalState.classId]: 'uploaded' }))
+    }
     setUploading(false)
     setToast({ tone: 'success', message: body.message ?? 'Photos uploaded.' })
     setUploadModalState(prev => ({ ...prev, open: false }))
@@ -913,9 +945,25 @@ export default function Home() {
                                     const endsAtMs = new Date(classRow.ends_at).getTime()
                                     const closed = Number.isFinite(endsAtMs) && now > endsAtMs + 15 * 60_000
                                     const selectedProfileId = selectedProfileIdByClass[classRow.id]
+                                    const photoStatus =
+                                      photoStatusOverrideByClass[classRow.id] ?? selectedPhotoStatusByClass[classRow.id] ?? ''
 
                                     if (enrollment.status !== 'approved' || !closed || !selectedProfileId) {
                                       return <span className="text-xs text-muted-foreground">-</span>
+                                    }
+
+                                    if (photoStatus) {
+                                      const statusToneClass =
+                                        photoStatus === 'accepted'
+                                          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                          : photoStatus === 'rejected'
+                                            ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                                            : 'border-amber-300 bg-amber-50 text-amber-700'
+                                      return (
+                                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusToneClass}`}>
+                                          {photoStatus}
+                                        </span>
+                                      )
                                     }
 
                                     return (
