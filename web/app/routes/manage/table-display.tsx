@@ -416,11 +416,16 @@ const personLinkForCell = (
   }
   if (
     tableName === 'class' &&
-    ['id', 'workshop_description', 'starts_at', 'ends_at', 'zoom_host_email'].includes(column) &&
-    typeof row.id === 'string' &&
-    row.id
+    ['workshop_description', 'starts_at', 'ends_at', 'zoom_host_email'].includes(column)
   ) {
-    return withReturnTo('/manage/class-attendance', { f_class_id: row.id })
+    const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
+    const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''
+    const endsAt = typeof row.ends_at === 'string' ? row.ends_at : ''
+    return withReturnTo('/manage/class-attendance', {
+      ...(workshopDescription ? { f_workshop_description: workshopDescription } : {}),
+      ...(startsAt ? { f_class_starts_at: formatTimestamp(startsAt) } : {}),
+      ...(endsAt ? { f_class_ends_at: formatTimestamp(endsAt) } : {}),
+    })
   }
   if (tableName === 'class' && column === 'step_meeting' && typeof row.id === 'string' && row.id) {
     const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
