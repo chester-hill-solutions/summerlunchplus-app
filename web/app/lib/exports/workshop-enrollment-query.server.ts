@@ -250,6 +250,16 @@ export async function loadWorkshopEnrollmentData(request: Request) {
     columns = [...columns.filter(column => column !== 'semester_range'), 'semester_range']
   }
 
+  if (columns.includes('status')) {
+    const columnsWithoutStatus = columns.filter(column => column !== 'status')
+    const insertAt = Math.min(2, columnsWithoutStatus.length)
+    columns = [
+      ...columnsWithoutStatus.slice(0, insertAt),
+      'status',
+      ...columnsWithoutStatus.slice(insertAt),
+    ]
+  }
+
   const baseColumnMeta = (base.columnMeta ?? {}) as Record<
     string,
     {
