@@ -139,6 +139,16 @@ type LoaderData = {
   foreignKeyOptions?: Record<string, ForeignKeyOption[]>
 }
 
+type RegisterStudentActionResult = {
+  ok: boolean
+  intent: 'register-student'
+  class_id: string
+  profile_id: string
+  zoom_join_url?: string
+  message?: string
+  error?: string
+}
+
 const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500, 1000, 1500] as const
 const FILTER_EMPTY_TOKEN = '__none__'
@@ -390,6 +400,12 @@ const toDateValue = (value: unknown) => {
 const rowKeyFor = (row: Record<string, unknown>, editorConfig?: EditorConfig) => {
   if (!editorConfig?.primaryKey.length) return ''
   return editorConfig.primaryKey.map(key => String(row[key] ?? '')).join('::')
+}
+
+const attendanceRowKey = (row: Record<string, unknown>) => {
+  const classId = typeof row.class_id === 'string' ? row.class_id : ''
+  const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+  return classId && profileId ? `${classId}::${profileId}` : ''
 }
 
 const personLinkForCell = (
@@ -715,6 +731,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const filterRequestCounterRef = useRef(0)
   const openFilterCacheKeyRef = useRef<string | null>(null)
   const [openFilterCacheEntry, setOpenFilterCacheEntry] = useState<FilterOptionsCacheEntry | null>(null)
+  const [attendanceJoinUrlOverrides, setAttendanceJoinUrlOverrides] = useState<Record<string, string>>({})
+  const [attendanceRegisterFeedback, setAttendanceRegisterFeedback] = useState<
+    Record<string, { type: 'success' | 'error'; message: string }>
+  >({})
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
   const debugPerf = searchParams.get('debugPerf') === '1'
@@ -1631,6 +1651,28 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const canInlineInsert = Boolean(editorConfig?.allowInsert)
   const canInlineUpdate = Boolean(editorConfig?.allowUpdate)
 
+  useEffect(() => {
+    if (!isClassAttendance) return
+    const result = statusFetcher.data as RegisterStudentActionResult | undefined
+    if (!result || result.intent !== 'register-student') return
+    const key = `${result.class_id}::${result.profile_id}`
+    if (!key) return
+
+    if (result.ok && typeof result.zoom_join_url === 'string' && result.zoom_join_url) {
+      setAttendanceJoinUrlOverrides(prev => ({ ...prev, [key]: result.zoom_join_url as string }))
+      setAttendanceRegisterFeedback(prev => ({
+        ...prev,
+        [key]: { type: 'success', message: result.message ?? 'Zoom join link created.' },
+      }))
+      return
+    }
+
+    setAttendanceRegisterFeedback(prev => ({
+      ...prev,
+      [key]: { type: 'error', message: result.error ?? result.message ?? 'Register failed.' },
+    }))
+  }, [isClassAttendance, statusFetcher.data])
+
   const tableWidth = useMemo(() => {
     const totalColumnWidth = columns.reduce(
       (sum, column) => sum + (columnWidths[column] ?? (columnMeta[column]?.numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH)),
@@ -2196,6 +2238,66 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                     }
                   >
                     {columns.map(column => {
+                      if (isClassAttendance && column === 'student_join_url') {
+                        const classId = typeof row.class_id === 'string' ? row.class_id : ''
+                        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+                        const key = attendanceRowKey(row)
+                        const fetchedOverride = key ? attendanceJoinUrlOverrides[key] : ''
+                        const rowJoinUrl = typeof row.student_join_url === 'string' ? row.student_join_url : ''
+                        const effectiveJoinUrl = fetchedOverride || rowJoinUrl
+                        const isRegistering =
+                          statusFetcher.state === 'submitting' &&
+                          statusFetcher.formData?.get('intent') === 'register-student' &&
+                          statusFetcher.formData?.get('class_id') === classId &&
+                          statusFetcher.formData?.get('profile_id') === profileId
+                        const feedback = key ? attendanceRegisterFeedback[key] : null
+
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={effectiveJoinUrl || '(empty)'}>
+                            {effectiveJoinUrl ? (
+                              <a
+                                href={effectiveJoinUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={event => event.stopPropagation()}
+                                className="block max-w-full truncate underline decoration-dotted underline-offset-2 hover:text-primary"
+                              >
+                                {effectiveJoinUrl}
+                              </a>
+                            ) : canEditStatus ? (
+                              <div className="space-y-1">
+                                <button
+                                  type="button"
+                                  disabled={!classId || !profileId || isRegistering}
+                                  onClick={event => {
+                                    event.stopPropagation()
+                                    if (key) {
+                                      setAttendanceRegisterFeedback(prev => {
+                                        if (!prev[key]) return prev
+                                        const next = { ...prev }
+                                        delete next[key]
+                                        return next
+                                      })
+                                    }
+                                    registerAttendanceStudent(row)
+                                  }}
+                                  className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isRegistering ? 'Registering...' : 'Register'}
+                                </button>
+                                {feedback ? (
+                                  <p className={`max-w-64 whitespace-normal text-[11px] ${feedback.type === 'error' ? 'text-destructive' : 'text-emerald-700'}`}>
+                                    {feedback.message}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">(empty)</span>
+                            )}
+                          </td>
+                        )
+                      }
+
                       if (isClassAttendance && column === 'status' && canEditStatus) {
                         const statusValue = typeof row.status === 'string' ? row.status : ''
                         return (
@@ -2261,39 +2363,6 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                               <option value="true">true</option>
                               <option value="false">false</option>
                             </select>
-                          </td>
-                        )
-                      }
-
-                      if (isClassAttendance && column === 'register_student_action') {
-                        const classId = typeof row.class_id === 'string' ? row.class_id : ''
-                        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
-                        const showButton =
-                          typeof row.register_student_action === 'string' &&
-                          row.register_student_action === 'Register'
-                        const isRegistering =
-                          statusFetcher.state === 'submitting' &&
-                          statusFetcher.formData?.get('intent') === 'register-student' &&
-                          statusFetcher.formData?.get('class_id') === classId &&
-                          statusFetcher.formData?.get('profile_id') === profileId
-
-                        return (
-                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="Create missing registrant and join link">
-                            {showButton ? (
-                              <button
-                                type="button"
-                                disabled={!classId || !profileId || isRegistering}
-                                onClick={event => {
-                                  event.stopPropagation()
-                                  registerAttendanceStudent(row)
-                                }}
-                                className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {isRegistering ? 'Registering...' : 'Register'}
-                              </button>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
                           </td>
                         )
                       }

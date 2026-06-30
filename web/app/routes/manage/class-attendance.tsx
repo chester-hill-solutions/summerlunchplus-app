@@ -42,6 +42,8 @@ type MeetingRow = {
   id: string
   class_id: string
   status: string
+  error_message: string | null
+  last_synced_at: string | null
   zoom_meeting_id: string | null
   topic: string | null
   start_time: string | null
@@ -59,9 +61,14 @@ type RegistrantRow = {
 }
 
 type SyncRunRow = {
+  id: string
   class_zoom_meeting_id: string
   status: string
   created_at: string
+  started_at: string | null
+  completed_at: string | null
+  error_message: string | null
+  payload: unknown
 }
 
 const IN_CLAUSE_BATCH_SIZE = 150
@@ -113,7 +120,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       classIds.length
         ? adminClient
             .from('class_zoom_meeting')
-            .select('id, class_id, status, zoom_meeting_id, topic, start_time, duration_minutes, join_url, host_zoom_user_email')
+            .select('id, class_id, status, error_message, last_synced_at, zoom_meeting_id, topic, start_time, duration_minutes, join_url, host_zoom_user_email')
             .in('class_id', classIds)
         : Promise.resolve({ data: [] as MeetingRow[], error: null }),
       classIds.length
@@ -159,7 +166,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     meetingIds.length
       ? adminClient
           .from('class_zoom_participant_sync')
-          .select('class_zoom_meeting_id, status, created_at')
+          .select('id, class_zoom_meeting_id, status, created_at, started_at, completed_at, error_message, payload')
           .in('class_zoom_meeting_id', meetingIds)
           .order('created_at', { ascending: false })
       : Promise.resolve({ data: [] as SyncRunRow[], error: null }),
@@ -183,10 +190,29 @@ export async function loader({ request }: Route.LoaderArgs) {
     if (!meetingByClassId.has(row.class_id)) meetingByClassId.set(row.class_id, row)
   }
 
-  const latestSyncByMeetingId = new Map<string, { status: string; created_at: string }>()
+  const latestSyncByMeetingId = new Map<
+    string,
+    {
+      id: string
+      status: string
+      created_at: string
+      started_at: string | null
+      completed_at: string | null
+      error_message: string | null
+      payload: unknown
+    }
+  >()
   for (const row of (syncRows ?? []) as SyncRunRow[]) {
     if (!latestSyncByMeetingId.has(row.class_zoom_meeting_id)) {
-      latestSyncByMeetingId.set(row.class_zoom_meeting_id, { status: row.status, created_at: row.created_at })
+      latestSyncByMeetingId.set(row.class_zoom_meeting_id, {
+        id: row.id,
+        status: row.status,
+        created_at: row.created_at,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+        error_message: row.error_message,
+        payload: row.payload,
+      })
     }
   }
 
@@ -234,6 +260,40 @@ export async function loader({ request }: Route.LoaderArgs) {
       stepAttendanceSync = 'Failed'
     }
 
+    const stepMeetingDetail = [
+      `status=${meeting?.status ?? 'missing'}`,
+      `zoom_meeting_id=${meeting?.zoom_meeting_id ?? 'none'}`,
+      `host=${meeting?.host_zoom_user_email ?? 'none'}`,
+      `meeting_error=${meeting?.error_message ?? 'none'}`,
+      `meeting_last_synced=${meeting?.last_synced_at ?? 'none'}`,
+    ].join(' | ')
+
+    const stepRegistrantDetail = [
+      `zoom_registrant_id=${studentRegistrant?.zoom_registrant_id ?? 'none'}`,
+      `join_url=${studentRegistrant?.zoom_join_url ?? 'none'}`,
+      `registrant_last_updated=${studentRegistrant ? 'present' : 'none'}`,
+    ].join(' | ')
+
+    const stepReminderDetail = [
+      `last_sent_at=${studentRegistrant?.last_sent_at ?? 'none'}`,
+      `eligible=${studentRegistrant ? 'yes' : 'no'}`,
+    ].join(' | ')
+
+    const latestSyncPayload =
+      latestSync?.payload && typeof latestSync.payload === 'object'
+        ? JSON.stringify(latestSync.payload)
+        : latestSync?.payload == null
+          ? ''
+          : String(latestSync.payload)
+
+    const stepAttendanceSyncDetail = [
+      `sync_status=${latestSync?.status ?? 'none'}`,
+      `sync_id=${latestSync?.id ?? 'none'}`,
+      `sync_started=${latestSync?.started_at ?? 'none'}`,
+      `sync_completed=${latestSync?.completed_at ?? 'none'}`,
+      `sync_error=${latestSync?.error_message ?? 'none'}`,
+    ].join(' | ')
+
     return {
       ...row,
       workshop_description: workshop?.description ?? 'Workshop',
@@ -241,7 +301,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       class_ends_at: classRow?.ends_at ?? null,
       profile_display: displayNameOrId(profile, row.profile_id),
       student_join_url: studentRegistrant?.zoom_join_url ?? null,
-      register_student_action: registrantReady ? '' : 'Register',
       zoom_meeting_id: meeting?.zoom_meeting_id ?? null,
       zoom_topic: meeting?.topic ?? null,
       zoom_start_at: meeting?.start_time ?? null,
@@ -253,6 +312,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       step_attendance_rows: 'Done',
       step_reminder: reminderSent ? 'Done' : 'Missing',
       step_attendance_sync: stepAttendanceSync,
+      step_meeting_detail: stepMeetingDetail,
+      step_registrants_detail: stepRegistrantDetail,
+      step_reminder_detail: stepReminderDetail,
+      step_attendance_sync_detail: stepAttendanceSyncDetail,
+      latest_sync_payload: latestSyncPayload,
+      latest_sync_error: latestSync?.error_message ?? null,
       recorded_by_email:
         typeof row.recorded_by === 'string' && row.recorded_by
           ? displayName(profileByUserId.get(row.recorded_by) ?? null) || row.recorded_by
@@ -287,7 +352,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       'photo_status',
       'camera_on',
       'student_join_url',
-      'register_student_action',
       'zoom_meeting_id',
       'zoom_topic',
       'zoom_start_at',
@@ -299,6 +363,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       'step_attendance_rows',
       'step_reminder',
       'step_attendance_sync',
+      'step_meeting_detail',
+      'step_registrants_detail',
+      'step_reminder_detail',
+      'step_attendance_sync_detail',
+      'latest_sync_error',
+      'latest_sync_payload',
       'recorded_by_email',
       'created_at',
       'updated_at',
@@ -316,7 +386,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       photo_status: { label: 'Photo status', filterable: true },
       camera_on: { label: 'Camera on', filterable: true },
       student_join_url: { label: 'Student join link', truncate: true, filterable: true },
-      register_student_action: { label: 'Register row', filterable: false },
       zoom_meeting_id: { label: 'Zoom meeting ID', filterable: true },
       zoom_topic: { label: 'Zoom topic', truncate: true, filterable: true },
       zoom_start_at: { label: 'Zoom start (UTC)', filterable: true },
@@ -328,6 +397,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       step_attendance_rows: { label: 'Step 3: Attendance row', filterable: true },
       step_reminder: { label: 'Step 4: Reminder', filterable: true },
       step_attendance_sync: { label: 'Step 5: Attendance sync', filterable: true },
+      step_meeting_detail: { label: 'Step 1 detail', filterable: true, truncate: true },
+      step_registrants_detail: { label: 'Step 2 detail', filterable: true, truncate: true },
+      step_reminder_detail: { label: 'Step 4 detail', filterable: true, truncate: true },
+      step_attendance_sync_detail: { label: 'Step 5 detail', filterable: true, truncate: true },
+      latest_sync_error: { label: 'Latest sync error', filterable: true, truncate: true },
+      latest_sync_payload: { label: 'Latest sync payload', filterable: false, truncate: true },
       recorded_by_email: { label: 'Recorded by', filterable: true, truncate: true },
       created_at: { label: 'Created', filterable: true },
       updated_at: { label: 'Updated', filterable: true },
@@ -352,12 +427,29 @@ export async function action({ request }: Route.ActionArgs) {
     const classId = formData.get('class_id') as string
     const profileId = formData.get('profile_id') as string
     if (!classId || !profileId) {
-      return new Response('Missing identifiers', { status: 400, headers: auth.headers })
+      return {
+        ok: false,
+        intent: 'register-student',
+        class_id: classId,
+        profile_id: profileId,
+        error: 'Missing identifiers',
+      }
     }
 
     try {
       const appOrigin = new URL(request.url).origin
-      await runZoomJobsForClass({ classId, appOrigin, runId: `manual-row-${Date.now().toString(36)}` })
+      const runResult = await runZoomJobsForClass({ classId, appOrigin, runId: `manual-row-${Date.now().toString(36)}` })
+      const provision = runResult.provision
+      const provisionSummary =
+        provision && typeof provision === 'object'
+          ? [
+              `provision_error=${'error' in provision ? String(provision.error ?? 'none') : 'none'}`,
+              `meeting_recreated=${'meetingRecreated' in provision ? String(provision.meetingRecreated) : 'n/a'}`,
+              `registrants_created=${'registrantsCreated' in provision ? String(provision.registrantsCreated) : 'n/a'}`,
+              `registrants_updated=${'registrantsUpdated' in provision ? String(provision.registrantsUpdated) : 'n/a'}`,
+              `registrants_skipped=${'registrantsSkipped' in provision ? String(provision.registrantsSkipped) : 'n/a'}`,
+            ].join(' | ')
+          : 'provision=unknown'
 
       const { data: registrant, error } = await adminClient
         .from('class_zoom_registrant')
@@ -367,19 +459,44 @@ export async function action({ request }: Route.ActionArgs) {
         .maybeSingle<{ zoom_registrant_id: string | null; zoom_join_url: string | null }>()
 
       if (error) {
-        return new Response(error.message, { status: 500, headers: auth.headers })
+        return {
+          ok: false,
+          intent: 'register-student',
+          class_id: classId,
+          profile_id: profileId,
+          error: `${error.message} | ${provisionSummary}`,
+          run_result: runResult,
+        }
       }
 
       if (!registrant?.zoom_registrant_id || !registrant.zoom_join_url) {
-        return new Response('Sync ran but this student still has no join link.', { status: 409, headers: auth.headers })
+        return {
+          ok: false,
+          intent: 'register-student',
+          class_id: classId,
+          profile_id: profileId,
+          error: `Sync ran but this student still has no join link. | ${provisionSummary}`,
+          run_result: runResult,
+        }
       }
 
-      return { ok: true }
+      return {
+        ok: true,
+        intent: 'register-student',
+        class_id: classId,
+        profile_id: profileId,
+        zoom_join_url: registrant.zoom_join_url,
+        message: `Zoom join link created. | ${provisionSummary}`,
+        run_result: runResult,
+      }
     } catch (error) {
-      return new Response(error instanceof Error ? error.message : 'Failed to register student.', {
-        status: 500,
-        headers: auth.headers,
-      })
+      return {
+        ok: false,
+        intent: 'register-student',
+        class_id: classId,
+        profile_id: profileId,
+        error: error instanceof Error ? error.message : 'Failed to register student.',
+      }
     }
   }
 
