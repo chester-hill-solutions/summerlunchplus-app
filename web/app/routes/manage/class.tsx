@@ -36,7 +36,7 @@ export async function loader(args: Route.LoaderArgs) {
 
   const { supabase } = createClient(args.request)
 
-  const [{ data: meetings }, { data: registrants }, { data: enrollments }] = await Promise.all([
+  const [{ data: meetings }, { data: registrants }, { data: enrollments }, { data: attendanceRows }] = await Promise.all([
     supabase
       .from('class_zoom_meeting')
       .select('id, class_id, status, join_url, host_zoom_user_email, zoom_meeting_id, start_time, duration_minutes, topic')
@@ -52,6 +52,9 @@ export async function loader(args: Route.LoaderArgs) {
           .in('workshop_id', workshopIds)
           .eq('status', 'approved')
       : Promise.resolve({ data: [] as Array<{ workshop_id: string; profile_id: string | null; status: string }> }),
+    classIds.length
+      ? supabase.from('class_attendance').select('class_id, profile_id').in('class_id', classIds)
+      : Promise.resolve({ data: [] as Array<{ class_id: string; profile_id: string | null }> }),
   ])
 
   const meetingByClassId = new Map<
@@ -101,13 +104,25 @@ export async function loader(args: Route.LoaderArgs) {
   }
 
   const approvedCountByWorkshopId = new Map<string, number>()
+  const approvedProfileIdsByWorkshopId = new Map<string, Set<string>>()
   const seenWorkshopProfile = new Set<string>()
   for (const enrollment of enrollments ?? []) {
     if (!enrollment.workshop_id || !enrollment.profile_id) continue
     const key = `${enrollment.workshop_id}::${enrollment.profile_id}`
     if (seenWorkshopProfile.has(key)) continue
     seenWorkshopProfile.add(key)
+    const workshopProfiles = approvedProfileIdsByWorkshopId.get(enrollment.workshop_id) ?? new Set<string>()
+    workshopProfiles.add(enrollment.profile_id)
+    approvedProfileIdsByWorkshopId.set(enrollment.workshop_id, workshopProfiles)
     approvedCountByWorkshopId.set(enrollment.workshop_id, (approvedCountByWorkshopId.get(enrollment.workshop_id) ?? 0) + 1)
+  }
+
+  const attendanceProfileIdsByClassId = new Map<string, Set<string>>()
+  for (const row of attendanceRows ?? []) {
+    if (!row.class_id || !row.profile_id) continue
+    const classProfiles = attendanceProfileIdsByClassId.get(row.class_id) ?? new Set<string>()
+    classProfiles.add(row.profile_id)
+    attendanceProfileIdsByClassId.set(row.class_id, classProfiles)
   }
 
   const registrantsByClassId = new Map<
@@ -166,6 +181,8 @@ export async function loader(args: Route.LoaderArgs) {
     const meeting = classId ? meetingByClassId.get(classId) : null
     const classRegistrants = classId ? registrantsByClassId.get(classId) ?? [] : []
     const expected = workshopId ? approvedCountByWorkshopId.get(workshopId) ?? 0 : 0
+    const expectedProfileIds = workshopId ? approvedProfileIdsByWorkshopId.get(workshopId) ?? new Set<string>() : new Set<string>()
+    const attendanceProfileIds = classId ? attendanceProfileIdsByClassId.get(classId) ?? new Set<string>() : new Set<string>()
     const zoomEndAt =
       meeting?.start_time && typeof meeting.duration_minutes === 'number'
         ? new Date(new Date(meeting.start_time).getTime() + meeting.duration_minutes * 60_000).toISOString()
@@ -174,6 +191,7 @@ export async function loader(args: Route.LoaderArgs) {
     const registrantsReady = classRegistrants.filter(
       entry => Boolean(entry.zoom_registrant_id && entry.zoom_join_url)
     ).length
+    const attendanceRowsReady = Array.from(expectedProfileIds).filter(profileId => attendanceProfileIds.has(profileId)).length
     const remindersSent = classRegistrants.filter(entry => Boolean(entry.last_sent_at)).length
 
     const endsAt = typeof row.ends_at === 'string' ? new Date(row.ends_at) : null
@@ -212,23 +230,28 @@ export async function loader(args: Route.LoaderArgs) {
       zoom_join_url: meeting?.join_url ?? row.zoom_join_url ?? '',
       step_meeting: meeting && meeting.status === 'created' && meeting.join_url ? 'Done' : 'Missing',
       step_registrants: statusLabel({ done: registrantsReady, total: expected }),
+      step_attendance_rows: statusLabel({ done: attendanceRowsReady, total: expected }),
       step_reminder: statusLabel({ done: remindersSent, total: expected }),
       step_attendance: attendanceStep,
     }
   })
 
-  const displayColumns = [
-    ...(base.columns ?? []).filter(
-      column =>
-        column !== 'id' &&
-        column !== 'class_zoom_meeting_id' &&
-        column !== 'class_zoom_meeting_display'
-    ),
-    'zoom_topic',
-    'zoom_start_at',
-    'zoom_end_at',
-    'zoom_schedule_match',
-  ]
+  const baseDisplayColumns = (base.columns ?? []).filter(
+    column =>
+      column !== 'id' &&
+      column !== 'class_zoom_meeting_id' &&
+      column !== 'class_zoom_meeting_display'
+  )
+
+  const displayColumns: string[] = []
+  for (const column of baseDisplayColumns) {
+    displayColumns.push(column)
+    if (column === 'step_registrants') {
+      displayColumns.push('step_attendance_rows')
+    }
+  }
+
+  displayColumns.push('zoom_topic', 'zoom_start_at', 'zoom_end_at', 'zoom_schedule_match')
 
   const fitAllColumnsMeta = Object.fromEntries(
     displayColumns.map(column => [
@@ -266,9 +289,10 @@ export async function loader(args: Route.LoaderArgs) {
         fitContentOnLoad: true,
       },
       step_meeting: { label: 'Step 1: Meeting', filterable: true },
-      step_registrants: { label: 'Step 2: Registrants', filterable: true },
-      step_reminder: { label: 'Step 3: Reminder', filterable: true },
-      step_attendance: { label: 'Step 4: Attendance Sync', filterable: true },
+      step_registrants: { label: 'Step 2: Zoom Registrants', filterable: true },
+      step_attendance_rows: { label: 'Step 3: Attendance Rows', filterable: true },
+      step_reminder: { label: 'Step 4: Reminder', filterable: true },
+      step_attendance: { label: 'Step 5: Attendance Sync', filterable: true },
       zoom_topic: { label: 'Zoom Topic', truncate: true, minWidth: 170, preferredWidth: 240 },
       zoom_start_at: { label: 'Zoom Start (UTC)' },
       zoom_end_at: { label: 'Zoom End (UTC)' },
