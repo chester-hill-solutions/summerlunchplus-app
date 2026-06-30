@@ -32,18 +32,116 @@ const REPROVISION_HORIZON_MINUTES = 36 * 60
 const REMINDER_WINDOW_MINUTES = 2 * 60
 const RUNNING_SYNC_TIMEOUT_MINUTES = 20
 const FAILED_SYNC_RETRY_COOLDOWN_MINUTES = 10
+const IN_CLAUSE_BATCH_SIZE = 150
 
-const backfillPastAttendanceRows = async () => {
-  const { error } = await adminClient.rpc('ensure_class_attendance_rows')
-  if (error) {
-    return {
-      ok: false,
-      error: error.message,
+const chunkArray = <T,>(items: T[], size: number) => {
+  if (size <= 0 || !items.length) return [] as T[][]
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
+const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
+  const startsAtOrBefore = toIso(addMinutes(now, REPROVISION_HORIZON_MINUTES))
+  const { data: classRows, error: classError } = await adminClient
+    .from('class')
+    .select('id, workshop_id')
+    .lte('starts_at', startsAtOrBefore)
+
+  if (classError) {
+    return { ok: false, classesScanned: 0, expectedPairs: 0, inserted: 0, error: classError.message }
+  }
+
+  const classes = (classRows ?? []) as Array<{ id: string; workshop_id: string | null }>
+  if (!classes.length) {
+    return { ok: true, classesScanned: 0, expectedPairs: 0, inserted: 0 }
+  }
+
+  const classIds = classes.map(row => row.id)
+  const workshopIds = Array.from(new Set(classes.map(row => row.workshop_id).filter((id): id is string => Boolean(id))))
+
+  const { data: enrollments, error: enrollmentError } = workshopIds.length
+    ? await adminClient
+        .from('workshop_enrollment')
+        .select('workshop_id, profile_id')
+        .in('workshop_id', workshopIds)
+        .eq('status', 'approved')
+        .not('profile_id', 'is', null)
+    : { data: [], error: null }
+
+  if (enrollmentError) {
+    return { ok: false, classesScanned: classes.length, expectedPairs: 0, inserted: 0, error: enrollmentError.message }
+  }
+
+  const approvedByWorkshop = new Map<string, Set<string>>()
+  for (const enrollment of enrollments ?? []) {
+    if (!enrollment.workshop_id || !enrollment.profile_id) continue
+    const bucket = approvedByWorkshop.get(enrollment.workshop_id) ?? new Set<string>()
+    bucket.add(enrollment.profile_id)
+    approvedByWorkshop.set(enrollment.workshop_id, bucket)
+  }
+
+  const expectedPairs: Array<{ class_id: string; profile_id: string; status: null }> = []
+  for (const classRow of classes) {
+    if (!classRow.workshop_id) continue
+    const approvedProfiles = approvedByWorkshop.get(classRow.workshop_id) ?? new Set<string>()
+    for (const profileId of approvedProfiles) {
+      expectedPairs.push({ class_id: classRow.id, profile_id: profileId, status: null })
     }
+  }
+
+  if (!expectedPairs.length) {
+    return { ok: true, classesScanned: classes.length, expectedPairs: 0, inserted: 0 }
+  }
+
+  const existingPairs = new Set<string>()
+  for (const classIdChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: attendanceRows, error: attendanceError } = await adminClient
+      .from('class_attendance')
+      .select('class_id, profile_id')
+      .in('class_id', classIdChunk)
+    if (attendanceError) {
+      return {
+        ok: false,
+        classesScanned: classes.length,
+        expectedPairs: expectedPairs.length,
+        inserted: 0,
+        error: attendanceError.message,
+      }
+    }
+    for (const row of attendanceRows ?? []) {
+      if (!row.class_id || !row.profile_id) continue
+      existingPairs.add(`${row.class_id}::${row.profile_id}`)
+    }
+  }
+
+  const missingPairs = expectedPairs.filter(row => !existingPairs.has(`${row.class_id}::${row.profile_id}`))
+  if (!missingPairs.length) {
+    return { ok: true, classesScanned: classes.length, expectedPairs: expectedPairs.length, inserted: 0 }
+  }
+
+  let inserted = 0
+  for (const chunk of chunkArray(missingPairs, IN_CLAUSE_BATCH_SIZE)) {
+    const { error } = await adminClient.from('class_attendance').upsert(chunk, { onConflict: 'class_id,profile_id' })
+    if (error) {
+      return {
+        ok: false,
+        classesScanned: classes.length,
+        expectedPairs: expectedPairs.length,
+        inserted,
+        error: error.message,
+      }
+    }
+    inserted += chunk.length
   }
 
   return {
     ok: true,
+    classesScanned: classes.length,
+    expectedPairs: expectedPairs.length,
+    inserted,
   }
 }
 
@@ -366,7 +464,7 @@ const dedupeParticipants = (participants: Array<Record<string, unknown>>) => {
 const syncPostClassAttendance = async ({ now }: { now: Date }) => {
   const { data: meetings, error } = await adminClient
     .from('class_zoom_meeting')
-    .select('id, class_id, zoom_meeting_uuid, status, class:class_id ( starts_at, ends_at )')
+    .select('id, class_id, zoom_meeting_uuid, status, class:class_id ( starts_at, ends_at, workshop_id )')
     .eq('status', 'created')
 
   if (error) {
@@ -378,11 +476,33 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
   let failed = 0
   let pendingRetry = 0
   let skippedCooldown = 0
+  let absentMarked = 0
+
+  const approvedByWorkshop = new Map<string, Set<string>>()
+
+  const getApprovedProfileIdsForWorkshop = async (workshopId: string | null) => {
+    if (!workshopId) return new Set<string>()
+    const cached = approvedByWorkshop.get(workshopId)
+    if (cached) return cached
+
+    const { data: enrollments, error: enrollmentError } = await adminClient
+      .from('workshop_enrollment')
+      .select('profile_id')
+      .eq('workshop_id', workshopId)
+      .eq('status', 'approved')
+      .not('profile_id', 'is', null)
+
+    if (enrollmentError) throw new Error(enrollmentError.message)
+
+    const profileIds = new Set((enrollments ?? []).map(row => row.profile_id).filter((id): id is string => Boolean(id)))
+    approvedByWorkshop.set(workshopId, profileIds)
+    return profileIds
+  }
 
   const nowIso = now.toISOString()
 
   for (const meeting of meetings ?? []) {
-    const classRelation = relationRow<{ starts_at: string; ends_at: string }>(meeting.class)
+    const classRelation = relationRow<{ starts_at: string; ends_at: string; workshop_id: string | null }>(meeting.class)
     const classEndsAt = classRelation?.ends_at ? new Date(classRelation.ends_at) : null
     if (!classEndsAt || classEndsAt.getTime() > addMinutes(now, -15).getTime()) continue
     if (!meeting.zoom_meeting_uuid) continue
@@ -439,6 +559,20 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
     }
 
     try {
+      const approvedProfileIds = await getApprovedProfileIdsForWorkshop(classRelation?.workshop_id ?? null)
+
+      if (approvedProfileIds.size > 0) {
+        const attendanceSeedRows = Array.from(approvedProfileIds).map(profileId => ({
+          class_id: meeting.class_id,
+          profile_id: profileId,
+          status: null,
+        }))
+        const { error: attendanceSeedError } = await adminClient
+          .from('class_attendance')
+          .upsert(attendanceSeedRows, { onConflict: 'class_id,profile_id' })
+        if (attendanceSeedError) throw new Error(attendanceSeedError.message)
+      }
+
       const participantsPayload = await zoomApiClient.getParticipants(meeting.zoom_meeting_uuid)
       const participants = participantsPayload.participants ?? []
       const dedupedRows = dedupeParticipants(participants)
@@ -464,10 +598,14 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
         new Set(rows.map(row => normalizeEmail(row.user_email)).filter((email): email is string => Boolean(email)))
       )
 
+      const presentProfileIds = new Set<string>()
+
       if (participantEmails.length) {
         const { data: profiles } = await adminClient.from('profile').select('id, email').in('email', participantEmails)
 
         for (const profile of profiles ?? []) {
+          if (approvedProfileIds.size > 0 && !approvedProfileIds.has(profile.id)) continue
+          presentProfileIds.add(profile.id)
           const { error: attendanceUpdateError } = await adminClient
             .from('class_attendance')
             .update({ status: 'present', recorded_by: null })
@@ -476,6 +614,29 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
           if (attendanceUpdateError) {
             throw new Error(attendanceUpdateError.message)
           }
+        }
+      }
+
+      if (approvedProfileIds.size > 0) {
+        const missingProfileIds = Array.from(approvedProfileIds).filter(profileId => !presentProfileIds.has(profileId))
+        if (missingProfileIds.length) {
+          const { error: absentUnknownError, count: absentUnknownCount } = await adminClient
+            .from('class_attendance')
+            .update({ status: 'absent', recorded_by: null }, { count: 'exact' })
+            .eq('class_id', meeting.class_id)
+            .in('profile_id', missingProfileIds)
+            .eq('status', 'unknown')
+          if (absentUnknownError) throw new Error(absentUnknownError.message)
+
+          const { error: absentNullError, count: absentNullCount } = await adminClient
+            .from('class_attendance')
+            .update({ status: 'absent', recorded_by: null }, { count: 'exact' })
+            .eq('class_id', meeting.class_id)
+            .in('profile_id', missingProfileIds)
+            .is('status', null)
+          if (absentNullError) throw new Error(absentNullError.message)
+
+          absentMarked += (absentUnknownCount ?? 0) + (absentNullCount ?? 0)
         }
       }
 
@@ -524,7 +685,7 @@ const syncPostClassAttendance = async ({ now }: { now: Date }) => {
     }
   }
 
-  return { scanned, synced, failed, pendingRetry, skippedCooldown }
+  return { scanned, synced, failed, pendingRetry, skippedCooldown, absentMarked }
 }
 
 export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?: Date; appOrigin: string; runId?: string }) => {
@@ -533,7 +694,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     now: now.toISOString(),
   })
 
-  const attendanceRowBackfill = await backfillPastAttendanceRows()
+  const attendanceRowBackfill = await backfillAttendanceRowsCoverage({ now })
   const within36h = await provisionWithin36h({ now })
   const hostReconciliation = await reconcileHostOverlaps({ now })
   const reminders = await sendReminderCoverage({ now, appOrigin })
@@ -547,7 +708,9 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     reminderScanned: reminders.scannedClasses,
     attendanceScanned: attendanceSync.scanned,
     attendanceFailed: attendanceSync.failed,
+    attendanceAbsentMarked: attendanceSync.absentMarked,
     attendanceRowBackfillOk: attendanceRowBackfill.ok,
+    attendanceRowsBackfilled: attendanceRowBackfill.ok ? attendanceRowBackfill.inserted : 0,
   })
 
   return {
