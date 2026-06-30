@@ -21,6 +21,7 @@ type ActionData = {
 type ClassRow = Record<string, unknown> & {
   id?: string
   workshop_id?: string | null
+  starts_at?: string | null
   ends_at?: string | null
 }
 
@@ -38,7 +39,7 @@ export async function loader(args: Route.LoaderArgs) {
   const [{ data: meetings }, { data: registrants }, { data: enrollments }] = await Promise.all([
     supabase
       .from('class_zoom_meeting')
-      .select('id, class_id, status, join_url, host_zoom_user_email')
+      .select('id, class_id, status, join_url, host_zoom_user_email, zoom_meeting_id, start_time, duration_minutes, topic')
       .in('class_id', classIds),
     supabase
       .from('class_zoom_registrant')
@@ -53,7 +54,19 @@ export async function loader(args: Route.LoaderArgs) {
       : Promise.resolve({ data: [] as Array<{ workshop_id: string; profile_id: string | null; status: string }> }),
   ])
 
-  const meetingByClassId = new Map<string, { id: string; status: string; join_url: string | null; host_zoom_user_email: string | null }>()
+  const meetingByClassId = new Map<
+    string,
+    {
+      id: string
+      status: string
+      join_url: string | null
+      host_zoom_user_email: string | null
+      zoom_meeting_id: string | null
+      start_time: string | null
+      duration_minutes: number | null
+      topic: string | null
+    }
+  >()
   for (const meeting of meetings ?? []) {
     if (!meeting.class_id || meetingByClassId.has(meeting.class_id)) continue
     meetingByClassId.set(meeting.class_id, {
@@ -61,6 +74,10 @@ export async function loader(args: Route.LoaderArgs) {
       status: meeting.status,
       join_url: meeting.join_url,
       host_zoom_user_email: meeting.host_zoom_user_email,
+      zoom_meeting_id: meeting.zoom_meeting_id,
+      start_time: meeting.start_time,
+      duration_minutes: meeting.duration_minutes,
+      topic: meeting.topic,
     })
   }
 
@@ -116,12 +133,43 @@ export async function loader(args: Route.LoaderArgs) {
     return `Partial (${done}/${total})`
   }
 
+  const zoomScheduleMatchLabel = ({
+    classStartsAt,
+    classEndsAt,
+    zoomStartsAt,
+    zoomDurationMinutes,
+  }: {
+    classStartsAt: string | null
+    classEndsAt: string | null
+    zoomStartsAt: string | null
+    zoomDurationMinutes: number | null
+  }) => {
+    if (!classStartsAt || !classEndsAt || !zoomStartsAt || typeof zoomDurationMinutes !== 'number') return 'Missing'
+
+    const classStartMs = new Date(classStartsAt).getTime()
+    const classEndMs = new Date(classEndsAt).getTime()
+    const zoomStartMs = new Date(zoomStartsAt).getTime()
+    const zoomEndMs = zoomStartMs + zoomDurationMinutes * 60_000
+
+    if (!Number.isFinite(classStartMs) || !Number.isFinite(classEndMs) || !Number.isFinite(zoomStartMs)) return 'Invalid'
+
+    const startDeltaMinutes = Math.round(Math.abs(classStartMs - zoomStartMs) / 60_000)
+    const endDeltaMinutes = Math.round(Math.abs(classEndMs - zoomEndMs) / 60_000)
+
+    if (startDeltaMinutes <= 1 && endDeltaMinutes <= 1) return 'In sync'
+    return `Drift (${startDeltaMinutes}m/${endDeltaMinutes}m)`
+  }
+
   const nextRows = rows.map(row => {
     const classId = typeof row.id === 'string' ? row.id : ''
     const workshopId = typeof row.workshop_id === 'string' ? row.workshop_id : ''
     const meeting = classId ? meetingByClassId.get(classId) : null
     const classRegistrants = classId ? registrantsByClassId.get(classId) ?? [] : []
     const expected = workshopId ? approvedCountByWorkshopId.get(workshopId) ?? 0 : 0
+    const zoomEndAt =
+      meeting?.start_time && typeof meeting.duration_minutes === 'number'
+        ? new Date(new Date(meeting.start_time).getTime() + meeting.duration_minutes * 60_000).toISOString()
+        : ''
 
     const registrantsReady = classRegistrants.filter(
       entry => Boolean(entry.zoom_registrant_id && entry.zoom_join_url)
@@ -149,6 +197,17 @@ export async function loader(args: Route.LoaderArgs) {
 
     return {
       ...row,
+      class_zoom_meeting_id: meeting?.id ?? '',
+      class_zoom_meeting_display: meeting?.zoom_meeting_id ?? '',
+      zoom_topic: meeting?.topic ?? '',
+      zoom_start_at: meeting?.start_time ?? '',
+      zoom_end_at: zoomEndAt,
+      zoom_schedule_match: zoomScheduleMatchLabel({
+        classStartsAt: typeof row.starts_at === 'string' ? row.starts_at : null,
+        classEndsAt: typeof row.ends_at === 'string' ? row.ends_at : null,
+        zoomStartsAt: meeting?.start_time ?? null,
+        zoomDurationMinutes: meeting?.duration_minutes ?? null,
+      }),
       zoom_host_email: meeting?.host_zoom_user_email ?? row.zoom_host_email ?? '',
       zoom_join_url: meeting?.join_url ?? row.zoom_join_url ?? '',
       step_meeting: meeting && meeting.status === 'created' && meeting.join_url ? 'Done' : 'Missing',
@@ -160,13 +219,48 @@ export async function loader(args: Route.LoaderArgs) {
 
   return {
     ...base,
+    columns: [
+      ...(base.columns ?? []).filter(
+        column =>
+          column !== 'id' &&
+          column !== 'class_zoom_meeting_id' &&
+          column !== 'class_zoom_meeting_display'
+      ),
+      'zoom_topic',
+      'zoom_start_at',
+      'zoom_end_at',
+      'zoom_schedule_match',
+    ],
     rows: nextRows,
     columnMeta: {
       ...(base.columnMeta ?? {}),
+      workshop_description: {
+        label: 'Workshop',
+        truncate: true,
+        minWidth: 170,
+        preferredWidth: 220,
+        fitContentOnLoad: true,
+      },
+      starts_at: {
+        label: 'Timestamp',
+        minWidth: 210,
+        preferredWidth: 260,
+        fitContentOnLoad: true,
+      },
+      ends_at: {
+        label: 'Ends at',
+        minWidth: 180,
+        preferredWidth: 220,
+        fitContentOnLoad: true,
+      },
       step_meeting: { label: 'Step 1: Meeting', filterable: true },
       step_registrants: { label: 'Step 2: Registrants', filterable: true },
       step_reminder: { label: 'Step 3: Reminder', filterable: true },
       step_attendance: { label: 'Step 4: Attendance Sync', filterable: true },
+      zoom_topic: { label: 'Zoom Topic', truncate: true, minWidth: 170, preferredWidth: 240 },
+      zoom_start_at: { label: 'Zoom Start (UTC)' },
+      zoom_end_at: { label: 'Zoom End (UTC)' },
+      zoom_schedule_match: { label: 'Zoom Time Check', filterable: true },
       zoom_host_email: { label: 'Zoom Host', filterable: true },
       zoom_join_url: { label: 'Zoom Join Link', truncate: true },
     },
