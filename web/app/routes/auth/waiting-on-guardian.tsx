@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import AuthStickerBackground from '@/components/auth/sticker-background'
+import { normalizeEmail } from '@/lib/email-domain'
 import { getProfileSignUpCompletionWithContext } from '@/lib/onboarding.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
@@ -205,6 +206,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = String(formData.get('intent') ?? '')
   const guardianId = String(formData.get('guardian_id') ?? '')
   const pid = String(formData.get('pid') ?? '')
+  const submittedGuardianEmail = String(formData.get('guardian_email') ?? '')
 
   if (intent !== 'resend_guardian_invite') {
     return { error: 'Unknown intent' }
@@ -225,6 +227,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { error: 'Student profile not found' }
   }
 
+  const studentEmail = normalizeEmail(studentProfile.email ?? '')
+
   const { data: link } = await supabase
     .from('person_guardian_child')
     .select('id')
@@ -242,13 +246,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .eq('id', guardianId)
     .maybeSingle()
 
-  if (!guardianProfile?.email) {
-    return { error: 'Guardian email is missing' }
+  const guardianEmail = normalizeEmail(submittedGuardianEmail || guardianProfile?.email || '')
+
+  if (!guardianEmail) {
+    return { error: 'Guardian email is required' }
+  }
+
+  if (studentEmail && guardianEmail === studentEmail) {
+    return { error: 'Guardian email must be different from the student email' }
+  }
+
+  const { data: existingProfile } = await adminClient
+    .from('profile')
+    .select('id')
+    .eq('email', guardianEmail)
+    .maybeSingle()
+
+  if (existingProfile?.id && existingProfile.id !== guardianId) {
+    return { error: 'That email is already used by another account. Enter a different guardian email.' }
+  }
+
+  const { error: guardianUpdateError } = await adminClient
+    .from('profile')
+    .update({ email: guardianEmail })
+    .eq('id', guardianId)
+    .eq('role', 'guardian')
+
+  if (guardianUpdateError) {
+    return { error: guardianUpdateError.message }
   }
 
   const origin = new URL(request.url).origin
   const inviteResult = await sendGuardianInvite({
-    guardianEmail: guardianProfile.email,
+    guardianEmail,
     origin,
     inviterProfileId: studentProfile.id,
     inviterEmail: userData.user.email ?? '',
@@ -286,7 +316,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  return { ok: true, message: `Invite resent to ${guardianProfile.email}` }
+  return { ok: true, message: `Invite resent to ${guardianEmail}` }
 }
 
 export default function WaitingOnGuardianPage() {
@@ -335,13 +365,22 @@ export default function WaitingOnGuardianPage() {
                         >
                           {guardian.isComplete ? 'Complete' : 'Pending'}
                         </span>
-                        {!guardian.isComplete && guardian.email ? (
+                        {!guardian.isComplete ? (
                           <fetcher.Form method="post">
                             <input type="hidden" name="intent" value="resend_guardian_invite" />
                             <input type="hidden" name="pid" value={pid} />
                             <input type="hidden" name="guardian_id" value={guardian.id} />
+                            <input
+                              type="email"
+                              name="guardian_email"
+                              defaultValue={guardian.email ?? ''}
+                              required
+                              className="h-8 min-w-52 rounded-md border border-slate-300 px-2 text-xs"
+                              placeholder="guardian@email.com"
+                              disabled={loading}
+                            />
                             <Button type="submit" variant="outline" size="sm" disabled={loading}>
-                              {loading ? 'Sending...' : 'Resend invite'}
+                              {loading ? 'Sending...' : 'Save + resend'}
                             </Button>
                           </fetcher.Form>
                         ) : null}
