@@ -30,6 +30,7 @@ const resolvePublicAppOrigin = (fallbackOrigin: string) => {
 
 const REPROVISION_HORIZON_MINUTES = 36 * 60
 const REMINDER_WINDOW_MINUTES = 2 * 60
+const POST_CLASS_FOLLOWUP_DELAY_HOURS = 24
 const RUNNING_SYNC_TIMEOUT_MINUTES = 20
 const FAILED_SYNC_RETRY_COOLDOWN_MINUTES = 10
 const IN_CLAUSE_BATCH_SIZE = 150
@@ -314,6 +315,88 @@ const resolveReminderRecipientEmail = async (profileId: string) => {
   }
 }
 
+const resolveGuardianRecipientForFollowup = async (profileId: string) => {
+  const { data: profile, error: profileError } = await adminClient
+    .from('profile')
+    .select('id, role, firstname, surname, email')
+    .eq('id', profileId)
+    .maybeSingle<{ id: string; role: string | null; firstname: string | null; surname: string | null; email: string | null }>()
+
+  if (profileError || !profile) {
+    return null
+  }
+
+  const guardianNameForEmail = (row: { firstname: string | null; surname: string | null; email: string | null }) => {
+    const full = [row.firstname ?? '', row.surname ?? '']
+      .map(value => value.trim())
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+    if (full) return full
+    const email = normalizeEmail(row.email)
+    if (email) return email
+    return 'Parent/Guardian'
+  }
+
+  if (profile.role === 'guardian') {
+    const email = normalizeEmail(profile.email)
+    if (email) {
+      return {
+        recipientProfileId: profile.id,
+        email,
+        guardianName: guardianNameForEmail(profile),
+      }
+    }
+  }
+
+  const { data: guardianEdges, error: guardianEdgeError } = await adminClient
+    .from('person_guardian_child')
+    .select('guardian_profile_id, primary_child')
+    .eq('child_profile_id', profileId)
+
+  if (guardianEdgeError) {
+    return null
+  }
+
+  const prioritizedGuardianIds = (guardianEdges ?? [])
+    .slice()
+    .sort((left, right) => Number(right.primary_child) - Number(left.primary_child))
+    .map(edge => edge.guardian_profile_id)
+    .filter((id): id is string => Boolean(id))
+
+  if (prioritizedGuardianIds.length) {
+    const { data: guardians, error: guardianError } = await adminClient
+      .from('profile')
+      .select('id, firstname, surname, email')
+      .in('id', prioritizedGuardianIds)
+
+    if (!guardianError && guardians?.length) {
+      const guardianById = new Map(guardians.map(guardian => [guardian.id, guardian]))
+      for (const guardianId of prioritizedGuardianIds) {
+        const guardian = guardianById.get(guardianId)
+        if (!guardian) continue
+        const email = normalizeEmail(guardian.email)
+        if (!email) continue
+
+        return {
+          recipientProfileId: guardian.id,
+          email,
+          guardianName: guardianNameForEmail(guardian),
+        }
+      }
+    }
+  }
+
+  const fallbackEmail = normalizeEmail(profile.email)
+  if (!fallbackEmail) return null
+
+  return {
+    recipientProfileId: profile.id,
+    email: fallbackEmail,
+    guardianName: guardianNameForEmail(profile),
+  }
+}
+
 const sendReminderCoverage = async ({ now, appOrigin, onlyClassId }: { now: Date; appOrigin: string; onlyClassId?: string }) => {
   const publicAppOrigin = resolvePublicAppOrigin(appOrigin)
   const reminderStart = now
@@ -419,6 +502,72 @@ const sendReminderCoverage = async ({ now, appOrigin, onlyClassId }: { now: Date
   }
 
   return { scannedClasses: classIds.length, sent, failed, skipped }
+}
+
+const sendPostClassCameraOrPhotoFollowupCoverage = async ({ now, onlyClassId }: { now: Date; onlyClassId?: string }) => {
+  const followupThreshold = new Date(now.getTime() - POST_CLASS_FOLLOWUP_DELAY_HOURS * 60 * 60_000).toISOString()
+  const attendanceQuery = adminClient
+    .from('class_attendance')
+    .select('class_id, profile_id, camera_on, photo_status, class:class_id ( ends_at )')
+
+  if (onlyClassId) {
+    attendanceQuery.eq('class_id', onlyClassId)
+  }
+
+  const { data: attendanceRows, error } = await attendanceQuery
+
+  if (error) {
+    return { scanned: 0, eligible: 0, sent: 0, failed: 1, skipped: 0, error: error.message }
+  }
+
+  const candidates = (attendanceRows ?? []).filter(row => {
+    const classRow = relationRow<{ ends_at: string }>(row.class)
+    if (!classRow?.ends_at) return false
+    if (new Date(classRow.ends_at).toISOString() > followupThreshold) return false
+
+    const cameraMissingOrOff = row.camera_on !== true
+    const photoStatusMissing = row.photo_status == null
+    return cameraMissingOrOff && photoStatusMissing
+  })
+
+  let sent = 0
+  let failed = 0
+  let skipped = 0
+
+  for (const row of candidates) {
+    const recipient = await resolveGuardianRecipientForFollowup(row.profile_id)
+    if (!recipient?.email) {
+      skipped += 1
+      continue
+    }
+
+    const result = await sendTemplateEmail({
+      toEmail: recipient.email,
+      templateKey: 'class_camera_or_photo_followup_v1',
+      templateData: {
+        guardianName: recipient.guardianName,
+      },
+      eventKey: `class:${row.class_id}:profile:${row.profile_id}:camera_or_photo_followup_v1`,
+      profileId: row.profile_id,
+      familyProfileId: recipient.recipientProfileId,
+    })
+
+    if (result.status === 'sent') {
+      sent += 1
+    } else if (result.status === 'skipped') {
+      skipped += 1
+    } else {
+      failed += 1
+    }
+  }
+
+  return {
+    scanned: (attendanceRows ?? []).length,
+    eligible: candidates.length,
+    sent,
+    failed,
+    skipped,
+  }
 }
 
 const isRecent = ({ now, value, windowMinutes }: { now: Date; value: string | null; windowMinutes: number }) => {
@@ -799,6 +948,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
   const within36h = await provisionWithin36h({ now })
   const hostReconciliation = await reconcileHostOverlaps({ now })
   const reminders = await sendReminderCoverage({ now, appOrigin })
+  const postClassCameraOrPhotoFollowup = await sendPostClassCameraOrPhotoFollowupCoverage({ now })
   const attendanceSync = await syncPostClassAttendance({ now })
 
   console.info('[zoom-jobs] run completed', {
@@ -807,6 +957,8 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     within36hScanned: within36h.scanned,
     hostConflictsDetected: hostReconciliation.detected,
     reminderScanned: reminders.scannedClasses,
+    postClassFollowupEligible: postClassCameraOrPhotoFollowup.eligible,
+    postClassFollowupSent: postClassCameraOrPhotoFollowup.sent,
     attendanceScanned: attendanceSync.scanned,
     attendanceFailed: attendanceSync.failed,
     attendanceAbsentMarked: attendanceSync.absentMarked,
@@ -821,6 +973,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     provisionWithin36h: within36h,
     hostOverlapReconciliation: hostReconciliation,
     reminderCoverage: reminders,
+    postClassCameraOrPhotoFollowup,
     attendanceRowBackfill,
     attendanceSync,
   }
@@ -841,6 +994,7 @@ export const runZoomJobsForClass = async ({
   const provision = await provisionClassById(classId)
   const hostReconciliation = await reconcileHostOverlaps({ now, onlyClassIds: new Set([classId]) })
   const reminderCoverage = await sendReminderCoverage({ now, appOrigin, onlyClassId: classId })
+  const postClassCameraOrPhotoFollowup = await sendPostClassCameraOrPhotoFollowupCoverage({ now, onlyClassId: classId })
   const attendanceSync = await syncPostClassAttendance({ now, onlyClassId: classId })
 
   return {
@@ -852,6 +1006,7 @@ export const runZoomJobsForClass = async ({
     provision,
     hostOverlapReconciliation: hostReconciliation,
     reminderCoverage,
+    postClassCameraOrPhotoFollowup,
     attendanceSync,
   }
 }
