@@ -1,4 +1,8 @@
 import {
+  renderClassCameraOrPhotoFollowupEmail,
+  type ClassCameraOrPhotoFollowupTemplateData,
+} from '@/lib/email/templates/class-camera-or-photo-followup'
+import {
   renderClassReminderLoginEmail,
   type ClassReminderLoginTemplateData,
 } from '@/lib/email/templates/class-reminder-login'
@@ -15,6 +19,7 @@ export type EmailTemplateMap = {
   family_enrollment_requested_v1: FamilyEnrollmentRequestedTemplateData
   family_enrollment_accepted_v1: FamilyEnrollmentAcceptedTemplateData
   class_reminder_login_v1: ClassReminderLoginTemplateData
+  class_camera_or_photo_followup_v1: ClassCameraOrPhotoFollowupTemplateData
 }
 
 export type EmailTemplateKey = keyof EmailTemplateMap
@@ -32,6 +37,9 @@ export const emailTemplates: {
   },
   class_reminder_login_v1: {
     render: renderClassReminderLoginEmail,
+  },
+  class_camera_or_photo_followup_v1: {
+    render: renderClassCameraOrPhotoFollowupEmail,
   },
 }
 
