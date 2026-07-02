@@ -477,6 +477,17 @@ const personLinkForCell = (
       ...(typeof row.ends_at === 'string' && row.ends_at ? { f_class_ends_at: formatTimestamp(row.ends_at) } : {}),
     })
   }
+  if (tableName === 'class' && column === 'step_attendance_rows' && typeof row.id === 'string' && row.id) {
+    const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
+    const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''
+    const endsAt = typeof row.ends_at === 'string' ? row.ends_at : ''
+    return withReturnTo('/manage/class-attendance', {
+      f_class_id: row.id,
+      ...(workshopDescription ? { f_workshop_description: workshopDescription } : {}),
+      ...(startsAt ? { f_class_starts_at: formatTimestamp(startsAt) } : {}),
+      ...(endsAt ? { f_class_ends_at: formatTimestamp(endsAt) } : {}),
+    })
+  }
   if (tableName === 'class' && column === 'step_reminder') {
     const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
     const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''

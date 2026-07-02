@@ -243,7 +243,8 @@ export async function loader(args: Route.LoaderArgs) {
     column =>
       column !== 'id' &&
       column !== 'class_zoom_meeting_id' &&
-      column !== 'class_zoom_meeting_display'
+      column !== 'class_zoom_meeting_display' &&
+      column !== 'ends_at'
   )
 
   const displayColumns: string[] = []
@@ -254,7 +255,7 @@ export async function loader(args: Route.LoaderArgs) {
     }
   }
 
-  displayColumns.push('zoom_topic', 'zoom_start_at', 'zoom_end_at', 'zoom_schedule_match', 'sync_class')
+  displayColumns.push('zoom_topic', 'zoom_start_at', 'zoom_end_at', 'zoom_schedule_match', 'ends_at', 'sync_class')
 
   const fitAllColumnsMeta = Object.fromEntries(
     displayColumns.map(column => [
