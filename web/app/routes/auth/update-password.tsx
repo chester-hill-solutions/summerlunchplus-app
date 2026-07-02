@@ -13,7 +13,19 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { type EmailOtpType } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
-import { Link, type ActionFunctionArgs, type LoaderFunctionArgs, redirect, useFetcher } from 'react-router'
+import {
+  Link,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+  redirect,
+  useFetcher,
+  useRouteLoaderData,
+} from 'react-router'
+
+type RootLoaderData = {
+  supabaseUrl?: string
+  supabaseAnonKey?: string
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const requestUrl = new URL(request.url)
@@ -64,6 +76,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Page() {
   const fetcher = useFetcher<typeof action>()
+  const rootData = useRouteLoaderData('root') as RootLoaderData | undefined
   const [ready, setReady] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
 
@@ -73,7 +86,15 @@ export default function Page() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    const supabase = createBrowserClient()
+    const supabaseUrl = rootData?.supabaseUrl?.trim() ?? ''
+    const supabaseAnonKey = rootData?.supabaseAnonKey?.trim() ?? ''
+    if (!supabaseUrl || !supabaseAnonKey) {
+      setAuthError('Missing Supabase client configuration for password recovery.')
+      setReady(false)
+      return
+    }
+
+    const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey)
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(event => {
@@ -124,7 +145,7 @@ export default function Page() {
     })
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [rootData?.supabaseAnonKey, rootData?.supabaseUrl])
 
   return (
     <AuthStickerBackground dense>
