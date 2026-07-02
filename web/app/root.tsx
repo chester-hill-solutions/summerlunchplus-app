@@ -22,7 +22,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const hasAuthCode = Boolean(url.searchParams.get('code'))
   const hasOtpToken = Boolean(url.searchParams.get('token_hash') && url.searchParams.get('type'))
 
-  if (pathname !== '/auth/confirm' && (hasAuthCode || hasOtpToken)) {
+  if (pathname !== '/auth/confirm' && pathname !== '/update-password' && (hasAuthCode || hasOtpToken)) {
     throw redirect(`/auth/confirm${url.search}`, { status: 302 })
   }
 
