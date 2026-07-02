@@ -618,15 +618,6 @@ export default function Home() {
     }
   }
 
-  const sortedFamilyProfiles = familyProfiles
-    .slice()
-    .sort((a, b) => {
-      const roleA = a.role === 'guardian' ? 0 : 1
-      const roleB = b.role === 'guardian' ? 0 : 1
-      if (roleA !== roleB) return roleA - roleB
-      return personName(a).localeCompare(personName(b))
-    })
-
   const workshopEnrollments = enrollments.filter(enrollment => Boolean(enrollment.workshop_id))
   const hasWorkshopEnrollment = workshopEnrollments.length > 0
   const hasPendingWorkshopEnrollment = workshopEnrollments.some(enrollment => enrollment.status === 'pending')
@@ -771,110 +762,8 @@ export default function Home() {
       return a.requested_at.localeCompare(b.requested_at)
     })
 
-  const renderJoinControl = ({
-    enrollmentStatus,
-    classRow,
-  }: {
-    enrollmentStatus: string
-    classRow: ClassRow
-  }) => {
-    const now = Date.now()
-    const startsAtMs = new Date(classRow.starts_at).getTime()
-    const endsAtMs = new Date(classRow.ends_at).getTime()
-    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + 15 * 60_000
-    const joinOpen =
-      Number.isFinite(startsAtMs) &&
-      Number.isFinite(endsAtMs) &&
-      now >= startsAtMs - 15 * 60_000 &&
-      now <= endsAtMs + 15 * 60_000
-
-    if (enrollmentStatus !== 'approved') {
-      return <span className="text-xs text-muted-foreground">Available after acceptance</span>
-    }
-
-    if (closed) {
-      return (
-        <Button size="sm" variant="outline" disabled>
-          CLOSED
-        </Button>
-      )
-    }
-
-    if (!joinOpen) {
-      return <span className="text-xs text-muted-foreground">Opens 15 min before class</span>
-    }
-
-    if (!joinUrlByClass[classRow.id]) {
-      return <span className="text-xs text-muted-foreground">Link pending</span>
-    }
-
-    return (
-      <Button asChild size="sm">
-        <a href={joinUrlByClass[classRow.id]} target="_blank" rel="noreferrer">
-          JOIN CLASS
-        </a>
-      </Button>
-    )
-  }
-
-  const renderPhotoControl = ({
-    enrollmentStatus,
-    classRow,
-    workshopLabel,
-    mobile = false,
-  }: {
-    enrollmentStatus: string
-    classRow: ClassRow
-    workshopLabel: string
-    mobile?: boolean
-  }) => {
-    const now = Date.now()
-    const endsAtMs = new Date(classRow.ends_at).getTime()
-    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + 15 * 60_000
-    const selectedProfileId = selectedProfileIdByClass[classRow.id]
-    const photoStatus =
-      photoStatusOverrideByClass[classRow.id] ?? selectedPhotoStatusByClass[classRow.id] ?? ''
-
-    if (enrollmentStatus !== 'approved' || !closed || !selectedProfileId) {
-      return <span className="text-xs text-muted-foreground">-</span>
-    }
-
-    if (photoStatus) {
-      const statusToneClass =
-        photoStatus === 'accepted'
-          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-          : photoStatus === 'rejected'
-            ? 'border-destructive/40 bg-destructive/10 text-destructive'
-            : 'border-amber-300 bg-amber-50 text-amber-700'
-      return (
-        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusToneClass}`}>
-          {photoStatus}
-        </span>
-      )
-    }
-
-    return (
-      <Button
-        size="sm"
-        className={mobile ? 'w-full' : ''}
-        onClick={() => {
-          resetUploadModal()
-          setUploadModalState({
-            open: true,
-            classId: classRow.id,
-            profileId: selectedProfileId,
-            workshopLabel,
-            startsAt: classRow.starts_at,
-          })
-        }}
-      >
-        Upload Images
-      </Button>
-    )
-  }
-
   return (
-    <main className="w-full px-2 pt-4 pb-10 space-y-6 sm:px-6 sm:pt-6">
+    <main className="w-full px-6 pt-6 pb-10 space-y-6">
       {toast ? (
         <div
           className={`fixed bottom-4 right-4 z-50 rounded border px-3 py-2 text-sm shadow-md ${
@@ -887,7 +776,7 @@ export default function Home() {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex gap-2">
         <Button asChild variant={tab === 'family-workshops' ? 'default' : 'outline'}>
           <Link to="/home">Family Workshops</Link>
         </Button>
@@ -934,78 +823,51 @@ export default function Home() {
             <>
               <section className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
                 <h2 className="text-lg font-semibold">Enrolled workshops</h2>
-                <div className="space-y-3 md:hidden">
-                  {sortedWorkshopEnrollments.map(enrollment => {
-                    const workshopId = enrollment.workshop_id as string
-                    const workshop = workshopsById[workshopId]
-                    const semester = semesterById[enrollment.semester_id]
-                    const upcoming = joinableByWorkshop[workshopId] ?? []
-                    const next = upcoming[0]
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Workshop</TableHead>
+                      <TableHead>Semester</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Next class</TableHead>
+                      <TableHead>Attendance</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedWorkshopEnrollments.map(enrollment => {
+                      const workshopId = enrollment.workshop_id as string
+                      const workshop = workshopsById[workshopId]
+                      const semester = semesterById[enrollment.semester_id]
+                      const upcoming = joinableByWorkshop[workshopId] ?? []
+                      const next = upcoming[0]
 
-                    return (
-                      <article key={`mobile-enrollment-${enrollment.id}`} className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                        <a href={`#workshop-${workshopId}`} className="block text-sm font-semibold underline decoration-dotted underline-offset-2 hover:text-primary">
-                          {workshop?.description ?? 'Workshop'}
-                        </a>
-                        <p className="text-xs text-muted-foreground">
-                          {semester?.name ?? (semester ? `${formatDate(semester.starts_at)} - ${formatDate(semester.ends_at)}` : enrollment.semester_id.slice(0, 8))}
-                        </p>
-                        <p className="text-xs text-muted-foreground capitalize">
-                          {enrollment.status === 'pending' ? 'pending (under review)' : enrollment.status}
-                        </p>
-                        <p className="text-xs text-muted-foreground">Next class: {next ? formatDateTime(next.starts_at) : 'No upcoming class'}</p>
-                      </article>
-                    )
-                  })}
-                </div>
-
-                <div className="hidden md:block">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Workshop</TableHead>
-                        <TableHead>Semester</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Next class</TableHead>
-                        <TableHead>Attendance</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {sortedWorkshopEnrollments.map(enrollment => {
-                        const workshopId = enrollment.workshop_id as string
-                        const workshop = workshopsById[workshopId]
-                        const semester = semesterById[enrollment.semester_id]
-                        const upcoming = joinableByWorkshop[workshopId] ?? []
-                        const next = upcoming[0]
-
-                        return (
-                          <TableRow key={enrollment.id}>
-                            <TableCell>
-                              <a href={`#workshop-${workshopId}`} className="underline decoration-dotted underline-offset-2 hover:text-primary">
-                                {workshop?.description ?? 'Workshop'}
-                              </a>
-                            </TableCell>
-                            <TableCell>{semester?.name ?? (semester ? `${formatDate(semester.starts_at)} - ${formatDate(semester.ends_at)}` : enrollment.semester_id.slice(0, 8))}</TableCell>
-                            <TableCell>
-                              {enrollment.status === 'pending' ? (
-                                <span
-                                  className="cursor-help capitalize"
-                                  title="Your enrollment is under review. Thank you for your patience."
-                                >
-                                  {enrollment.status}
-                                </span>
-                              ) : (
-                                <span className="capitalize">{enrollment.status}</span>
-                              )}
-                            </TableCell>
-                            <TableCell>{next ? formatDateTime(next.starts_at) : 'No upcoming class'}</TableCell>
-                            <TableCell>{next ? 'Join from class list below' : '-'}</TableCell>
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                      return (
+                        <TableRow key={enrollment.id}>
+                          <TableCell>
+                            <a href={`#workshop-${workshopId}`} className="underline decoration-dotted underline-offset-2 hover:text-primary">
+                              {workshop?.description ?? 'Workshop'}
+                            </a>
+                          </TableCell>
+                          <TableCell>{semester?.name ?? (semester ? `${formatDate(semester.starts_at)} - ${formatDate(semester.ends_at)}` : enrollment.semester_id.slice(0, 8))}</TableCell>
+                          <TableCell>
+                            {enrollment.status === 'pending' ? (
+                              <span
+                                className="cursor-help capitalize"
+                                title="Your enrollment is under review. Thank you for your patience."
+                              >
+                                {enrollment.status}
+                              </span>
+                            ) : (
+                              <span className="capitalize">{enrollment.status}</span>
+                            )}
+                          </TableCell>
+                          <TableCell>{next ? formatDateTime(next.starts_at) : 'No upcoming class'}</TableCell>
+                          <TableCell>{next ? 'Join from class list below' : '-'}</TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
               </section>
 
               {sortedWorkshopEnrollments.map(enrollment => {
@@ -1022,64 +884,112 @@ export default function Home() {
                       {classSchedule.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No classes scheduled.</p>
                       ) : (
-                        <>
-                          <div className="hidden md:block">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Starts</TableHead>
-                                  <TableHead>Ends</TableHead>
-                                  <TableHead>Join</TableHead>
-                                  <TableHead>Photos</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {classSchedule.map(classRow => (
-                                  <TableRow key={classRow.id}>
-                                    <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
-                                    <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
-                                    <TableCell>{renderJoinControl({ enrollmentStatus: enrollment.status, classRow })}</TableCell>
-                                    <TableCell>
-                                      {renderPhotoControl({
-                                        enrollmentStatus: enrollment.status,
-                                        classRow,
-                                        workshopLabel: workshop?.description ?? 'Workshop',
-                                      })}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-
-                          <div className="space-y-3 md:hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Starts</TableHead>
+                              <TableHead>Ends</TableHead>
+                              <TableHead>Join</TableHead>
+                              <TableHead>Photos</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
                             {classSchedule.map(classRow => (
-                              <article key={`mobile-${classRow.id}`} className="rounded-lg border bg-muted/20 p-3 space-y-3">
-                                <div className="space-y-1">
-                                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Starts</p>
-                                  <p className="text-sm font-medium">{formatDateTime(classRow.starts_at)}</p>
-                                </div>
-                                <div className="space-y-1">
-                                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Ends</p>
-                                  <p className="text-sm font-medium">{formatDateTime(classRow.ends_at)}</p>
-                                </div>
-                                <div className="space-y-2">
-                                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Join</p>
-                                  {renderJoinControl({ enrollmentStatus: enrollment.status, classRow })}
-                                </div>
-                                <div className="space-y-2">
-                                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Photos</p>
-                                  {renderPhotoControl({
-                                    enrollmentStatus: enrollment.status,
-                                    classRow,
-                                    workshopLabel: workshop?.description ?? 'Workshop',
-                                    mobile: true,
-                                  })}
-                                </div>
-                              </article>
+                              <TableRow key={classRow.id}>
+                                <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
+                                <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    const now = Date.now()
+                                    const startsAtMs = new Date(classRow.starts_at).getTime()
+                                    const endsAtMs = new Date(classRow.ends_at).getTime()
+                                    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + 15 * 60_000
+                                    const joinOpen =
+                                      Number.isFinite(startsAtMs) &&
+                                      Number.isFinite(endsAtMs) &&
+                                      now >= startsAtMs - 15 * 60_000 &&
+                                      now <= endsAtMs + 15 * 60_000
+
+                                    if (enrollment.status !== 'approved') {
+                                      return <span className="text-xs text-muted-foreground">Available after acceptance</span>
+                                    }
+
+                                    if (closed) {
+                                      return (
+                                        <Button size="sm" variant="outline" disabled>
+                                          CLOSED
+                                        </Button>
+                                      )
+                                    }
+
+                                    if (!joinOpen) {
+                                      return <span className="text-xs text-muted-foreground">Opens 15 min before class</span>
+                                    }
+
+                                    if (!joinUrlByClass[classRow.id]) {
+                                      return <span className="text-xs text-muted-foreground">Link pending</span>
+                                    }
+
+                                    return (
+                                      <Button asChild size="sm">
+                                        <a href={joinUrlByClass[classRow.id]} target="_blank" rel="noreferrer">
+                                          JOIN CLASS
+                                        </a>
+                                      </Button>
+                                    )
+                                  })()}
+                                </TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    const now = Date.now()
+                                    const endsAtMs = new Date(classRow.ends_at).getTime()
+                                    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + 15 * 60_000
+                                    const selectedProfileId = selectedProfileIdByClass[classRow.id]
+                                    const photoStatus =
+                                      photoStatusOverrideByClass[classRow.id] ?? selectedPhotoStatusByClass[classRow.id] ?? ''
+
+                                    if (enrollment.status !== 'approved' || !closed || !selectedProfileId) {
+                                      return <span className="text-xs text-muted-foreground">-</span>
+                                    }
+
+                                    if (photoStatus) {
+                                      const statusToneClass =
+                                        photoStatus === 'accepted'
+                                          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                          : photoStatus === 'rejected'
+                                            ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                                            : 'border-amber-300 bg-amber-50 text-amber-700'
+                                      return (
+                                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusToneClass}`}>
+                                          {photoStatus}
+                                        </span>
+                                      )
+                                    }
+
+                                    return (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          resetUploadModal()
+                                          setUploadModalState({
+                                            open: true,
+                                            classId: classRow.id,
+                                            profileId: selectedProfileId,
+                                            workshopLabel: workshop?.description ?? 'Workshop',
+                                            startsAt: classRow.starts_at,
+                                          })
+                                        }}
+                                      >
+                                        Upload Images
+                                      </Button>
+                                    )
+                                  })()}
+                                </TableCell>
+                              </TableRow>
                             ))}
-                          </div>
-                        </>
+                          </TableBody>
+                        </Table>
                       )}
                     </div>
 
@@ -1099,123 +1009,26 @@ export default function Home() {
 
           <section className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
             <h2 className="text-lg font-semibold">Family members</h2>
-            <div className="space-y-3 md:hidden">
-              {sortedFamilyProfiles.map(profile => {
-                const isGuardian = profile.role === 'guardian'
-                const isStudent = profile.role === 'student'
-                const isPrimaryChild = isStudent && family.guardians.some(guardian => guardian.primaryChildId === profile.id)
-                const invite = profile.email ? inviteByEmail.get(profile.email.toLowerCase()) : null
-                const inviteStatus = profile.user_id
-                  ? 'Active account'
-                  : invite?.status
-                    ? `Invite ${invite.status}`
-                    : 'No invite sent'
-
-                return (
-                  <article key={`mobile-family-${profile.id}`} className="rounded-lg border bg-muted/20 p-3 space-y-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{personName(profile)}</p>
-                        {isPrimaryChild ? (
-                          <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                            Primary child
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="text-xs text-muted-foreground capitalize">{profile.role}</p>
-                      <p className="text-xs text-muted-foreground">{profile.email ?? 'No email'}</p>
-                      <p className="text-xs text-muted-foreground capitalize">{inviteStatus}</p>
-                    </div>
-
-                    {family.profileRole === 'guardian' ? (
-                      <div className="space-y-2">
-                        {isStudent ? (
-                          <Form method="post">
-                            <input type="hidden" name="intent" value="set_primary_child" />
-                            <input type="hidden" name="child_id" value={profile.id} />
-                            <Button type="submit" variant="outline" size="sm" className="w-full" disabled={isPrimaryChild || mutationLocked}>
-                              {isPrimaryChild ? 'Primary child' : 'Set primary child'}
-                            </Button>
-                          </Form>
-                        ) : null}
-
-                        {!profile.user_id && (isStudent || isGuardian) ? (
-                          <Form method="post" className="space-y-2">
-                            <input type="hidden" name="intent" value="send_or_resend_invite" />
-                            <input type="hidden" name="profile_id" value={profile.id} />
-                            <input type="hidden" name="role" value={isGuardian ? 'guardian' : 'student'} />
-                            <Input
-                              name="email"
-                              type="email"
-                              defaultValue={profile.email ?? ''}
-                              placeholder={isGuardian ? 'guardian@gmail.com' : 'child@gmail.com'}
-                              className="h-9 w-full"
-                              required
-                              disabled={mutationLocked}
-                            />
-                            <Button type="submit" variant="outline" size="sm" className="w-full" disabled={mutationLocked}>
-                              {invite?.status === 'pending' ? 'Resend invite' : 'Send invite'}
-                            </Button>
-                          </Form>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">View only</span>
-                    )}
-                  </article>
-                )
-              })}
-
-              {family.profileRole === 'guardian' ? (
-                <>
-                  <article className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                    <p className="text-sm font-semibold">Add child</p>
-                    <Form method="post" className="space-y-2">
-                      <input type="hidden" name="intent" value="add_child" />
-                      <Input name="firstname" placeholder="First name" className="h-9 w-full" disabled={mutationLocked} />
-                      <Input name="surname" placeholder="Surname" className="h-9 w-full" disabled={mutationLocked} />
-                      <Input name="email" type="email" placeholder="Email (optional)" className="h-9 w-full" disabled={mutationLocked} />
-                      <Button type="submit" className="w-full" disabled={mutationLocked}>Add child</Button>
-                    </Form>
-                  </article>
-
-                  <article className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                    <p className="text-sm font-semibold">Add guardian</p>
-                    <Form method="post" className="space-y-2">
-                      <input type="hidden" name="intent" value="add_guardian" />
-                      <Input name="firstname" placeholder="First name" className="h-9 w-full" disabled={mutationLocked} />
-                      <Input name="surname" placeholder="Surname" className="h-9 w-full" disabled={mutationLocked} />
-                      <Input name="email" type="email" placeholder="guardian@gmail.com" className="h-9 w-full" required disabled={mutationLocked} />
-                      <select name="child_id" className="h-9 w-full rounded border border-input bg-background px-2 text-sm" required disabled={mutationLocked}>
-                        <option value="">Link to child</option>
-                        {familyProfiles
-                          .filter(profile => profile.role === 'student')
-                          .map(child => (
-                            <option key={child.id} value={child.id}>
-                              {personName(child)}
-                            </option>
-                          ))}
-                      </select>
-                      <Button type="submit" className="w-full" disabled={mutationLocked}>Add guardian</Button>
-                    </Form>
-                  </article>
-                </>
-              ) : null}
-            </div>
-
-            <div className="hidden md:block">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Invite status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedFamilyProfiles.map(profile => {
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Invite status</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {familyProfiles
+                  .slice()
+                  .sort((a, b) => {
+                    const roleA = a.role === 'guardian' ? 0 : 1
+                    const roleB = b.role === 'guardian' ? 0 : 1
+                    if (roleA !== roleB) return roleA - roleB
+                    return personName(a).localeCompare(personName(b))
+                  })
+                  .map(profile => {
                     const isGuardian = profile.role === 'guardian'
                     const isStudent = profile.role === 'student'
                     const isPrimaryChild = isStudent && family.guardians.some(guardian => guardian.primaryChildId === profile.id)
@@ -1281,50 +1094,49 @@ export default function Home() {
                     )
                   })}
 
-                  {family.profileRole === 'guardian' ? (
-                    <>
-                      <TableRow>
-                        <TableCell className="font-medium">Add child</TableCell>
-                        <TableCell>student</TableCell>
-                        <TableCell colSpan={3}>
-                          <Form method="post" className="flex flex-wrap items-center gap-2">
-                            <input type="hidden" name="intent" value="add_child" />
-                            <Input name="firstname" placeholder="First name" className="h-8 w-32" disabled={mutationLocked} />
-                            <Input name="surname" placeholder="Surname" className="h-8 w-32" disabled={mutationLocked} />
-                            <Input name="email" type="email" placeholder="Email (optional)" className="h-8 w-52" disabled={mutationLocked} />
-                            <Button type="submit" size="sm" disabled={mutationLocked}>Add</Button>
-                          </Form>
-                        </TableCell>
-                      </TableRow>
+                {family.profileRole === 'guardian' ? (
+                  <>
+                    <TableRow>
+                      <TableCell className="font-medium">Add child</TableCell>
+                      <TableCell>student</TableCell>
+                      <TableCell colSpan={3}>
+                        <Form method="post" className="flex flex-wrap items-center gap-2">
+                          <input type="hidden" name="intent" value="add_child" />
+                          <Input name="firstname" placeholder="First name" className="h-8 w-32" disabled={mutationLocked} />
+                          <Input name="surname" placeholder="Surname" className="h-8 w-32" disabled={mutationLocked} />
+                          <Input name="email" type="email" placeholder="Email (optional)" className="h-8 w-52" disabled={mutationLocked} />
+                          <Button type="submit" size="sm" disabled={mutationLocked}>Add</Button>
+                        </Form>
+                      </TableCell>
+                    </TableRow>
 
-                      <TableRow>
-                        <TableCell className="font-medium">Add guardian</TableCell>
-                        <TableCell>guardian</TableCell>
-                        <TableCell colSpan={3}>
-                          <Form method="post" className="flex flex-wrap items-center gap-2">
-                            <input type="hidden" name="intent" value="add_guardian" />
-                            <Input name="firstname" placeholder="First name" className="h-8 w-32" disabled={mutationLocked} />
-                            <Input name="surname" placeholder="Surname" className="h-8 w-32" disabled={mutationLocked} />
-                            <Input name="email" type="email" placeholder="guardian@gmail.com" className="h-8 w-52" required disabled={mutationLocked} />
-                            <select name="child_id" className="h-8 rounded border border-input bg-background px-2 text-xs" required disabled={mutationLocked}>
-                              <option value="">Link to child</option>
-                              {familyProfiles
-                                .filter(profile => profile.role === 'student')
-                                .map(child => (
-                                  <option key={child.id} value={child.id}>
-                                    {personName(child)}
-                                  </option>
-                                ))}
-                            </select>
-                            <Button type="submit" size="sm" disabled={mutationLocked}>Add</Button>
-                          </Form>
-                        </TableCell>
-                      </TableRow>
-                    </>
-                  ) : null}
-                </TableBody>
-              </Table>
-            </div>
+                    <TableRow>
+                      <TableCell className="font-medium">Add guardian</TableCell>
+                      <TableCell>guardian</TableCell>
+                      <TableCell colSpan={3}>
+                        <Form method="post" className="flex flex-wrap items-center gap-2">
+                          <input type="hidden" name="intent" value="add_guardian" />
+                          <Input name="firstname" placeholder="First name" className="h-8 w-32" disabled={mutationLocked} />
+                          <Input name="surname" placeholder="Surname" className="h-8 w-32" disabled={mutationLocked} />
+                          <Input name="email" type="email" placeholder="guardian@gmail.com" className="h-8 w-52" required disabled={mutationLocked} />
+                          <select name="child_id" className="h-8 rounded border border-input bg-background px-2 text-xs" required disabled={mutationLocked}>
+                            <option value="">Link to child</option>
+                            {familyProfiles
+                              .filter(profile => profile.role === 'student')
+                              .map(child => (
+                                <option key={child.id} value={child.id}>
+                                  {personName(child)}
+                                </option>
+                              ))}
+                          </select>
+                          <Button type="submit" size="sm" disabled={mutationLocked}>Add</Button>
+                        </Form>
+                      </TableCell>
+                    </TableRow>
+                  </>
+                ) : null}
+              </TableBody>
+            </Table>
           </section>
         </div>
       )}

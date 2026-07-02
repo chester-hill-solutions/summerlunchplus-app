@@ -76,7 +76,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     label: 'Families',
     table: 'person_guardian_child',
     select: 'guardian_profile_id, child_profile_id, primary_child',
-    columns: ['guardian_display', 'guardian_email', 'child_display', 'primary_child'],
+    columns: ['guardian_display', 'child_display', 'primary_child'],
     lookupMappings: [
       {
         keyColumn: 'guardian_profile_id',
@@ -84,13 +84,6 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         resultColumn: 'guardian_display',
         select: 'id, firstname, surname, email',
         format: 'profile_display',
-      },
-      {
-        keyColumn: 'guardian_profile_id',
-        table: 'profile',
-        resultColumn: 'guardian_email',
-        select: 'id, email',
-        valueColumn: 'email',
       },
       {
         keyColumn: 'child_profile_id',
@@ -314,55 +307,6 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         select: 'user_id, email',
         valueColumn: 'email',
         resultColumn: 'uploaded_by_email',
-      },
-    ],
-    editor: {
-      primaryKey: ['id'],
-      allowInsert: false,
-      allowUpdate: false,
-      fields: {},
-    },
-  },
-  'class-attendance-raw': {
-    label: 'Class Attendance Raw (Zoom Participants)',
-    table: 'class_zoom_participant',
-    select:
-      'id, class_zoom_meeting_id, class_id, profile_id, zoom_user_id, user_name, user_email, join_time, leave_time, duration_seconds, camera_on, attentiveness_score, raw, created_at',
-    columns: [
-      'class_display',
-      'class_zoom_meeting_display',
-      'profile_display',
-      'profile_id',
-      'user_name',
-      'user_email',
-      'join_time',
-      'leave_time',
-      'duration_seconds',
-      'camera_on',
-      'raw',
-      'created_at',
-    ],
-    order: 'created_at',
-    lookupMappings: [
-      {
-        keyColumn: 'class_id',
-        table: 'class',
-        resultColumn: 'class_display',
-        select: 'id, starts_at, workshop:workshop_id ( description )',
-        format: 'class_display',
-      },
-      {
-        keyColumn: 'profile_id',
-        table: 'profile',
-        resultColumn: 'profile_display',
-        select: 'id, firstname, surname, email',
-        format: 'profile_display',
-      },
-      {
-        keyColumn: 'class_zoom_meeting_id',
-        table: 'class_zoom_meeting',
-        valueColumn: 'zoom_meeting_id',
-        resultColumn: 'class_zoom_meeting_display',
       },
     ],
     editor: {
