@@ -28,6 +28,35 @@ const resolvePublicAppOrigin = (fallbackOrigin: string) => {
   return ensureOrigin(explicitOrigin || fallbackOrigin)
 }
 
+const formatClassStartsAtForWorkshopTimezone = ({
+  startsAt,
+  workshopTimezone,
+}: {
+  startsAt: string
+  workshopTimezone: string | null | undefined
+}) => {
+  const date = new Date(startsAt)
+  if (Number.isNaN(date.getTime())) {
+    return startsAt
+  }
+
+  const timezone = typeof workshopTimezone === 'string' ? workshopTimezone.trim() : ''
+  const options: Intl.DateTimeFormatOptions = {
+    dateStyle: 'full',
+    timeStyle: 'short',
+    ...(timezone ? { timeZone: timezone } : {}),
+  }
+
+  try {
+    return new Intl.DateTimeFormat('en-US', options).format(date)
+  } catch {
+    return new Intl.DateTimeFormat('en-US', {
+      dateStyle: 'full',
+      timeStyle: 'short',
+    }).format(date)
+  }
+}
+
 const REPROVISION_HORIZON_MINUTES = 36 * 60
 const REMINDER_WINDOW_MINUTES = 2 * 60
 const POST_CLASS_FOLLOWUP_DELAY_HOURS = 24
@@ -414,7 +443,7 @@ const sendReminderCoverage = async ({ now, appOrigin, onlyClassId }: { now: Date
 
     const { data: classRow } = await adminClient
       .from('class')
-      .select('id, starts_at, workshop:workshop_id ( description )')
+      .select('id, starts_at, workshop:workshop_id ( description, timezone )')
       .eq('id', classId)
       .single()
 
@@ -461,10 +490,18 @@ const sendReminderCoverage = async ({ now, appOrigin, onlyClassId }: { now: Date
           ? workshopRelation.description.trim()
           : 'your class'
 
-      const startsAtText = new Intl.DateTimeFormat('en-US', {
-        dateStyle: 'full',
-        timeStyle: 'short',
-      }).format(new Date(classRow.starts_at))
+      const workshopTimezone =
+        workshopRelation &&
+        typeof workshopRelation === 'object' &&
+        'timezone' in workshopRelation &&
+        typeof workshopRelation.timezone === 'string'
+          ? workshopRelation.timezone
+          : null
+
+      const startsAtText = formatClassStartsAtForWorkshopTimezone({
+        startsAt: classRow.starts_at,
+        workshopTimezone,
+      })
 
       const templateData: { workshopName: string; classStartsAt: string; loginUrl: string } = {
         workshopName,

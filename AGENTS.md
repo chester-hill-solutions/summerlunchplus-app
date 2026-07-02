@@ -1,40 +1,42 @@
 # AGENTS.md
 
 ## Repo boundaries
-- Product app is `web/` (React Router v7 SSR + Vite + TypeScript + Supabase). Run Node commands in `web/`; repo-root `package.json` has no scripts.
-- `zoom-api/` is a separate FastAPI service; follow `zoom-api/CLAUDE.md` when working there.
-- `scheduler/` is a separate cron service that triggers `web` internal routes; treat it as its own deployable.
+- Product app is `web/` (React Router v7 SSR). Run Node commands in `web/`; root `package.json` has no scripts.
+- `scheduler/` (cron worker) and `zoom-api/` (FastAPI) are separate deployables with their own run/test flows.
+- When touching `zoom-api/`, follow `zoom-api/CLAUDE.md`.
 
-## High-signal wiring details
-- Routes are manually declared in `web/app/routes.ts`; new route files 404 until added there.
-- `web/app/root.tsx` applies onboarding redirects to every path not in its allowlist; if you add a public/auth route, update that allowlist or it will be gated unexpectedly.
-- Auth/onboarding flow is split across `web/app/root.tsx`, `web/app/lib/auth.server.ts`, and `web/app/routes/auth/sign-up-details.tsx`; keep redirect logic consistent across all three.
-- Signup details path is `/auth/sign-up-details` (not `/auth/signup-details`).
-- `web/app/lib/supabase/server.ts#createClient` returns `{ supabase, headers }`; forward `headers` on redirects/responses or auth cookies are dropped.
-- `~/` and `@/` both map to `web/app/*` (`web/tsconfig.json`).
+## Web app wiring that causes regressions
+- Routes are manually declared in `web/app/routes.ts`; new route files 404 until registered.
+- `npm run typecheck` runs `react-router typegen` + `tsc`; run it after route edits to refresh generated route types.
+- `web/app/root.tsx` enforces onboarding redirects on almost every path; add new public/auth paths to its allowlist or they will be gated.
+- Keep onboarding logic aligned across `web/app/root.tsx`, `web/app/lib/auth.server.ts`, and `web/app/routes/auth/sign-up-details.tsx`.
+- Signup details route is `/auth/sign-up-details` (with hyphen).
+- `createClient` in `web/app/lib/supabase/server.ts` returns `{ supabase, headers }`; propagate `headers` on redirects/responses or auth cookies are lost.
+- Path aliases `~/` and `@/` both resolve to `web/app/*` (`web/tsconfig.json`).
 
-## Local setup and commands
-- Initial app env: from repo root run `cp web/.env.template web/.env.local`, then `supabase start --debug`, then copy values from `supabase status -o json` into `web/.env.local`.
-- `ONBOARDING_MODE` defaults to `role`; only `permission` enables permission-gated onboarding (`web/.env.template`, `web/app/lib/auth.server.ts`).
-- App commands (in `web/`): `npm ci`, `npm run dev`, `npm run typecheck`, `npm run build && npm run start`, `npm run test`.
-- There is no lint/format script configured in `web/package.json`; do not assume `npm run lint` exists.
-- Focused Playwright runs: `npm run test:e2e -- tests/e2e/<spec>.spec.ts --grep "..."` and `npm run test:unit -- tests/unit/<spec>.spec.ts`.
+## Local setup and verification
+- First-time local app setup (repo root): `cp web/.env.template web/.env.local` -> `supabase start --debug` -> copy values from `supabase status -o json` into `web/.env.local`.
+- `ONBOARDING_MODE` falls back to `role`; only `permission` enables permission-gated onboarding.
+- Key commands in `web/`: `npm ci`, `npm run dev`, `npm run typecheck`, `npm run build && npm run start`, `npm run test`.
+- There is no lint/format script in `web/package.json`; do not invent `npm run lint`.
+- Focused tests: `npm run test:e2e -- tests/e2e/<spec>.spec.ts --grep "..."` and `npm run test:unit -- tests/unit/<spec>.spec.ts`.
+- CI (`.github/workflows/tests.yml`) boots Supabase and runs only `npm run test`; typecheck is not part of CI.
 
-## Testing quirks
-- `npm run test` is Playwright for both e2e and unit directories (`web/package.json`); there is no separate Jest/Vitest suite.
-- If `PLAYWRIGHT_BASE_URL` is unset, Playwright starts `npm run dev -- --port 5173` automatically (`web/playwright.config.ts`).
-- Some admin e2e specs skip unless `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are available (env or `web/.env.local`) (`web/tests/e2e/helpers/admin-account.ts`).
+## Test behavior gotchas
+- `npm run test` is Playwright over both `web/tests/e2e` and `web/tests/unit`; there is no Jest/Vitest suite.
+- If `PLAYWRIGHT_BASE_URL` is unset, Playwright auto-starts `npm run dev -- --port 5173`.
+- Admin e2e helpers skip/fail without `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (env or `web/.env.local`).
 
-## Database workflow and guardrails
-- Declarative SQL in `supabase/schemas/` is source of truth. Do not manually edit existing `supabase/migrations/*`.
-- Schema change flow (repo root): edit `supabase/schemas/*` -> `supabase db diff -f <name>` -> `supabase migration up`.
-- Regenerate DB types after schema changes:
+## Database and auth guardrails
+- Treat declarative SQL in `supabase/schemas/` as source of truth; do not hand-edit existing `supabase/migrations/*`.
+- Schema flow (repo root): edit `supabase/schemas/*` -> `supabase db diff -f <name>` -> `supabase migration up`.
+- After schema changes, regenerate `web/app/lib/database.types.ts` with:
   `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`.
-- New DB-backed features must include permission seeds (`app_permissions`/`role_permission`) and RLS updates in the same change (`CODE_STANDARDS.md`).
-- Use `public.user_roles` + JWT claims as auth truth; `auth.users.raw_user_meta_data.role` can drift.
+- DB-backed features must ship permissions + RLS together (`app_permissions`, `role_permission`, policies) per `CODE_STANDARDS.md`.
+- Auth truth is `public.user_roles` + JWT claims; `auth.users.raw_user_meta_data.role` can drift.
 
-## Service integration gotchas
-- `scheduler` auth depends on matching `INTERNAL_RUNNER_SECRET` between `scheduler` and `web` (`scheduler/README.md`, `web/app/lib/internal-runner-auth.server.ts`).
-- Cron schedules are defined in `scheduler/crontab`; update that file (not docs) when changing job frequency.
-- Default Supabase seed mode is app bootstrap + sanitized prod snapshot (`supabase/config.toml` uses `./seeds/prod-data/*-sanitized.sql`, not dummy fixtures).
-- Auth email templates are configured in `supabase/config.toml` and loaded from `supabase/templates/*.html`.
+## Scheduler/Supabase integration gotchas
+- Internal cron auth requires matching `INTERNAL_RUNNER_SECRET` in `scheduler` and `web`.
+- Job timing source of truth is `scheduler/crontab` (not README text).
+- Default seed mode in `supabase/config.toml` uses bootstrap + sanitized prod snapshot (`./seeds/prod-data/*-sanitized.sql`).
+- Supabase auth email templates are configured in `supabase/config.toml` and loaded from `supabase/templates/*.html`.
