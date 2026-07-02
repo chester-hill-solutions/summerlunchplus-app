@@ -86,6 +86,11 @@ export const manageSections: ManageNavSection[] = [
         label: 'Federal electoral districts',
         description: 'Manage whitelist and meal kit flags with enrollment totals by riding status.',
       },
+      {
+        to: '/manage/program-analytics',
+        label: 'Program analytics',
+        description: 'Enrollment totals by status for Sobeys, PC, and Meal Kit programs.',
+      },
     ],
   },
   {

@@ -88,8 +88,8 @@ const allocateGiftCards = async () => {
   const nowIso = new Date().toISOString()
   const { data: attendanceRows, error: attendanceError } = await adminClient
     .from('class_attendance')
-    .select('id, class_id, profile_id, status, gift_card_blocked, class:class_id(ends_at), profile:profile_id(email)')
-    .eq('status', 'present')
+    .select('id, class_id, profile_id, camera_on, photo_status, gift_card_blocked, class:class_id(ends_at), profile:profile_id(email)')
+    .or('camera_on.eq.true,photo_status.eq.accepted,photo_status.eq.uploaded')
 
   if (attendanceError) {
     throw new Error(`Failed to load attendance rows: ${attendanceError.message}`)
@@ -99,7 +99,8 @@ const allocateGiftCards = async () => {
     id: string
     class_id: string
     profile_id: string
-    status: string | null
+    camera_on: boolean | null
+    photo_status: 'uploaded' | 'accepted' | 'rejected' | null
     gift_card_blocked: boolean | null
     class: { ends_at: string | null } | Array<{ ends_at: string | null }> | null
     profile: { email: string | null } | Array<{ email: string | null }> | null
@@ -164,6 +165,8 @@ const allocateGiftCards = async () => {
   let allocated = 0
 
   for (const row of typedRows) {
+    const hasAttendanceEvidence = row.camera_on === true || row.photo_status === 'accepted' || row.photo_status === 'uploaded'
+    if (!hasAttendanceEvidence) continue
     if (row.gift_card_blocked) continue
     if (allocationByPair.has(allocationKey(row.class_id, row.profile_id))) continue
 
