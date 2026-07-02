@@ -646,7 +646,7 @@ export function createTableLoader(tableName: string) {
       const canUseClassEnrollmentPriorityDefault =
         tableName === 'class-enrollment' &&
         !requestedSortColumn &&
-        (!parsedFilters.status || (!parsedFilters.status.includeEmpty && parsedFilters.status.values.length >= 0))
+        (!parsedFilters.status || !parsedFilters.status.includeEmpty)
 
       if (canUseClassEnrollmentPriorityDefault) {
         const statusFilter = parsedFilters.status
@@ -658,57 +658,90 @@ export function createTableLoader(tableName: string) {
         let remainingOffset = (page - 1) * pageSize
         let remainingLimit = pageSize
         const orderedRows: Record<string, unknown>[] = []
-        let orderedTotal = 0
+
+        const totalCountQueryBase = fromQualifiedTable(supabase, definition.table).select('id', { count: 'exact', head: true })
+        const totalCountQuery = applyParsedFilters({
+          query: totalCountQueryBase,
+          parsedFilters,
+          selectableColumns,
+        })
+        const { count: totalCount, error: totalCountError } = await totalCountQuery
+        if (totalCountError) {
+          throw new Response(totalCountError.message, { status: 500 })
+        }
+        totalRows = totalCount ?? 0
 
         for (const status of allowedStatuses) {
-          const countQueryBase = fromQualifiedTable(supabase, definition.table).select('id', { count: 'exact', head: true })
-          const countQuery = applyParsedFilters({
-            query: countQueryBase,
-            parsedFilters,
-            selectableColumns,
-            excludedColumns: excludedStatus,
-          }).eq('status', status)
+          let statusCursor = 0
 
-          const { count, error: countError } = await countQuery
-          if (countError) {
-            throw new Response(countError.message, { status: 500 })
+          while (remainingOffset > 0) {
+            const consumeSize = Math.min(remainingOffset, FETCH_BATCH_SIZE)
+            const consumeQueryBase = fromQualifiedTable(supabase, definition.table).select('id')
+            const consumeQuery = applyParsedFilters({
+              query: consumeQueryBase,
+              parsedFilters,
+              selectableColumns,
+              excludedColumns: excludedStatus,
+            })
+              .eq('status', status)
+              .order('requested_at', { ascending: false })
+              .range(statusCursor, statusCursor + consumeSize - 1)
+
+            const { data: consumeRows, error: consumeError } = await consumeQuery
+            if (consumeError) {
+              throw new Response(consumeError.message, { status: 500 })
+            }
+
+            const consumed = ((consumeRows ?? []) as unknown as Record<string, unknown>[]).length
+            if (consumed === 0) {
+              break
+            }
+
+            remainingOffset -= consumed
+            statusCursor += consumed
+            if (consumed < consumeSize) {
+              break
+            }
           }
 
-          const statusCount = count ?? 0
-          orderedTotal += statusCount
-
           if (remainingLimit <= 0) continue
-          if (remainingOffset >= statusCount) {
-            remainingOffset -= statusCount
+          if (remainingOffset > 0) {
             continue
           }
 
-          const localFrom = remainingOffset
-          const localTo = localFrom + remainingLimit - 1
-          const rowQueryBase = fromQualifiedTable(supabase, definition.table).select(definition.select)
-          const rowQuery = applyParsedFilters({
-            query: rowQueryBase,
-            parsedFilters,
-            selectableColumns,
-            excludedColumns: excludedStatus,
-          })
-            .eq('status', status)
-            .order('requested_at', { ascending: false })
-            .range(localFrom, localTo)
+          while (remainingLimit > 0) {
+            const fetchSize = Math.min(remainingLimit, FETCH_BATCH_SIZE)
+            const rowQueryBase = fromQualifiedTable(supabase, definition.table).select(definition.select)
+            const rowQuery = applyParsedFilters({
+              query: rowQueryBase,
+              parsedFilters,
+              selectableColumns,
+              excludedColumns: excludedStatus,
+            })
+              .eq('status', status)
+              .order('requested_at', { ascending: false })
+              .range(statusCursor, statusCursor + fetchSize - 1)
 
-          const { data: statusRows, error: rowError } = await rowQuery
-          if (rowError) {
-            throw new Response(rowError.message, { status: 500 })
+            const { data: statusRows, error: rowError } = await rowQuery
+            if (rowError) {
+              throw new Response(rowError.message, { status: 500 })
+            }
+
+            const chunk = (statusRows ?? []) as unknown as Record<string, unknown>[]
+            if (!chunk.length) {
+              break
+            }
+
+            orderedRows.push(...chunk)
+            remainingLimit -= chunk.length
+            statusCursor += chunk.length
+            if (chunk.length < fetchSize) {
+              break
+            }
           }
-
-          const chunk = (statusRows ?? []) as unknown as Record<string, unknown>[]
-          orderedRows.push(...chunk)
-          remainingLimit -= chunk.length
-          remainingOffset = 0
         }
 
         rows = orderedRows
-        totalRows = orderedTotal
       } else {
         const queryBase = fromQualifiedTable(supabase, definition.table)
           .select(definition.select, { count: 'exact' })
