@@ -49,6 +49,10 @@ export type Database = {
           camera_on: boolean | null
           class_id: string
           created_at: string
+          gift_card_block_reason: string | null
+          gift_card_blocked: boolean
+          gift_card_blocked_at: string | null
+          gift_card_blocked_by: string | null
           id: string
           notes: string | null
           photo_status:
@@ -63,6 +67,10 @@ export type Database = {
           camera_on?: boolean | null
           class_id: string
           created_at?: string
+          gift_card_block_reason?: string | null
+          gift_card_blocked?: boolean
+          gift_card_blocked_at?: string | null
+          gift_card_blocked_by?: string | null
           id?: string
           notes?: string | null
           photo_status?:
@@ -77,6 +85,10 @@ export type Database = {
           camera_on?: boolean | null
           class_id?: string
           created_at?: string
+          gift_card_block_reason?: string | null
+          gift_card_blocked?: boolean
+          gift_card_blocked_at?: string | null
+          gift_card_blocked_by?: string | null
           id?: string
           notes?: string | null
           photo_status?:
@@ -974,12 +986,20 @@ export type Database = {
       }
       gift_card_asset: {
         Row: {
+          account_number: string
+          allocated_at: string | null
           asset_url: string
           assigned_profile_id: string | null
           created_at: string
           id: string
           metadata: Json
+          opened_at: string | null
+          opened_count: number
+          last_opened_at: string | null
           page_count: number | null
+          pin: string
+          provider: Database["public"]["Enums"]["gift_card_provider"]
+          reminder_sent_at: string | null
           sent_at: string | null
           source_index: number | null
           status: Database["public"]["Enums"]["gift_card_asset_status"]
@@ -989,12 +1009,20 @@ export type Database = {
           value: number
         }
         Insert: {
+          account_number: string
+          allocated_at?: string | null
           asset_url: string
           assigned_profile_id?: string | null
           created_at?: string
           id?: string
           metadata?: Json
+          opened_at?: string | null
+          opened_count?: number
+          last_opened_at?: string | null
           page_count?: number | null
+          pin: string
+          provider?: Database["public"]["Enums"]["gift_card_provider"]
+          reminder_sent_at?: string | null
           sent_at?: string | null
           source_index?: number | null
           status?: Database["public"]["Enums"]["gift_card_asset_status"]
@@ -1004,12 +1032,20 @@ export type Database = {
           value: number
         }
         Update: {
+          account_number?: string
+          allocated_at?: string | null
           asset_url?: string
           assigned_profile_id?: string | null
           created_at?: string
           id?: string
           metadata?: Json
+          opened_at?: string | null
+          opened_count?: number
+          last_opened_at?: string | null
           page_count?: number | null
+          pin?: string
+          provider?: Database["public"]["Enums"]["gift_card_provider"]
+          reminder_sent_at?: string | null
           sent_at?: string | null
           source_index?: number | null
           status?: Database["public"]["Enums"]["gift_card_asset_status"]
@@ -1031,6 +1067,149 @@ export type Database = {
             columns: ["upload_id"]
             isOneToOne: false
             referencedRelation: "gift_card_upload"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gift_card_allocation: {
+        Row: {
+          blocked: boolean
+          blocked_at: string | null
+          blocked_by: string | null
+          blocked_reason: string | null
+          class_attendance_id: string | null
+          class_id: string
+          created_at: string
+          first_opened_at: string | null
+          gift_card_asset_id: string
+          glr_token_hash: string | null
+          id: string
+          last_opened_at: string | null
+          metadata: Json
+          open_count: number
+          profile_id: string
+          reminder_email_message_id: string | null
+          reminder_event_key: string | null
+          reminder_sent_at: string | null
+          status: Database["public"]["Enums"]["gift_card_allocation_status"]
+          updated_at: string
+        }
+        Insert: {
+          blocked?: boolean
+          blocked_at?: string | null
+          blocked_by?: string | null
+          blocked_reason?: string | null
+          class_attendance_id?: string | null
+          class_id: string
+          created_at?: string
+          first_opened_at?: string | null
+          gift_card_asset_id: string
+          glr_token_hash?: string | null
+          id?: string
+          last_opened_at?: string | null
+          metadata?: Json
+          open_count?: number
+          profile_id: string
+          reminder_email_message_id?: string | null
+          reminder_event_key?: string | null
+          reminder_sent_at?: string | null
+          status?: Database["public"]["Enums"]["gift_card_allocation_status"]
+          updated_at?: string
+        }
+        Update: {
+          blocked?: boolean
+          blocked_at?: string | null
+          blocked_by?: string | null
+          blocked_reason?: string | null
+          class_attendance_id?: string | null
+          class_id?: string
+          created_at?: string
+          first_opened_at?: string | null
+          gift_card_asset_id?: string
+          glr_token_hash?: string | null
+          id?: string
+          last_opened_at?: string | null
+          metadata?: Json
+          open_count?: number
+          profile_id?: string
+          reminder_email_message_id?: string | null
+          reminder_event_key?: string | null
+          reminder_sent_at?: string | null
+          status?: Database["public"]["Enums"]["gift_card_allocation_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gift_card_allocation_class_attendance_id_fkey"
+            columns: ["class_attendance_id"]
+            isOneToOne: false
+            referencedRelation: "class_attendance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gift_card_allocation_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gift_card_allocation_gift_card_asset_id_fkey"
+            columns: ["gift_card_asset_id"]
+            isOneToOne: false
+            referencedRelation: "gift_card_asset"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gift_card_allocation_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gift_card_click_event: {
+        Row: {
+          created_at: string
+          gift_card_allocation_id: string
+          id: string
+          ip_address: unknown
+          metadata: Json
+          profile_id: string | null
+          user_agent: string | null
+        }
+        Insert: {
+          created_at?: string
+          gift_card_allocation_id: string
+          id?: string
+          ip_address?: unknown
+          metadata?: Json
+          profile_id?: string | null
+          user_agent?: string | null
+        }
+        Update: {
+          created_at?: string
+          gift_card_allocation_id?: string
+          id?: string
+          ip_address?: unknown
+          metadata?: Json
+          profile_id?: string | null
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gift_card_click_event_gift_card_allocation_id_fkey"
+            columns: ["gift_card_allocation_id"]
+            isOneToOne: false
+            referencedRelation: "gift_card_allocation"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gift_card_click_event_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
             referencedColumns: ["id"]
           },
         ]
@@ -2143,7 +2322,15 @@ export type Database = {
         | "agreement"
         | "checkbox"
         | "no-input-text"
-      gift_card_asset_status: "available" | "sent" | "used" | "invalid"
+      gift_card_allocation_status: "allocated" | "sent" | "opened"
+      gift_card_asset_status:
+        | "available"
+        | "allocated"
+        | "sent"
+        | "opened"
+        | "used"
+        | "invalid"
+      gift_card_provider: "PC" | "Sobeys"
       gift_card_upload_status:
         | "uploaded"
         | "processing"
@@ -2392,7 +2579,16 @@ export const Constants = {
         "checkbox",
         "no-input-text",
       ],
-      gift_card_asset_status: ["available", "sent", "used", "invalid"],
+      gift_card_allocation_status: ["allocated", "sent", "opened"],
+      gift_card_asset_status: [
+        "available",
+        "allocated",
+        "sent",
+        "opened",
+        "used",
+        "invalid",
+      ],
+      gift_card_provider: ["PC", "Sobeys"],
       gift_card_upload_status: [
         "uploaded",
         "processing",

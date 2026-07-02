@@ -67,6 +67,7 @@ type LoaderData = {
   enrollments: EnrollmentRow[]
   classesByWorkshop: Record<string, ClassRow[]>
   joinUrlByClass: Record<string, string>
+  giftCardLinkByClass: Record<string, string>
   selectedProfileIdByClass: Record<string, string>
   selectedPhotoStatusByClass: Record<string, string>
   nextClass:
@@ -346,6 +347,31 @@ export async function loader({ request }: Route.LoaderArgs) {
     return acc
   }, {})
 
+  const { data: allocationRowsRaw } = classIds.length
+    ? await adminClient
+        .from('gift_card_allocation')
+        .select('id, class_id, profile_id, status, blocked, reminder_sent_at')
+        .in('class_id', classIds)
+        .in('profile_id', family.familyProfileIds)
+    : { data: [] }
+
+  const giftCardLinkByClass = ((allocationRowsRaw ?? []) as Array<{
+    id: string
+    class_id: string
+    profile_id: string
+    status: 'allocated' | 'sent' | 'opened'
+    blocked: boolean
+    reminder_sent_at: string | null
+  }>).reduce<Record<string, string>>((acc, row) => {
+    if (row.blocked) return acc
+    if (!row.reminder_sent_at) return acc
+    if (row.status !== 'sent' && row.status !== 'opened') return acc
+    const selectedProfileId = selectedProfileIdByClass[row.class_id]
+    if (!selectedProfileId || selectedProfileId !== row.profile_id) return acc
+    acc[row.class_id] = `/glr/${row.id}`
+    return acc
+  }, {})
+
   const nextClassCandidate = classes
     .filter(classRow => Boolean(classRow.workshop_id) && approvedWorkshopIds.has(classRow.workshop_id) && new Date(classRow.starts_at).getTime() > now)
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0]
@@ -369,6 +395,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     enrollments,
     classesByWorkshop,
     joinUrlByClass,
+    giftCardLinkByClass,
     selectedProfileIdByClass,
     selectedPhotoStatusByClass,
     nextClass,
@@ -589,6 +616,7 @@ export default function Home() {
     enrollments,
     classesByWorkshop,
     joinUrlByClass,
+    giftCardLinkByClass,
     selectedProfileIdByClass,
     selectedPhotoStatusByClass,
     nextClass,
@@ -873,6 +901,31 @@ export default function Home() {
     )
   }
 
+  const renderGiftCardControl = ({
+    enrollmentStatus,
+    classRow,
+  }: {
+    enrollmentStatus: string
+    classRow: ClassRow
+  }) => {
+    if (enrollmentStatus !== 'approved') {
+      return <span className="text-xs text-muted-foreground">Available after acceptance</span>
+    }
+
+    const href = giftCardLinkByClass[classRow.id]
+    if (!href) {
+      return <span className="text-xs text-muted-foreground">Not available yet</span>
+    }
+
+    return (
+      <Button asChild size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700">
+        <a href={href} target="_blank" rel="noreferrer">
+          GIFT CARD
+        </a>
+      </Button>
+    )
+  }
+
   return (
     <main className="w-full px-2 pt-4 pb-10 space-y-6 sm:px-6 sm:pt-6">
       {toast ? (
@@ -1030,6 +1083,7 @@ export default function Home() {
                                   <TableHead>Starts</TableHead>
                                   <TableHead>Ends</TableHead>
                                   <TableHead>Join</TableHead>
+                                  <TableHead>Gift card</TableHead>
                                   <TableHead>Photos</TableHead>
                                 </TableRow>
                               </TableHeader>
@@ -1039,6 +1093,7 @@ export default function Home() {
                                     <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
                                     <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
                                     <TableCell>{renderJoinControl({ enrollmentStatus: enrollment.status, classRow })}</TableCell>
+                                    <TableCell>{renderGiftCardControl({ enrollmentStatus: enrollment.status, classRow })}</TableCell>
                                     <TableCell>
                                       {renderPhotoControl({
                                         enrollmentStatus: enrollment.status,
@@ -1066,6 +1121,10 @@ export default function Home() {
                                 <div className="space-y-2">
                                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Join</p>
                                   {renderJoinControl({ enrollmentStatus: enrollment.status, classRow })}
+                                </div>
+                                <div className="space-y-2">
+                                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Gift card</p>
+                                  {renderGiftCardControl({ enrollmentStatus: enrollment.status, classRow })}
                                 </div>
                                 <div className="space-y-2">
                                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Photos</p>

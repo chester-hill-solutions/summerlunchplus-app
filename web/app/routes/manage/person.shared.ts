@@ -121,6 +121,10 @@ export type PersonLoaderData = {
   formNameById: Record<string, string>
   suspiciousSignals: SuspiciousSignalRow[]
   federalDistrictOptions: Array<{ value: string; label: string }>
+  familyFormAnswers: {
+    giftcard_display: string
+    prior_participation_display: string
+  }
 }
 
 export const formatDate = (value: string | null) => {

@@ -6,6 +6,8 @@ import { Combobox } from '@/components/ui/combobox'
 import type { PersonLoaderData } from './person.shared'
 import { formatDate, formatDateTime, profileLabel } from './person.shared'
 
+const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
+
 const geoStatusLabel: Record<PersonLoaderData['ipEvidence'][number]['geo_status'], string> = {
   geo_available: 'Geo available',
   no_ip_captured: 'No IP captured',
@@ -16,11 +18,13 @@ const geoStatusLabel: Record<PersonLoaderData['ipEvidence'][number]['geo_status'
 }
 
 export default function ManagePersonOverviewPage() {
-  const { profile, ipEvidence, familyProfiles, primaryChildByGuardian, federalDistrictOptions } = useOutletContext<PersonLoaderData>()
+  const { profile, ipEvidence, familyProfiles, primaryChildByGuardian, federalDistrictOptions, familyFormAnswers } = useOutletContext<PersonLoaderData>()
   const location = useLocation()
   const selectedRidingFetcher = useFetcher<{ error?: string; success?: boolean }>()
   const relatedRidingFetcher = useFetcher<{ error?: string; success?: boolean }>()
+  const familyAnswerFetcher = useFetcher<{ error?: string; success?: boolean }>()
   const [selectedRiding, setSelectedRiding] = useState(profile.federal_electoral_district_name ?? '')
+  const [giftcardValue, setGiftcardValue] = useState(familyFormAnswers.giftcard_display === 'N/A' ? '' : familyFormAnswers.giftcard_display)
 
   useEffect(() => {
     setSelectedRiding(profile.federal_electoral_district_name ?? '')
@@ -57,6 +61,10 @@ export default function ManagePersonOverviewPage() {
   useEffect(() => {
     setRelatedRiding(relatedProfile?.federal_electoral_district_name ?? '')
   }, [relatedProfile?.id, relatedProfile?.federal_electoral_district_name])
+
+  useEffect(() => {
+    setGiftcardValue(familyFormAnswers.giftcard_display === 'N/A' ? '' : familyFormAnswers.giftcard_display)
+  }, [familyFormAnswers.giftcard_display, profile.id])
 
   return (
     <section className="rounded-lg border bg-card p-4">
@@ -129,6 +137,48 @@ export default function ManagePersonOverviewPage() {
           ) : (
             <p className="text-muted-foreground">No related child/guardian profile found.</p>
           )}
+        </div>
+      </div>
+
+      <div className="mt-4 border-t pt-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Family form answers</h3>
+        <div className="mt-2 rounded border bg-muted/20 p-3 text-sm">
+          <p><span className="font-medium">Current gift card:</span> {familyFormAnswers.giftcard_display || 'N/A'}</p>
+          <p><span className="font-medium">Prior participation:</span> {familyFormAnswers.prior_participation_display || 'N/A'}</p>
+          <familyAnswerFetcher.Form
+            method="post"
+            action={`/manage/person${location.search}`}
+            className="mt-2 flex flex-wrap items-center gap-2"
+          >
+            <input type="hidden" name="intent" value="update-family-form-answer" />
+            <input type="hidden" name="profile_id" value={profile.id} />
+            <input type="hidden" name="question_code" value={GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE} />
+            <input type="hidden" name="value" value={giftcardValue} />
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gift card preference</span>
+            <Combobox
+              value={giftcardValue}
+              onChange={setGiftcardValue}
+              options={[
+                { value: 'Meal Kit', label: 'Meal Kit' },
+                { value: 'Walmart', label: 'Walmart' },
+                { value: 'No Frills', label: 'No Frills' },
+                { value: 'Loblaws', label: 'Loblaws' },
+                { value: 'FreshCo', label: 'FreshCo' },
+                { value: 'Food Basics', label: 'Food Basics' },
+                { value: 'Metro', label: 'Metro' },
+                { value: 'Sobeys', label: 'Sobeys' },
+                { value: 'Costco', label: 'Costco' },
+                { value: 'N/A', label: 'N/A' },
+              ]}
+              placeholder="Select gift card"
+              disabled={familyAnswerFetcher.state !== 'idle'}
+            />
+            <Button type="submit" size="sm" variant="outline" disabled={familyAnswerFetcher.state !== 'idle' || !giftcardValue.trim()}>
+              {familyAnswerFetcher.state !== 'idle' ? 'Saving...' : 'Save gift card'}
+            </Button>
+            {familyAnswerFetcher.data?.error ? <p className="basis-full text-xs text-destructive">{familyAnswerFetcher.data.error}</p> : null}
+            {familyAnswerFetcher.data?.success ? <p className="basis-full text-xs text-emerald-600">Gift card preference updated.</p> : null}
+          </familyAnswerFetcher.Form>
         </div>
       </div>
 

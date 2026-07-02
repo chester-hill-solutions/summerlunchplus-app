@@ -1,23 +1,46 @@
-import { useFetcher, useLoaderData } from 'react-router'
+import { Link, useLoaderData } from 'react-router'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
-import { processGiftCardUpload } from '@/lib/gift-cards/process-upload.server'
 
-import type { Database } from '@/lib/database.types'
 import type { Route } from './+types/gift-cards'
 
-type UploadRow = Database['public']['Tables']['gift_card_upload']['Row']
+type GiftCardAssetRow = {
+  id: string
+  provider: 'PC' | 'Sobeys'
+  account_number: string
+  pin: string
+  value: number
+  asset_url: string
+  status: 'available' | 'allocated' | 'sent' | 'opened' | 'used' | 'invalid'
+  assigned_profile_id: string | null
+  upload_id: string
+  created_at: string
+}
 
-const uploadTypeOptions: { label: string; value: Database['public']['Enums']['gift_card_upload_type'] }[] = [
-  { label: 'PDF (1 card per page)', value: 'pdf_per_page' },
-  { label: 'PDF (1 card per 4 pages)', value: 'pdf_per_4_pages' },
-  { label: 'CSV (links)', value: 'csv_link' },
-]
+const formatMoney = (value: number) =>
+  new Intl.NumberFormat('en-CA', {
+    style: 'currency',
+    currency: 'CAD',
+    minimumFractionDigits: 2,
+  }).format(value)
+
+const mask = (value: string, visibleDigits = 4) => {
+  const trimmed = value.trim()
+  if (trimmed.length <= visibleDigits) return trimmed
+  return `${'•'.repeat(Math.max(0, trimmed.length - visibleDigits))}${trimmed.slice(-visibleDigits)}`
+}
+
+const formatDateTime = (value: string) =>
+  new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value))
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
@@ -26,188 +49,74 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const { supabase } = createClient(request)
-  const { data: uploads } = await supabase
-    .from('gift_card_upload')
-    .select('id, provider, upload_type, status, total_cards, processed_cards, file_name, error_message, created_at')
+  const { data: assets, error } = await supabase
+    .from('gift_card_asset')
+    .select('id, provider, account_number, pin, value, asset_url, status, assigned_profile_id, upload_id, created_at')
     .order('created_at', { ascending: false })
 
+  if (error) {
+    throw new Response(error.message, { status: 500 })
+  }
+
   return {
-    uploads: uploads ?? [],
-    role: auth.claims.role,
+    assets: (assets ?? []) as GiftCardAssetRow[],
   }
-}
-
-export async function action({ request }: Route.ActionArgs) {
-  const auth = await requireAuth(request)
-  if (!isRoleAtLeast(auth.claims.role, 'staff')) {
-    return { error: 'You are not allowed to upload gift cards.' }
-  }
-
-  const formData = await request.formData()
-  const uploadType = formData.get('upload_type') as Database['public']['Enums']['gift_card_upload_type']
-  const provider = (formData.get('provider') as string | null)?.trim() ?? ''
-  const defaultValueRaw = (formData.get('default_value') as string | null)?.trim() ?? ''
-  const file = formData.get('file')
-
-  if (!uploadType) {
-    return { error: 'Upload type is required.' }
-  }
-
-  if (!file || !(file instanceof File) || file.size === 0) {
-    return { error: 'Please choose a file to upload.' }
-  }
-
-  const defaultValue = defaultValueRaw ? Number(defaultValueRaw) : undefined
-  if (defaultValueRaw && Number.isNaN(defaultValue)) {
-    return { error: 'Gift card value must be a number.' }
-  }
-
-  if (uploadType !== 'csv_link' && defaultValue == null) {
-    return { error: 'Gift card value is required for PDF uploads.' }
-  }
-
-  const { supabase, headers } = createClient(request)
-  const { data: uploadRow, error: uploadError } = await supabase
-    .from('gift_card_upload')
-    .insert({
-      uploaded_by: auth.user.id,
-      provider: provider || null,
-      upload_type: uploadType,
-      status: 'processing',
-      file_name: file.name,
-      file_size: file.size,
-      metadata: {
-        default_value: defaultValue ?? null,
-      },
-    })
-    .select('id')
-    .single()
-
-  if (uploadError || !uploadRow?.id) {
-    return { error: uploadError?.message ?? 'Unable to start upload.' }
-  }
-
-  const result = await processGiftCardUpload({
-    supabase,
-    uploadId: uploadRow.id,
-    uploadType,
-    file,
-    defaultValue,
-    provider: provider || undefined,
-  })
-
-  await supabase
-    .from('gift_card_upload')
-    .update({
-      status: result.errorMessage ? 'failed' : 'processed',
-      total_cards: result.totalCards,
-      processed_cards: result.processedCards,
-      error_message: result.errorMessage ?? null,
-    })
-    .eq('id', uploadRow.id)
-
-  if (result.errorMessage) {
-    return { error: result.errorMessage }
-  }
-
-  return new Response(JSON.stringify({ success: true }), {
-    headers: { ...headers, 'Content-Type': 'application/json' },
-  })
 }
 
 export default function GiftCardsPage() {
-  const { uploads } = useLoaderData<typeof loader>()
-  const fetcher = useFetcher<typeof action>()
-  const error = fetcher.data?.error
-  const loading = fetcher.state === 'submitting'
+  const { assets } = useLoaderData<typeof loader>()
 
   return (
     <div className="space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold">Gift card uploads</h1>
-        <p className="text-sm text-muted-foreground">
-          Upload PDF or CSV batches and track processing results.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-2">
+          <h1 className="text-2xl font-semibold">Gift card assets</h1>
+          <p className="text-sm text-muted-foreground">Inventory of uploaded gift cards and current lifecycle status.</p>
+        </div>
+        <Button asChild>
+          <Link to="/manage/gift-cards/upload">Upload gift cards</Link>
+        </Button>
       </header>
 
-      <div className="rounded-lg border bg-card p-6 shadow-sm">
-        <fetcher.Form method="post" className="grid gap-4" encType="multipart/form-data">
-          <div className="grid gap-2">
-            <Label htmlFor="upload_type">Upload type</Label>
-            <select
-              id="upload_type"
-              name="upload_type"
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              required
-            >
-              {uploadTypeOptions.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="provider">Provider (optional)</Label>
-            <Input id="provider" name="provider" />
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="default_value">Default value (required for PDF)</Label>
-            <Input id="default_value" name="default_value" type="number" min="0" step="0.01" />
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="file">File</Label>
-            <Input id="file" name="file" type="file" required />
-          </div>
-
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          <Button type="submit" disabled={loading}>
-            {loading ? 'Uploading...' : 'Upload batch'}
-          </Button>
-        </fetcher.Form>
-      </div>
-
       <div className="rounded-lg border bg-card">
-        <div className="border-b px-6 py-4">
-          <h2 className="text-lg font-semibold">Recent uploads</h2>
-        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="px-6 py-3 text-left">File</th>
-                <th className="px-6 py-3 text-left">Type</th>
                 <th className="px-6 py-3 text-left">Provider</th>
+                <th className="px-6 py-3 text-left">Account</th>
+                <th className="px-6 py-3 text-left">PIN</th>
+                <th className="px-6 py-3 text-left">Value</th>
                 <th className="px-6 py-3 text-left">Status</th>
-                <th className="px-6 py-3 text-left">Processed</th>
-                <th className="px-6 py-3 text-left">Errors</th>
+                <th className="px-6 py-3 text-left">Link</th>
+                <th className="px-6 py-3 text-left">Assigned profile</th>
+                <th className="px-6 py-3 text-left">Upload ID</th>
+                <th className="px-6 py-3 text-left">Created</th>
               </tr>
             </thead>
             <tbody>
-              {uploads.length === 0 ? (
+              {assets.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-6 text-center text-sm text-muted-foreground">
-                    No uploads yet.
+                  <td colSpan={9} className="px-6 py-6 text-center text-sm text-muted-foreground">
+                    No gift card assets yet.
                   </td>
                 </tr>
               ) : (
-                uploads.map(upload => (
-                  <tr key={upload.id} className="border-b last:border-b-0">
-                    <td className="px-6 py-3 font-medium text-slate-900">
-                      {upload.file_name ?? 'Untitled'}
-                    </td>
-                    <td className="px-6 py-3">{upload.upload_type}</td>
-                    <td className="px-6 py-3">{upload.provider ?? '—'}</td>
-                    <td className="px-6 py-3 capitalize">{upload.status}</td>
+                assets.map(asset => (
+                  <tr key={asset.id} className="border-b last:border-b-0">
+                    <td className="px-6 py-3">{asset.provider}</td>
+                    <td className="px-6 py-3 font-mono">{mask(asset.account_number)}</td>
+                    <td className="px-6 py-3 font-mono">{mask(asset.pin)}</td>
+                    <td className="px-6 py-3">{formatMoney(asset.value)}</td>
+                    <td className="px-6 py-3 capitalize">{asset.status}</td>
                     <td className="px-6 py-3">
-                      {upload.processed_cards}/{upload.total_cards}
+                      <a href={asset.asset_url} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-primary">
+                        Open
+                      </a>
                     </td>
-                    <td className="px-6 py-3 text-xs text-red-500">
-                      {upload.error_message ?? ''}
-                    </td>
+                    <td className="px-6 py-3 font-mono">{asset.assigned_profile_id ? asset.assigned_profile_id.slice(0, 8) : '—'}</td>
+                    <td className="px-6 py-3 font-mono">{asset.upload_id.slice(0, 8)}</td>
+                    <td className="px-6 py-3">{formatDateTime(asset.created_at)}</td>
                   </tr>
                 ))
               )}

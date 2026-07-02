@@ -10,10 +10,12 @@ import { refreshSuspiciousSignalsForProfile } from '@/lib/suspicious-signals.ser
 import { adminClient } from '@/lib/supabase/adminClient'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE, upsertAdminFamilyFormAnswer } from '@/lib/admin-form-answers.server'
 
 import type { LoaderFunctionArgs } from 'react-router'
 import type { PersonLoaderData, ProfileRow, SuspiciousSignalRow } from './person.shared'
 import { profileLabel } from './person.shared'
+import { loadWorkshopEnrollmentEnrichment } from './workshop-enrollment-enrichment.server'
 
 const primaryForwardedToken = (forwardedFor: string | null | undefined) => {
   if (typeof forwardedFor !== 'string' || !forwardedFor.trim()) return null
@@ -502,6 +504,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return { value: name, label: name }
     })
 
+  const enrichment = await loadWorkshopEnrollmentEnrichment([profileRow.id])
+  const familyFormAnswers = {
+    giftcard_display: enrichment[profileRow.id]?.giftcard_display ?? 'N/A',
+    prior_participation_display: enrichment[profileRow.id]?.prior_participation_display ?? 'N/A',
+  }
+
   return {
     profile: profileRow as ProfileRow,
     activityEvents,
@@ -517,6 +525,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     attendanceByClass,
     suspiciousSignals,
     federalDistrictOptions,
+    familyFormAnswers,
   } satisfies PersonLoaderData
 }
 
@@ -528,8 +537,40 @@ export async function action({ request }: LoaderFunctionArgs) {
 
   const formData = await request.formData()
   const intent = String(formData.get('intent') ?? '')
-  if (intent !== 'update-riding' && intent !== 'rescan-family') {
+  if (intent !== 'update-riding' && intent !== 'rescan-family' && intent !== 'update-family-form-answer') {
     return new Response('Unsupported action', { status: 400, headers: auth.headers })
+  }
+
+  if (intent === 'update-family-form-answer') {
+    if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    const profileId = String(formData.get('profile_id') ?? '').trim()
+    const questionCode = String(formData.get('question_code') ?? '').trim()
+    const value = String(formData.get('value') ?? '').trim()
+
+    if (!profileId || !questionCode) {
+      return { error: 'Missing profile or question code.' }
+    }
+
+    const result = await upsertAdminFamilyFormAnswer({
+      seedProfileId: profileId,
+      questionCode,
+      value,
+      actorUserId: auth.user.id,
+    })
+
+    if (!result.ok) {
+      return { error: result.error }
+    }
+
+    return {
+      success: true,
+      question_code: questionCode,
+      value: result.value,
+      gift_card_question_code: GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
+    }
   }
 
   if (intent === 'rescan-family') {
