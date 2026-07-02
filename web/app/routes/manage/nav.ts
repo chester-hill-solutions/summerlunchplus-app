@@ -29,7 +29,7 @@ export const manageSections: ManageNavSection[] = [
       {
         to: '/manage/class-attendance-raw',
         label: 'Raw attendance',
-        description: 'Raw Zoom participant rows used to derive class attendance status.',
+        description: 'Raw class_attendance rows before enrichment and derived debug fields.',
       },
       { to: '/manage/class-attendance-photo-upload-attempt', label: 'Photo upload attempts', description: 'Debug class photo upload failures and retries.' },
       { to: '/manage/workshop-enrollment', label: 'Workshop enrollments', description: 'Pending, waitlisted, approved, and rejected workshop enrollments.' },
