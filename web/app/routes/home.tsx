@@ -1083,8 +1083,8 @@ export default function Home() {
                                   <TableHead>Starts</TableHead>
                                   <TableHead>Ends</TableHead>
                                   <TableHead>Join</TableHead>
-                                  <TableHead>Gift card</TableHead>
                                   <TableHead>Photos</TableHead>
+                                  <TableHead>Gift card</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
@@ -1093,7 +1093,6 @@ export default function Home() {
                                     <TableCell>{formatDateTime(classRow.starts_at)}</TableCell>
                                     <TableCell>{formatDateTime(classRow.ends_at)}</TableCell>
                                     <TableCell>{renderJoinControl({ enrollmentStatus: enrollment.status, classRow })}</TableCell>
-                                    <TableCell>{renderGiftCardControl({ enrollmentStatus: enrollment.status, classRow })}</TableCell>
                                     <TableCell>
                                       {renderPhotoControl({
                                         enrollmentStatus: enrollment.status,
@@ -1101,6 +1100,7 @@ export default function Home() {
                                         workshopLabel: workshop?.description ?? 'Workshop',
                                       })}
                                     </TableCell>
+                                    <TableCell>{renderGiftCardControl({ enrollmentStatus: enrollment.status, classRow })}</TableCell>
                                   </TableRow>
                                 ))}
                               </TableBody>
@@ -1123,10 +1123,6 @@ export default function Home() {
                                   {renderJoinControl({ enrollmentStatus: enrollment.status, classRow })}
                                 </div>
                                 <div className="space-y-2">
-                                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Gift card</p>
-                                  {renderGiftCardControl({ enrollmentStatus: enrollment.status, classRow })}
-                                </div>
-                                <div className="space-y-2">
                                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Photos</p>
                                   {renderPhotoControl({
                                     enrollmentStatus: enrollment.status,
@@ -1134,6 +1130,10 @@ export default function Home() {
                                     workshopLabel: workshop?.description ?? 'Workshop',
                                     mobile: true,
                                   })}
+                                </div>
+                                <div className="space-y-2">
+                                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Gift card</p>
+                                  {renderGiftCardControl({ enrollmentStatus: enrollment.status, classRow })}
                                 </div>
                               </article>
                             ))}
