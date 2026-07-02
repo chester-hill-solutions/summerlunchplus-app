@@ -3,39 +3,17 @@ import type { LoaderFunctionArgs } from 'react-router'
 import { requireAuth } from '@/lib/auth.server'
 import { concernBandForScore, concernBandForSignals, concernRowClass, scoreConcernSignals } from '@/lib/concern-scoring'
 import { adminClient } from '@/lib/supabase/adminClient'
-import { type Database } from '@/lib/database.types'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createTableLoader } from '@/routes/manage/table-loader'
 
 const baseLoader = createTableLoader('class-enrollment')
 
-const ENROLLMENT_STATUS_ORDER: Record<Database['public']['Enums']['workshop_enrollment_status'], number> = {
-  pending: 0,
-  waitlisted: 1,
-  revoked: 2,
-  approved: 3,
-  rejected: 4,
-}
-
-const toTime = (value: unknown) => {
-  if (typeof value !== 'string' || !value) return Number.POSITIVE_INFINITY
-  const parsed = Date.parse(value)
-  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
-}
-
 export async function loadWorkshopEnrollmentData(request: Request) {
   const auth = await requireAuth(request)
   const canManageEnrollments = isRoleAtLeast(auth.claims.role, 'admin')
 
-  // Keep workshop enrollment on the full-row path so custom derived columns
-  // and filter options are computed from the full dataset, like class attendance.
-  const loaderUrl = new URL(request.url)
-  loaderUrl.searchParams.set('sort', '__full_scan__')
-  loaderUrl.searchParams.delete('dir')
-  const loaderRequest = new Request(loaderUrl.toString(), request)
-
   const base = await baseLoader(
-    { request: loaderRequest } as LoaderFunctionArgs,
+    { request } as LoaderFunctionArgs,
     { includeForeignKeyOptions: canManageEnrollments }
   )
 
@@ -161,31 +139,6 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       _row_concern_band: concernBand,
       _row_signal_summary: `Concern ${concernScore} (${concernBand}) · ${countLabel}: ${primarySignal.summary}`,
     }
-  })
-
-  enrichedRows.sort((left, right) => {
-    const leftStatus =
-      typeof left.status === 'string'
-        ? (left.status as Database['public']['Enums']['workshop_enrollment_status'])
-        : 'rejected'
-    const rightStatus =
-      typeof right.status === 'string'
-        ? (right.status as Database['public']['Enums']['workshop_enrollment_status'])
-        : 'rejected'
-
-    const statusDiff = ENROLLMENT_STATUS_ORDER[leftStatus] - ENROLLMENT_STATUS_ORDER[rightStatus]
-    if (statusDiff !== 0) {
-      return statusDiff
-    }
-
-    const timeDiff = toTime(right.requested_at) - toTime(left.requested_at)
-    if (timeDiff !== 0) {
-      return timeDiff
-    }
-
-    const leftId = typeof left.id === 'string' ? left.id : ''
-    const rightId = typeof right.id === 'string' ? right.id : ''
-    return leftId.localeCompare(rightId)
   })
 
   let columns = base.columns.includes('enrolled_capacity')
