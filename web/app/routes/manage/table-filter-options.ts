@@ -1,10 +1,17 @@
 import { createClient } from '@/lib/supabase/server'
 import { TABLE_DEFINITIONS } from './table-definitions'
 import { createTableLoader } from './table-loader'
+import { loadWorkshopEnrollmentEnrichment } from './workshop-enrollment-enrichment.server'
 import type { LoaderFunctionArgs } from 'react-router'
 
 const FETCH_BATCH_SIZE = 1000
 const FILTER_EMPTY_TOKEN = '__none__'
+const WORKSHOP_ENRICHMENT_COLUMNS = new Set([
+  'riding_display',
+  'geo_locations_display',
+  'giftcard_display',
+  'prior_participation_display',
+])
 
 type ParsedFilter = {
   values: string[]
@@ -49,19 +56,26 @@ const parseTopLevelSelectColumns = (select: string) => {
   return Array.from(new Set(columns))
 }
 
-const parseFiltersFromSearch = (columns: string[], searchParams: URLSearchParams): Record<string, ParsedFilter> => {
-  return columns.reduce<Record<string, ParsedFilter>>((acc, column) => {
-    const values = Array.from(new Set(searchParams.getAll(`f_${column}`)))
-    if (!values.length) return acc
+const parseFiltersFromSearch = (searchParams: URLSearchParams): Record<string, ParsedFilter> => {
+  const parsed: Record<string, ParsedFilter> = {}
+
+  for (const key of Array.from(new Set(Array.from(searchParams.keys())))) {
+    if (!key.startsWith('f_')) continue
+    const column = key.slice(2)
+    if (!column) continue
+
+    const values = Array.from(new Set(searchParams.getAll(key)))
+    if (!values.length) continue
 
     const includeEmpty = values.includes(FILTER_EMPTY_TOKEN)
     const explicitValues = values.filter(value => value !== FILTER_EMPTY_TOKEN)
-    acc[column] = {
+    parsed[column] = {
       values: explicitValues,
       includeEmpty,
     }
-    return acc
-  }, {})
+  }
+
+  return parsed
 }
 
 const fromQualifiedTable = (supabase: ReturnType<typeof createClient>['supabase'], qualifiedTable: string) => {
@@ -141,6 +155,37 @@ const loadAllRowsViaTableLoader = async (
   return payload.rows as Record<string, unknown>[]
 }
 
+const maybeEnrichWorkshopEnrollmentRows = async ({
+  tableName,
+  rows,
+  requiredColumns,
+}: {
+  tableName: string
+  rows: Record<string, unknown>[]
+  requiredColumns: Set<string>
+}) => {
+  if (tableName !== 'class-enrollment') return rows
+  const needsEnrichment = Array.from(requiredColumns).some(column => WORKSHOP_ENRICHMENT_COLUMNS.has(column))
+  if (!needsEnrichment) return rows
+
+  const profileIds = Array.from(
+    new Set(
+      rows
+        .map(row => (typeof row.profile_id === 'string' ? row.profile_id : ''))
+        .filter(Boolean)
+    )
+  )
+  if (!profileIds.length) return rows
+
+  const byProfileId = await loadWorkshopEnrollmentEnrichment(profileIds)
+  return rows.map(row => {
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!profileId) return row
+    const enrichment = byProfileId[profileId]
+    return enrichment ? { ...row, ...enrichment } : row
+  })
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const tableName = (url.searchParams.get('table') ?? '').trim()
@@ -155,13 +200,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return Response.json({ status: 'not_found', allOptions: [], totalCount: 0 }, { status: 404 })
   }
 
-  if (!definition.columns.includes(column)) {
+  const validBaseColumn = definition.columns.includes(column)
+  const validWorkshopDerivedColumn = tableName === 'class-enrollment' && WORKSHOP_ENRICHMENT_COLUMNS.has(column)
+
+  if (!validBaseColumn && !validWorkshopDerivedColumn) {
     return Response.json({ status: 'invalid_column', allOptions: [], totalCount: 0 }, { status: 400 })
   }
 
   const { supabase, headers } = createClient(request)
   const selectableColumns = new Set(parseTopLevelSelectColumns(definition.select))
-  const parsedFilters = parseFiltersFromSearch(definition.columns, url.searchParams)
+  const parsedFilters = parseFiltersFromSearch(url.searchParams)
 
   const hasUnsupportedFilter = Object.keys(parsedFilters).some(
     filterColumn => filterColumn !== column && !selectableColumns.has(filterColumn)
@@ -174,8 +222,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (hasUnsupportedFilter || hasMixedEmptyAndExplicit || !isSelectableColumn) {
     try {
       const rows = await loadAllRowsViaTableLoader(request, tableName)
+      const requiredColumns = new Set<string>([column, ...Object.keys(parsedFilters)])
+      const enrichedRows = await maybeEnrichWorkshopEnrollmentRows({
+        tableName,
+        rows,
+        requiredColumns,
+      })
       const options = sortFilterOptions(
-        rows
+        enrichedRows
           .filter(row => rowMatchesFilters(row, parsedFilters, column))
           .map(row => toOptionValue(row[column]))
       )
