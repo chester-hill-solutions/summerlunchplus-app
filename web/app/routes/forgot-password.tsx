@@ -26,10 +26,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const { supabase, headers } = createClient(request)
   const origin = new URL(request.url).origin
+  const redirectTo = `${origin}/update-password`
+
+  console.info('[auth] forgot-password reset redirect', {
+    requestUrl: request.url,
+    origin,
+    redirectTo,
+    host: request.headers.get('host'),
+    xForwardedHost: request.headers.get('x-forwarded-host'),
+    xForwardedProto: request.headers.get('x-forwarded-proto'),
+  })
 
   // Send the actual reset password email
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${origin}/update-password`,
+    redirectTo,
   })
 
   if (error) {

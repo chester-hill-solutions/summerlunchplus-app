@@ -299,6 +299,18 @@ const getCellValue = (column: string, row: Record<string, unknown>, tableName?: 
   return (value ?? '').toString()
 }
 
+const getFilterQueryValue = (column: string, row: Record<string, unknown>, tableName?: string) => {
+  const value = row[column]
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value)
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'object') {
+    return getCellValue(column, row, tableName)
+  }
+  return String(value)
+}
+
 const normalizeHoverCardValue = (value: unknown) => {
   if (value === null || value === undefined) return ''
   if (typeof value === 'string') return value.trim()
@@ -1096,12 +1108,14 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
   const filterDataRevision = useMemo(
     () =>
-      [
-        rowsWithEnrichment.length,
-        Object.keys(enrichmentByProfileId).length,
-        Object.keys(districtCountsByRiding).length,
-      ].join(':'),
-    [districtCountsByRiding, enrichmentByProfileId, rowsWithEnrichment.length]
+      serverSideQuery
+        ? 'server'
+        : [
+            rowsWithEnrichment.length,
+            Object.keys(enrichmentByProfileId).length,
+            Object.keys(districtCountsByRiding).length,
+          ].join(':'),
+    [districtCountsByRiding, enrichmentByProfileId, rowsWithEnrichment.length, serverSideQuery]
   )
 
   const openFilterCacheKey = useMemo(() => {
@@ -1180,6 +1194,82 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       updatedAt: Date.now(),
     }
     setOpenFilterCacheEntry(loadingEntry)
+
+    if (serverSideQuery) {
+      void (async () => {
+        const activeRequestId = filterActiveRequestRef.current.get(openFilterCacheKey)
+        if (activeRequestId !== requestId) return
+
+        const query = new URLSearchParams()
+        query.set('table', tableName)
+        query.set('column', openFilterColumn)
+        for (const column of columns) {
+          if (!hasOwn(filters, column)) continue
+          const values = filters[column] ?? []
+          if (!values.length) {
+            query.append(`f_${column}`, FILTER_EMPTY_TOKEN)
+            continue
+          }
+          for (const value of values) {
+            query.append(`f_${column}`, value)
+          }
+        }
+
+        try {
+          const response = await fetch(`/manage/table-filter-options?${query.toString()}`)
+          if (!response.ok) {
+            throw new Error(`Failed to load filter options (${response.status})`)
+          }
+
+          const payload = (await response.json()) as {
+            status?: string
+            allOptions?: string[]
+            totalCount?: number
+          }
+
+          const activeAfterFetch = filterActiveRequestRef.current.get(openFilterCacheKey)
+          if (activeAfterFetch !== requestId) return
+
+          if (payload.status === 'loaded') {
+            const allOptions = sortFilterOptions(payload.allOptions ?? [])
+            const loadedEntry: FilterOptionsCacheEntry = {
+              status: 'loaded',
+              allOptions,
+              totalCount: typeof payload.totalCount === 'number' ? payload.totalCount : allOptions.length,
+              updatedAt: Date.now(),
+            }
+            writeFilterCache(openFilterCacheKey, loadedEntry)
+            if (openFilterCacheKeyRef.current === openFilterCacheKey) {
+              setOpenFilterCacheEntry(loadedEntry)
+            }
+            filterActiveRequestRef.current.delete(openFilterCacheKey)
+            return
+          }
+        } catch (error) {
+          console.error('[table display] server filter options fetch failed', error)
+        }
+
+        const localOptions = computeAllOptionsForColumn(openFilterColumn, filters)
+        const fallbackEntry: FilterOptionsCacheEntry = {
+          status: 'loaded',
+          allOptions: localOptions,
+          totalCount: localOptions.length,
+          updatedAt: Date.now(),
+        }
+        writeFilterCache(openFilterCacheKey, fallbackEntry)
+        if (openFilterCacheKeyRef.current === openFilterCacheKey) {
+          setOpenFilterCacheEntry(fallbackEntry)
+        }
+        filterActiveRequestRef.current.delete(openFilterCacheKey)
+      })()
+
+      return () => {
+        const activeRequestId = filterActiveRequestRef.current.get(openFilterCacheKey)
+        if (activeRequestId === requestId) {
+          filterActiveRequestRef.current.delete(openFilterCacheKey)
+        }
+      }
+    }
 
     void (async () => {
       const activeRequestId = filterActiveRequestRef.current.get(openFilterCacheKey)
@@ -1315,7 +1405,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         filterActiveRequestRef.current.delete(openFilterCacheKey)
       }
     }
-  }, [filters, openFilterCacheKey, openFilterColumn, rowsWithEnrichment, tableName])
+  }, [columns, filters, openFilterCacheKey, openFilterColumn, rowsWithEnrichment, serverSideQuery, tableName])
 
   const derivedRows = useMemo(() => {
     let adjustedRows = serverSideQuery
@@ -1600,7 +1690,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     })
   }
 
-  const appendFilter = (column: string, value: string) => {
+  const appendFilter = (column: string, row: Record<string, unknown>) => {
+    const value = serverSideQuery
+      ? getFilterQueryValue(column, row, tableName)
+      : getCellValue(column, row, tableName)
     const current = filters[column] ?? []
     if (current.includes(value)) return
     const allOptionsForColumn = computeAllOptionsForColumn(column, filters)
@@ -2834,7 +2927,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                             }
 
                             if (!canClickFilter) return
-                            appendFilter(column, cellValue)
+                            appendFilter(column, row)
                           }}
                           onMouseEnter={() => {
                             if (!isWorkshopEnrollment || column !== 'profile_display') return
