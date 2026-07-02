@@ -69,7 +69,7 @@ export default function TeamLayout() {
     [isManagerOrAdmin, isStaff]
   )
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(teamNavSections.map(section => [section.key, section.defaultCollapsed]))
   )
