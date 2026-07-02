@@ -1,17 +1,18 @@
 # AGENTS.md
 
 ## Repo boundaries
-- Product app is `web/` (React Router v7 SSR). Run Node commands in `web/`; root `package.json` has no scripts.
-- `scheduler/` (cron worker) and `zoom-api/` (FastAPI) are separate deployables with their own run/test flows.
+- Product app is `web/` (React Router v7 SSR). Run Node commands in `web/`; root `package.json` has dependencies only, no scripts.
+- `scheduler/` (cron worker) and `zoom-api/` (FastAPI) are separate deployables with separate run/test flows.
 - When touching `zoom-api/`, follow `zoom-api/CLAUDE.md`.
 
-## Web app wiring that causes regressions
+## Web wiring that causes regressions
 - Routes are manually declared in `web/app/routes.ts`; new route files 404 until registered.
 - `npm run typecheck` runs `react-router typegen` + `tsc`; run it after route edits to refresh generated route types.
 - `web/app/root.tsx` enforces onboarding redirects on almost every path; add new public/auth paths to its allowlist or they will be gated.
 - Keep onboarding logic aligned across `web/app/root.tsx`, `web/app/lib/auth.server.ts`, and `web/app/routes/auth/sign-up-details.tsx`.
 - Signup details route is `/auth/sign-up-details` (with hyphen).
 - `createClient` in `web/app/lib/supabase/server.ts` returns `{ supabase, headers }`; propagate `headers` on redirects/responses or auth cookies are lost.
+- `enforceOnboardingGuard` calls `getSignUpDetailsStatus`, which queries `form_submission` + nested `form_answer`; avoid duplicate calls in the same request path.
 - Path aliases `~/` and `@/` both resolve to `web/app/*` (`web/tsconfig.json`).
 
 ## Local setup and verification
@@ -37,6 +38,7 @@
 
 ## Scheduler/Supabase integration gotchas
 - Internal cron auth requires matching `INTERNAL_RUNNER_SECRET` in `scheduler` and `web`.
+- Scheduler local run uses `make` targets in `scheduler/Makefile` (not npm scripts).
 - Job timing source of truth is `scheduler/crontab` (not README text).
 - Default seed mode in `supabase/config.toml` uses bootstrap + sanitized prod snapshot (`./seeds/prod-data/*-sanitized.sql`).
 - Supabase auth email templates are configured in `supabase/config.toml` and loaded from `supabase/templates/*.html`.
