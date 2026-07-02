@@ -20,13 +20,28 @@ import {
   useSearchParams,
 } from 'react-router'
 
+const trim = (value: string | undefined | null) => value?.trim() || ''
+
+const resolveSiteOrigin = (request: Request) => {
+  const configuredOrigin = trim(process.env.SITE_ORIGIN) || trim(process.env.PUBLIC_APP_ORIGIN)
+  if (configuredOrigin) return configuredOrigin
+
+  const forwardedProto = trim(request.headers.get('x-forwarded-proto'))
+  const forwardedHost = trim(request.headers.get('x-forwarded-host'))
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`
+  }
+
+  return new URL(request.url).origin
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData()
   const email = formData.get('email') as string
 
   const { supabase, headers } = createClient(request)
-  const origin = new URL(request.url).origin
-  const redirectTo = `${origin}/update-password`
+  const origin = resolveSiteOrigin(request)
+  const redirectTo = `${origin.replace(/\/$/, '')}/update-password`
 
   console.info('[auth] forgot-password reset redirect', {
     requestUrl: request.url,
@@ -35,6 +50,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     host: request.headers.get('host'),
     xForwardedHost: request.headers.get('x-forwarded-host'),
     xForwardedProto: request.headers.get('x-forwarded-proto'),
+    siteOrigin: process.env.SITE_ORIGIN ?? null,
+    publicAppOrigin: process.env.PUBLIC_APP_ORIGIN ?? null,
   })
 
   // Send the actual reset password email
