@@ -16,6 +16,7 @@ import type { Route } from './+types/workshop-enrollment'
 import TableDisplay from './table-display'
 import { EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV } from '@/lib/exports/types'
 import { transitionWorkshopEnrollmentStatus } from '@/lib/workshop-enrollment-status.server'
+import { GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE, upsertAdminFamilyFormAnswer } from '@/lib/admin-form-answers.server'
 
 const isLikelyEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
@@ -137,6 +138,40 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     return { ok: true }
+  }
+
+  if (intent === 'update-family-form-answer') {
+    if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    const profileId = String(formData.get('profile_id') ?? '').trim()
+    const questionCode = String(formData.get('question_code') ?? '').trim()
+    const value = String(formData.get('value') ?? '').trim()
+
+    if (!profileId || !questionCode) {
+      return new Response('Missing profile or question code', { status: 400, headers: auth.headers })
+    }
+
+    const result = await upsertAdminFamilyFormAnswer({
+      seedProfileId: profileId,
+      questionCode,
+      value,
+      actorUserId: auth.user.id,
+    })
+
+    if (!result.ok) {
+      return new Response(result.error, { status: 400, headers: auth.headers })
+    }
+
+    return {
+      ok: true,
+      intent,
+      profile_id: profileId,
+      question_code: questionCode,
+      value: result.value,
+      gift_card_question_code: GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
+    }
   }
 
   if (intent !== 'insert-row' && intent !== 'update-row') {

@@ -2100,6 +2100,26 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     statusFetcher.submit(formData, { method: 'post' })
   }
 
+  const updateWorkshopEnrollmentGiftcard = (row: Record<string, unknown>) => {
+    if (!isWorkshopEnrollment || !canEditStatus) return
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!profileId) return
+
+    const current = typeof row.giftcard_display === 'string' ? row.giftcard_display : ''
+    const suggested = current === 'N/A' ? '' : current
+    const next = window.prompt('Gift card preference', suggested)
+    if (next == null) return
+    const value = next.trim()
+    if (!value) return
+
+    const formData = new FormData()
+    formData.set('intent', 'update-family-form-answer')
+    formData.set('profile_id', profileId)
+    formData.set('question_code', 'gift_card_store_preference')
+    formData.set('value', value)
+    statusFetcher.submit(formData, { method: 'post' })
+  }
+
   const fieldKeys = editorConfig ? Object.keys(editorConfig.fields) : []
   const isNumericColumn = (column: string) =>
     editorConfig?.fields[column]?.type === 'number' || columnMeta[column]?.numeric === true
@@ -2733,6 +2753,27 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                                 </option>
                               ))}
                             </select>
+                          </td>
+                        )
+                      }
+
+                      if (isWorkshopEnrollment && column === 'giftcard_display' && canEditStatus) {
+                        const giftcardValue = typeof row.giftcard_display === 'string' ? row.giftcard_display : ''
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={giftcardValue || '(empty)'}>
+                            <div className="flex items-center gap-2">
+                              <span className="max-w-44 truncate">{giftcardValue || 'N/A'}</span>
+                              <button
+                                type="button"
+                                onClick={event => {
+                                  event.stopPropagation()
+                                  updateWorkshopEnrollmentGiftcard(row)
+                                }}
+                                className="rounded border border-input px-2 py-1 text-xs hover:bg-muted"
+                              >
+                                Edit
+                              </button>
+                            </div>
                           </td>
                         )
                       }
