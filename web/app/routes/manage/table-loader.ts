@@ -12,6 +12,7 @@ const FETCH_BATCH_SIZE = 1000
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500, 1000, 1500] as const
 const DEFAULT_PAGE_SIZE = 50
 const FILTER_EMPTY_TOKEN = '__none__'
+const CLASS_ENROLLMENT_STATUS_PRIORITY = ['pending', 'waitlisted', 'revoked', 'approved', 'rejected'] as const
 
 type ParsedFilter = {
   values: string[]
@@ -124,6 +125,36 @@ const fetchAllRowsInBatches = async ({
   }
 
   return rows
+}
+
+const applyParsedFilters = ({
+  query,
+  parsedFilters,
+  selectableColumns,
+  excludedColumns,
+}: {
+  query: any
+  parsedFilters: Record<string, ParsedFilter>
+  selectableColumns: Set<string>
+  excludedColumns?: Set<string>
+}) => {
+  let nextQuery = query
+  for (const [column, filter] of Object.entries(parsedFilters)) {
+    if (excludedColumns?.has(column)) continue
+    if (!selectableColumns.has(column)) continue
+    if (filter.includeEmpty && filter.values.length === 0) {
+      nextQuery = nextQuery.is(column, null)
+      continue
+    }
+    if (filter.values.length === 1) {
+      nextQuery = nextQuery.eq(column, filter.values[0])
+      continue
+    }
+    if (filter.values.length > 1) {
+      nextQuery = nextQuery.in(column, filter.values)
+    }
+  }
+  return nextQuery
 }
 
 const fromQualifiedTable = (supabase: ReturnType<typeof createClient>['supabase'], qualifiedTable: string) => {
@@ -612,43 +643,101 @@ export function createTableLoader(tableName: string) {
     let totalRows = 0
 
     if (useServerSideQuery) {
-      let query = fromQualifiedTable(supabase, definition.table)
-        .select(definition.select, { count: 'exact' })
+      const canUseClassEnrollmentPriorityDefault =
+        tableName === 'class-enrollment' &&
+        !requestedSortColumn &&
+        (!parsedFilters.status || (!parsedFilters.status.includeEmpty && parsedFilters.status.values.length >= 0))
 
-      for (const [column, filter] of Object.entries(parsedFilters)) {
-        if (!selectableColumns.has(column)) continue
-        if (filter.includeEmpty && filter.values.length === 0) {
-          query = query.is(column, null)
-          continue
+      if (canUseClassEnrollmentPriorityDefault) {
+        const statusFilter = parsedFilters.status
+        const allowedStatuses = statusFilter?.values.length
+          ? CLASS_ENROLLMENT_STATUS_PRIORITY.filter(status => statusFilter.values.includes(status))
+          : [...CLASS_ENROLLMENT_STATUS_PRIORITY]
+
+        const excludedStatus = new Set<string>(['status'])
+        let remainingOffset = (page - 1) * pageSize
+        let remainingLimit = pageSize
+        const orderedRows: Record<string, unknown>[] = []
+        let orderedTotal = 0
+
+        for (const status of allowedStatuses) {
+          const countQueryBase = fromQualifiedTable(supabase, definition.table).select('id', { count: 'exact', head: true })
+          const countQuery = applyParsedFilters({
+            query: countQueryBase,
+            parsedFilters,
+            selectableColumns,
+            excludedColumns: excludedStatus,
+          }).eq('status', status)
+
+          const { count, error: countError } = await countQuery
+          if (countError) {
+            throw new Response(countError.message, { status: 500 })
+          }
+
+          const statusCount = count ?? 0
+          orderedTotal += statusCount
+
+          if (remainingLimit <= 0) continue
+          if (remainingOffset >= statusCount) {
+            remainingOffset -= statusCount
+            continue
+          }
+
+          const localFrom = remainingOffset
+          const localTo = localFrom + remainingLimit - 1
+          const rowQueryBase = fromQualifiedTable(supabase, definition.table).select(definition.select)
+          const rowQuery = applyParsedFilters({
+            query: rowQueryBase,
+            parsedFilters,
+            selectableColumns,
+            excludedColumns: excludedStatus,
+          })
+            .eq('status', status)
+            .order('requested_at', { ascending: false })
+            .range(localFrom, localTo)
+
+          const { data: statusRows, error: rowError } = await rowQuery
+          if (rowError) {
+            throw new Response(rowError.message, { status: 500 })
+          }
+
+          const chunk = (statusRows ?? []) as unknown as Record<string, unknown>[]
+          orderedRows.push(...chunk)
+          remainingLimit -= chunk.length
+          remainingOffset = 0
         }
-        if (filter.values.length === 1) {
-          query = query.eq(column, filter.values[0])
-          continue
+
+        rows = orderedRows
+        totalRows = orderedTotal
+      } else {
+        const queryBase = fromQualifiedTable(supabase, definition.table)
+          .select(definition.select, { count: 'exact' })
+        const queryWithFilters = applyParsedFilters({
+          query: queryBase,
+          parsedFilters,
+          selectableColumns,
+        })
+
+        const orderColumn =
+          requestedSortColumn && selectableColumns.has(requestedSortColumn)
+            ? requestedSortColumn
+            : definition.order
+        const ascending = requestedSortColumn
+          ? requestedSortAscending
+          : orderAscending
+
+        const from = (page - 1) * pageSize
+        const to = from + pageSize - 1
+
+        const { data, error, count } = await queryWithFilters.order(orderColumn, { ascending }).range(from, to)
+
+        if (error) {
+          throw new Response(error.message, { status: 500 })
         }
-        if (filter.values.length > 1) {
-          query = query.in(column, filter.values)
-        }
+
+        rows = (data ?? []) as unknown as Record<string, unknown>[]
+        totalRows = count ?? rows.length
       }
-
-      const orderColumn =
-        requestedSortColumn && selectableColumns.has(requestedSortColumn)
-          ? requestedSortColumn
-          : definition.order
-      const ascending = requestedSortColumn
-        ? requestedSortAscending
-        : orderAscending
-
-      const from = (page - 1) * pageSize
-      const to = from + pageSize - 1
-
-      const { data, error, count } = await query.order(orderColumn, { ascending }).range(from, to)
-
-      if (error) {
-        throw new Response(error.message, { status: 500 })
-      }
-
-      rows = (data ?? []) as unknown as Record<string, unknown>[]
-      totalRows = count ?? rows.length
     } else {
       rows = await fetchAllRowsInBatches({
         supabase,

@@ -28,20 +28,8 @@ export async function loadWorkshopEnrollmentData(request: Request) {
   const auth = await requireAuth(request)
   const canManageEnrollments = isRoleAtLeast(auth.claims.role, 'admin')
 
-  const loaderRequest = hasExplicitSort
-    ? request
-    : new Request(
-        (() => {
-          const next = new URL(request.url)
-          next.searchParams.set('sort', 'requested_at')
-          next.searchParams.set('dir', 'desc')
-          return next.toString()
-        })(),
-        request
-      )
-
   const base = await baseLoader(
-    { request: loaderRequest } as LoaderFunctionArgs,
+    { request } as LoaderFunctionArgs,
     { includeForeignKeyOptions: canManageEnrollments }
   )
 
