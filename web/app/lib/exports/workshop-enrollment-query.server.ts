@@ -8,40 +8,12 @@ import { createTableLoader } from '@/routes/manage/table-loader'
 
 const baseLoader = createTableLoader('class-enrollment')
 
-const ENROLLMENT_STATUS_ORDER: Record<string, number> = {
-  pending: 0,
-  waitlisted: 1,
-  revoked: 2,
-  approved: 3,
-  rejected: 4,
-}
-
-const toTime = (value: unknown) => {
-  if (typeof value !== 'string' || !value) return Number.POSITIVE_INFINITY
-  const parsed = Date.parse(value)
-  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
-}
-
 export async function loadWorkshopEnrollmentData(request: Request) {
-  const url = new URL(request.url)
-  const hasExplicitSort = Boolean((url.searchParams.get('sort') ?? '').trim())
   const auth = await requireAuth(request)
   const canManageEnrollments = isRoleAtLeast(auth.claims.role, 'admin')
 
-  const loaderRequest = hasExplicitSort
-    ? request
-    : new Request(
-        (() => {
-          const next = new URL(request.url)
-          next.searchParams.set('sort', 'requested_at')
-          next.searchParams.set('dir', 'desc')
-          return next.toString()
-        })(),
-        request
-      )
-
   const base = await baseLoader(
-    { request: loaderRequest } as LoaderFunctionArgs,
+    { request } as LoaderFunctionArgs,
     { includeForeignKeyOptions: canManageEnrollments }
   )
 
@@ -168,28 +140,6 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       _row_signal_summary: `Concern ${concernScore} (${concernBand}) · ${countLabel}: ${primarySignal.summary}`,
     }
   })
-
-  if (!hasExplicitSort) {
-    enrichedRows.sort((left, right) => {
-      const leftStatus = typeof left.status === 'string' ? left.status : ''
-      const rightStatus = typeof right.status === 'string' ? right.status : ''
-      const leftRank = ENROLLMENT_STATUS_ORDER[leftStatus] ?? Number.MAX_SAFE_INTEGER
-      const rightRank = ENROLLMENT_STATUS_ORDER[rightStatus] ?? Number.MAX_SAFE_INTEGER
-
-      if (leftRank !== rightRank) {
-        return leftRank - rightRank
-      }
-
-      const timeDiff = toTime(right.requested_at) - toTime(left.requested_at)
-      if (timeDiff !== 0) {
-        return timeDiff
-      }
-
-      const leftId = typeof left.id === 'string' ? left.id : ''
-      const rightId = typeof right.id === 'string' ? right.id : ''
-      return leftId.localeCompare(rightId)
-    })
-  }
 
   let columns = base.columns.includes('enrolled_capacity')
     ? base.columns
