@@ -16,17 +16,22 @@ export const renderClassCameraOrPhotoFollowupEmail = ({
   const safeGuardianName = escapeHtml(guardianName)
 
   return {
-    subject: 'Please share your class recipe photo',
+    subject: 'Please upload your class recipe photo in the SummerLunch+ Hub',
     text:
       `Hi ${guardianName},\n` +
       '\n' +
-      "Thanks for being part of today's summerlunch+ class!\n" +
+      "Thanks for being part of today's summerlunch+ class.\n" +
       '\n' +
-      'It seems like your camera was turned off during class if you experienced any connectivity issues, please send us a photo of your completed recipe so we can confirm participation for today\'s session.\n' +
+      "To confirm participation for today's session, please upload a photo of your completed recipe in the SummerLunch+ Hub:\n" +
       '\n' +
-      'You can reply directly to this email with your photo attached.\n' +
+      '1. Log in to your SummerLunch+ account\n' +
+      '2. Go to the Workshops section\n' +
+      '3. Find today\'s class and click Upload Images\n' +
+      '4. Select your photo(s) and submit\n' +
       '\n' +
-      'Thank you, and we hope you enjoyed cooking with us!\n' +
+      'Please do not reply to this email, as this inbox is not monitored.\n' +
+      '\n' +
+      'Thank you!\n' +
       '\n' +
       '- The summerlunch+ Team',
     html: `<!doctype html>
@@ -44,10 +49,16 @@ export const renderClassCameraOrPhotoFollowupEmail = ({
             <tr>
               <td style="padding:8px 24px 24px 24px;font-family:Arial,sans-serif;color:#1f2937;font-size:16px;line-height:24px;">
                 <p style="margin:0 0 16px 0;">Hi ${safeGuardianName},</p>
-                <p style="margin:0 0 16px 0;">Thanks for being part of today's summerlunch+ class!</p>
-                <p style="margin:0 0 16px 0;">It seems like your camera was turned off during class if you experienced any connectivity issues, please send us a photo of your completed recipe so we can confirm participation for today's session.</p>
-                <p style="margin:0 0 16px 0;">You can reply directly to this email with your photo attached.</p>
-                <p style="margin:0 0 16px 0;">Thank you, and we hope you enjoyed cooking with us!</p>
+                <p style="margin:0 0 16px 0;">Thanks for being part of today's summerlunch+ class.</p>
+                <p style="margin:0 0 16px 0;">To confirm participation for today's session, please upload a photo of your completed recipe in the SummerLunch+ Hub:</p>
+                <ol style="margin:0 0 16px 24px;padding:0;">
+                  <li style="margin:0 0 8px 0;">Log in to your SummerLunch+ account</li>
+                  <li style="margin:0 0 8px 0;">Go to the Workshops section</li>
+                  <li style="margin:0 0 8px 0;">Find today's class and click Upload Images</li>
+                  <li style="margin:0;">Select your photo(s) and submit</li>
+                </ol>
+                <p style="margin:0 0 16px 0;">Please do not reply to this email, as this inbox is not monitored.</p>
+                <p style="margin:0 0 16px 0;">Thank you!</p>
                 <p style="margin:0;">- The summerlunch+ Team</p>
               </td>
             </tr>
