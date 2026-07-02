@@ -8,7 +8,18 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, type LoaderFunctionArgs, redirect, useLoaderData } from 'react-router'
 
 type LoaderData = {
-  next: string
+  next: string | null
+}
+
+const resolveDestination = ({
+  next,
+  type,
+}: {
+  next: string | null
+  type: EmailOtpType | null
+}) => {
+  if (next?.startsWith('/')) return next
+  return type === 'recovery' ? '/update-password' : '/'
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -17,7 +28,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const code = requestUrl.searchParams.get('code')
   const type = requestUrl.searchParams.get('type') as EmailOtpType | null
   const _next = requestUrl.searchParams.get('next')
-  const next = _next?.startsWith('/') ? _next : '/'
+  const next = _next?.startsWith('/') ? _next : null
   const { supabase, headers } = createClient(request)
 
   if (code) {
@@ -33,7 +44,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           loginMethod: 'otp:code',
         })
       }
-      return redirect(next, { headers })
+      const destination = resolveDestination({ next, type })
+      return redirect(destination, { headers })
     }
     return redirect(`/auth/error?error=${error.message}`)
   }
@@ -54,7 +66,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           loginMethod: `otp:${type}`,
         })
       }
-      return redirect(next, { headers })
+      const destination = resolveDestination({ next, type })
+      return redirect(destination, { headers })
     }
     return redirect(`/auth/error?error=${error.message}`)
   }
@@ -67,8 +80,8 @@ export default function ConfirmPage() {
   const [error, setError] = useState<string | null>(null)
 
   const destination = useMemo(() => {
-    if (next.startsWith('/')) return next
-    return '/'
+    if (next?.startsWith('/')) return next
+    return null
   }, [next])
 
   useEffect(() => {
@@ -114,7 +127,7 @@ export default function ConfirmPage() {
           return
         }
         const fallbackDestination = type === 'recovery' ? '/update-password' : '/login'
-        window.location.replace(destination || fallbackDestination)
+        window.location.replace(destination ?? fallbackDestination)
       })
   }, [destination])
 
