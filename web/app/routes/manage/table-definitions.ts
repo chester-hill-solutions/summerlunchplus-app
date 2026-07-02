@@ -966,6 +966,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
       'resend',
     ],
     order: 'created_at',
+    orderAscending: false,
     lookupMappings: [
       {
         keyColumn: 'triggered_by_user_id',
