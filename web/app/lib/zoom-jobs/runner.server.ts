@@ -125,7 +125,8 @@ const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
 
   let inserted = 0
   for (const chunk of chunkArray(missingPairs, IN_CLAUSE_BATCH_SIZE)) {
-    const { error } = await adminClient.from('class_attendance').upsert(chunk, { onConflict: 'class_id,profile_id' })
+    const rows = chunk.map(row => ({ class_id: row.class_id, profile_id: row.profile_id }))
+    const { error } = await adminClient.from('class_attendance').upsert(rows, { onConflict: 'class_id,profile_id' })
     if (error) {
       return {
         ok: false,
@@ -725,15 +726,28 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
       const approvedProfileIds = await getApprovedProfileIdsForWorkshop(classRelation?.workshop_id ?? null)
 
       if (approvedProfileIds.size > 0) {
-        const attendanceSeedRows = Array.from(approvedProfileIds).map(profileId => ({
-          class_id: meeting.class_id,
-          profile_id: profileId,
-          status: null,
-        }))
-        const { error: attendanceSeedError } = await adminClient
+        const approvedProfileIdsList = Array.from(approvedProfileIds)
+        const { data: existingRows, error: existingAttendanceError } = await adminClient
           .from('class_attendance')
-          .upsert(attendanceSeedRows, { onConflict: 'class_id,profile_id' })
-        if (attendanceSeedError) throw new Error(attendanceSeedError.message)
+          .select('profile_id')
+          .eq('class_id', meeting.class_id)
+          .in('profile_id', approvedProfileIdsList)
+
+        if (existingAttendanceError) throw new Error(existingAttendanceError.message)
+
+        const existingProfileIds = new Set((existingRows ?? []).map(row => row.profile_id).filter((id): id is string => Boolean(id)))
+        const missingProfileIds = approvedProfileIdsList.filter(profileId => !existingProfileIds.has(profileId))
+
+        if (missingProfileIds.length) {
+          const attendanceSeedRows = missingProfileIds.map(profileId => ({
+            class_id: meeting.class_id,
+            profile_id: profileId,
+          }))
+          const { error: attendanceSeedError } = await adminClient
+            .from('class_attendance')
+            .upsert(attendanceSeedRows, { onConflict: 'class_id,profile_id' })
+          if (attendanceSeedError) throw new Error(attendanceSeedError.message)
+        }
       }
 
       const participantsPayload = await zoomApiClient.getParticipants(meeting.zoom_meeting_uuid)
@@ -850,6 +864,7 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
               .update({ status: 'present', recorded_by: null })
               .eq('class_id', meeting.class_id)
               .in('profile_id', profileChunk)
+              .is('status', null)
             if (attendanceUpdateError) {
               throw new Error(attendanceUpdateError.message)
             }
@@ -860,14 +875,6 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
       if (approvedProfileIds.size > 0) {
         const missingProfileIds = Array.from(approvedProfileIds).filter(profileId => !presentProfileIds.has(profileId))
         if (missingProfileIds.length) {
-          const { error: absentUnknownError, count: absentUnknownCount } = await adminClient
-            .from('class_attendance')
-            .update({ status: 'absent', recorded_by: null }, { count: 'exact' })
-            .eq('class_id', meeting.class_id)
-            .in('profile_id', missingProfileIds)
-            .eq('status', 'unknown')
-          if (absentUnknownError) throw new Error(absentUnknownError.message)
-
           const { error: absentNullError, count: absentNullCount } = await adminClient
             .from('class_attendance')
             .update({ status: 'absent', recorded_by: null }, { count: 'exact' })
@@ -876,7 +883,7 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
             .is('status', null)
           if (absentNullError) throw new Error(absentNullError.message)
 
-          absentMarked += (absentUnknownCount ?? 0) + (absentNullCount ?? 0)
+          absentMarked += absentNullCount ?? 0
         }
       }
 
