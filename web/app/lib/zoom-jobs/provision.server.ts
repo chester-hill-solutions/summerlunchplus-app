@@ -237,11 +237,25 @@ const buildIdentities = async (profiles: ProfileRow[]) => {
 }
 
 const ensureAttendanceRowsForClass = async (classId: string, profileIds: string[]) => {
-  const rows = profileIds.map(profileId => ({ class_id: classId, profile_id: profileId, status: null }))
-  if (!rows.length) return 0
+  if (!profileIds.length) return 0
+
+  const { data: existingRows, error: existingError } = await adminClient
+    .from('class_attendance')
+    .select('profile_id')
+    .eq('class_id', classId)
+    .in('profile_id', profileIds)
+
+  if (existingError) throw new Error(existingError.message)
+
+  const existingProfileIds = new Set((existingRows ?? []).map(row => row.profile_id).filter((id): id is string => Boolean(id)))
+  const missingProfileIds = profileIds.filter(profileId => !existingProfileIds.has(profileId))
+  if (!missingProfileIds.length) return 0
+
+  const rows = missingProfileIds.map(profileId => ({ class_id: classId, profile_id: profileId }))
   const { error } = await adminClient.from('class_attendance').upsert(rows, { onConflict: 'class_id,profile_id' })
   if (error) throw new Error(error.message)
-  return rows.length
+
+  return missingProfileIds.length
 }
 
 const selectAvailableHost = async ({
