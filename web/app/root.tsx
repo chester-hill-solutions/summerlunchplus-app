@@ -39,9 +39,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     "/auth/error",
     "/",
   ]);
+  const isGlrPath = pathname === '/glr' || pathname.startsWith('/glr/')
   const isMyFormsPath = pathname === "/my-forms" || pathname.startsWith("/my-forms/");
 
-  if (!allowlist.has(pathname) && !isMyFormsPath) {
+  if (!allowlist.has(pathname) && !isMyFormsPath && !isGlrPath) {
     try {
       await enforceOnboardingGuard(request, { allowMyForms: false });
     } catch (err) {

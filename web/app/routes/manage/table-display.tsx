@@ -2069,6 +2069,25 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     statusFetcher.submit(formData, { method: 'post' })
   }
 
+  const toggleAttendanceGiftCardBlock = (row: Record<string, unknown>, blocked: boolean) => {
+    if (!isClassAttendance || !canEditStatus) return
+    const classId = typeof row.class_id === 'string' ? row.class_id : ''
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!classId || !profileId) return
+
+    const formData = new FormData()
+    formData.set('intent', 'toggle-gift-card-block')
+    formData.set('class_id', classId)
+    formData.set('profile_id', profileId)
+    formData.set('blocked', blocked ? 'true' : 'false')
+    if (blocked) {
+      const reason = window.prompt('Optional reason for blocking this gift card?', '')
+      if (reason == null) return
+      formData.set('reason', reason.trim())
+    }
+    statusFetcher.submit(formData, { method: 'post' })
+  }
+
   const updateWorkshopEnrollmentStatus = (row: Record<string, unknown>, value: string) => {
     if (!isWorkshopEnrollment || !canEditStatus || !value) return
     const enrollmentId = typeof row.id === 'string' ? row.id : ''
@@ -2740,6 +2759,37 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                               className="rounded border border-destructive/40 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               {isDeleting ? 'Deleting...' : 'Delete'}
+                            </button>
+                          </td>
+                        )
+                      }
+
+                      if (isClassAttendance && column === 'gift_card_block_action' && canEditStatus) {
+                        const classId = typeof row.class_id === 'string' ? row.class_id : ''
+                        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+                        const blocked = row.gift_card_blocked === true || row.gift_card_blocked === 'true'
+                        const isSubmitting =
+                          statusFetcher.state === 'submitting' &&
+                          statusFetcher.formData?.get('intent') === 'toggle-gift-card-block' &&
+                          statusFetcher.formData?.get('class_id') === classId &&
+                          statusFetcher.formData?.get('profile_id') === profileId
+
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="Toggle gift card block">
+                            <button
+                              type="button"
+                              disabled={!classId || !profileId || isSubmitting}
+                              onClick={event => {
+                                event.stopPropagation()
+                                toggleAttendanceGiftCardBlock(row, !blocked)
+                              }}
+                              className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60 ${
+                                blocked
+                                  ? 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                                  : 'border-destructive/40 text-destructive hover:bg-destructive/10'
+                              }`}
+                            >
+                              {isSubmitting ? 'Saving...' : blocked ? 'Unblock' : 'Block'}
                             </button>
                           </td>
                         )

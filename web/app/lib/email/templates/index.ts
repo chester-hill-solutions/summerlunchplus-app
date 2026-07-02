@@ -14,12 +14,17 @@ import {
   renderFamilyEnrollmentRequestedEmail,
   type FamilyEnrollmentRequestedTemplateData,
 } from '@/lib/email/templates/family-enrollment-requested'
+import {
+  renderGiftCardReminderEmail,
+  type GiftCardReminderTemplateData,
+} from '@/lib/email/templates/gift-card-reminder'
 
 export type EmailTemplateMap = {
   family_enrollment_requested_v1: FamilyEnrollmentRequestedTemplateData
   family_enrollment_accepted_v1: FamilyEnrollmentAcceptedTemplateData
   class_reminder_login_v1: ClassReminderLoginTemplateData
   class_camera_or_photo_followup_v1: ClassCameraOrPhotoFollowupTemplateData
+  gift_card_reminder_v1: GiftCardReminderTemplateData
 }
 
 export type EmailTemplateKey = keyof EmailTemplateMap
@@ -40,6 +45,9 @@ export const emailTemplates: {
   },
   class_camera_or_photo_followup_v1: {
     render: renderClassCameraOrPhotoFollowupEmail,
+  },
+  gift_card_reminder_v1: {
+    render: renderGiftCardReminderEmail,
   },
 }
 

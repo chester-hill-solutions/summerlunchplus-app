@@ -1,10 +1,8 @@
-import { PDFDocument } from 'pdf-lib'
-
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database, Json } from '@/lib/database.types'
 
-import { parseGiftCardCsv } from './parse-csv'
+import { parseGiftCardCsv, type GiftCardCsvColumnMapping } from './parse-csv'
 
 type UploadType = Database['public']['Enums']['gift_card_upload_type']
 
@@ -13,8 +11,8 @@ type ProcessUploadInput = {
   uploadId: string
   uploadType: UploadType
   file: File
-  defaultValue?: number
-  provider?: string
+  columnMapping?: GiftCardCsvColumnMapping
+  defaultProvider?: Database['public']['Enums']['gift_card_provider'] | ''
 }
 
 type ProcessUploadResult = {
@@ -24,9 +22,6 @@ type ProcessUploadResult = {
 }
 
 const RAW_BUCKET = 'gift-cards-raw'
-const PROCESSED_BUCKET = 'gift-cards-processed'
-
-const buildStorageAssetUrl = (bucket: string, path: string) => `storage://${bucket}/${path}`
 
 const uploadRawFile = async (supabase: SupabaseClient<Database>, uploadId: string, file: File) => {
   const buffer = await file.arrayBuffer()
@@ -50,6 +45,9 @@ const storeAssets = async (
   supabase: SupabaseClient<Database>,
   assets: Array<{
     upload_id: string
+    provider: Database['public']['Enums']['gift_card_provider']
+    account_number: string
+    pin: string
     value: number
     asset_url: string
     page_count?: number | null
@@ -62,6 +60,9 @@ const storeAssets = async (
   const { error } = await supabase.from('gift_card_asset').insert(
     assets.map(asset => ({
       upload_id: asset.upload_id,
+      provider: asset.provider,
+      account_number: asset.account_number,
+      pin: asset.pin,
       value: asset.value,
       asset_url: asset.asset_url,
       page_count: asset.page_count ?? null,
@@ -77,11 +78,14 @@ const processCsvUpload = async (
   supabase: SupabaseClient<Database>,
   uploadId: string,
   csvBuffer: ArrayBuffer,
-  defaultValue: number | undefined,
-  provider: string | undefined
+  columnMapping: GiftCardCsvColumnMapping | undefined,
+  defaultProvider: Database['public']['Enums']['gift_card_provider'] | '' | undefined
 ) => {
   const csvText = new TextDecoder().decode(csvBuffer)
-  const { assets, errors } = parseGiftCardCsv(csvText, { defaultValue })
+  const { assets, errors } = parseGiftCardCsv(csvText, {
+    columnMapping,
+    defaultProvider,
+  })
 
   if (errors.length) {
     return { assets: [], errors }
@@ -90,10 +94,12 @@ const processCsvUpload = async (
   const rows = assets.map(asset => ({
     upload_id: uploadId,
     value: asset.value,
-    asset_url: asset.linkUrl,
+    provider: asset.provider,
+    account_number: asset.accountNumber,
+    pin: asset.pin,
+    asset_url: asset.url,
     source_index: asset.rowNumber,
     metadata: {
-      provider: asset.provider ?? provider ?? null,
       source: 'csv',
     },
   }))
@@ -103,104 +109,32 @@ const processCsvUpload = async (
   return { assets: rows, errors: error ? [error.message] : [] }
 }
 
-const processPdfUpload = async (
-  supabase: SupabaseClient<Database>,
-  uploadId: string,
-  pdfBuffer: ArrayBuffer,
-  uploadType: UploadType,
-  defaultValue: number,
-  provider: string | undefined
-) => {
-  const pdfDoc = await PDFDocument.load(pdfBuffer)
-  const totalPages = pdfDoc.getPageCount()
-  const chunkSize = uploadType === 'pdf_per_4_pages' ? 4 : 1
-  const assets: Array<{
-    upload_id: string
-    value: number
-    asset_url: string
-    page_count: number
-    source_index: number
-    metadata: Json
-  }> = []
-
-  for (let start = 0; start < totalPages; start += chunkSize) {
-    const end = Math.min(start + chunkSize, totalPages)
-    const pageIndexes = Array.from({ length: end - start }, (_, index) => start + index)
-    const chunk = await PDFDocument.create()
-    const pages = await chunk.copyPages(pdfDoc, pageIndexes)
-    pages.forEach(page => chunk.addPage(page))
-    const bytes = await chunk.save()
-    const filePath = `${uploadId}/card-${assets.length + 1}.pdf`
-
-    const { error } = await supabase.storage
-      .from(PROCESSED_BUCKET)
-      .upload(filePath, bytes, { contentType: 'application/pdf', upsert: true })
-
-    if (error) {
-      return { assets: [], errors: [error.message] }
-    }
-
-    assets.push({
-      upload_id: uploadId,
-      value: defaultValue,
-      asset_url: buildStorageAssetUrl(PROCESSED_BUCKET, filePath),
-      page_count: pages.length,
-      source_index: start + 1,
-      metadata: {
-        provider: provider ?? null,
-        source: 'pdf',
-      },
-    })
-  }
-
-  const error = await storeAssets(supabase, assets)
-
-  return { assets, errors: error ? [error.message] : [] }
-}
-
 export const processGiftCardUpload = async ({
   supabase,
   uploadId,
   uploadType,
   file,
-  defaultValue,
-  provider,
+  columnMapping,
+  defaultProvider,
 }: ProcessUploadInput): Promise<ProcessUploadResult> => {
   try {
     const rawBuffer = await uploadRawFile(supabase, uploadId, file)
 
-    if (uploadType === 'csv_link') {
-      const { assets, errors } = await processCsvUpload(supabase, uploadId, rawBuffer, defaultValue, provider)
-      if (errors.length) {
-        return {
-          totalCards: assets.length,
-          processedCards: assets.length,
-          errorMessage: errors.join('; '),
-        }
-      }
-      return {
-        totalCards: assets.length,
-        processedCards: assets.length,
-      }
-    }
-
-    if (defaultValue == null || Number.isNaN(defaultValue)) {
+    if (uploadType !== 'csv_link') {
       return {
         totalCards: 0,
         processedCards: 0,
-        errorMessage: 'Gift card value is required for PDF uploads.',
+        errorMessage: 'Only CSV uploads are supported.',
       }
     }
 
-    const { assets, errors } = await processPdfUpload(
+    const { assets, errors } = await processCsvUpload(
       supabase,
       uploadId,
       rawBuffer,
-      uploadType,
-      defaultValue,
-      provider
+      columnMapping,
+      defaultProvider
     )
-
     if (errors.length) {
       return {
         totalCards: assets.length,

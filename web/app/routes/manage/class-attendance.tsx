@@ -1,11 +1,14 @@
 import { requireAuth } from '@/lib/auth.server'
 import { Constants, type Database } from '@/lib/database.types'
+import { resolveIpGeolocation } from '@/lib/geoip.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import { runZoomJobsForClass } from '@/lib/zoom-jobs/runner.server'
+import { loadWorkshopEnrollmentEnrichment } from './workshop-enrollment-enrichment.server'
 import type { Route } from './+types/class-attendance'
 import TableDisplay from './table-display'
+import { isIP } from 'node:net'
 
 type AttendanceRow = {
   id: string
@@ -14,6 +17,10 @@ type AttendanceRow = {
   status: 'unknown' | 'present' | 'absent' | null
   photo_status: 'uploaded' | 'accepted' | 'rejected' | null
   camera_on: boolean | null
+  gift_card_blocked: boolean
+  gift_card_block_reason: string | null
+  gift_card_blocked_at: string | null
+  gift_card_blocked_by: string | null
   recorded_by: string | null
   created_at: string
   updated_at: string
@@ -77,8 +84,65 @@ type SyncRunRow = {
   payload: unknown
 }
 
+type GiftCardAllocationRow = {
+  id: string
+  class_id: string
+  profile_id: string
+  gift_card_asset_id: string
+  status: 'allocated' | 'sent' | 'opened'
+  blocked: boolean
+  blocked_reason: string | null
+  reminder_sent_at: string | null
+  first_opened_at: string | null
+  last_opened_at: string | null
+  open_count: number
+}
+
+type GiftCardAssetRow = {
+  id: string
+  provider: 'PC' | 'Sobeys'
+  value: number
+}
+
+type GiftCardClickRow = {
+  gift_card_allocation_id: string
+  profile_id: string | null
+  ip_address: string | null
+  created_at: string
+}
+
+type FormSubmissionIpRow = {
+  profile_id: string | null
+  submitted_at: string | null
+  ip_selected?: unknown
+  ip_address: unknown
+  forwarded_for: unknown
+}
+
+type LoginEventIpRow = {
+  user_id: string | null
+  event_at: string | null
+  ip_selected?: unknown
+  ip_address: unknown
+  forwarded_for: unknown
+}
+
 const IN_CLAUSE_BATCH_SIZE = 150
 const CLASS_ATTENDANCE_FETCH_BATCH_SIZE = 1000
+
+const isSchemaMismatchError = (error: { code?: string | null; message?: string | null } | null) => {
+  if (!error) return false
+  if (typeof error.code === 'string' && error.code.startsWith('PGRST2')) return true
+  if (error.code === '42703' || error.code === '42P01') return true
+  const message = (error.message ?? '').toLowerCase()
+  return (
+    message.includes('column') && message.includes('does not exist')
+  ) ||
+    (message.includes('relation') && message.includes('does not exist')) ||
+    message.includes('schema cache') ||
+    message.includes('could not find the table') ||
+    message.includes('could not find the')
+}
 
 const chunkArray = <T,>(items: T[], size: number) => {
   if (size <= 0 || !items.length) return [] as T[][]
@@ -103,21 +167,87 @@ const displayNameOrId = (profile: ProfileRow | null, fallbackId: string) => {
   return label || `Unknown student (${fallbackId.slice(0, 8)})`
 }
 
+const flagEmojiForCountryCode = (countryCode: string | null) => {
+  if (!countryCode) return ''
+  const normalized = countryCode.trim().toUpperCase()
+  if (!/^[A-Z]{2}$/.test(normalized)) return ''
+  return String.fromCodePoint(...Array.from(normalized).map(char => 127397 + char.charCodeAt(0)))
+}
+
+const formatGeoLabel = (geo: Awaited<ReturnType<typeof resolveIpGeolocation>> | null) => {
+  const countryCode = geo?.countryCode ?? null
+  const flag = flagEmojiForCountryCode(countryCode)
+  const geoParts = [geo?.city, geo?.region, countryCode].filter(Boolean)
+  return geoParts.length
+    ? `${flag ? `${flag} ` : ''}${geoParts.join(', ')}`
+    : countryCode
+      ? `${flag ? `${flag} ` : ''}${countryCode}`
+      : 'Unknown location'
+}
+
+const parsePrimaryIp = (ipSelected: unknown, ipAddress: unknown, forwardedFor: unknown) => {
+  const normalizeIp = (value: unknown) => {
+    if (typeof value !== 'string') return ''
+    const trimmed = value.trim()
+    if (!trimmed || trimmed.length > 64) return ''
+    return isIP(trimmed) ? trimmed : ''
+  }
+
+  const selected = normalizeIp(ipSelected)
+  if (selected) return selected
+
+  const direct = normalizeIp(ipAddress)
+  if (direct) return direct
+
+  if (typeof forwardedFor !== 'string' || !forwardedFor.trim()) return ''
+  const first = forwardedFor
+    .split(',')
+    .map(part => part.trim())
+    .find(Boolean)
+
+  return normalizeIp(first)
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   const attendanceRows: AttendanceRow[] = []
+  let classAttendanceSelect =
+    'id, class_id, profile_id, status, photo_status, camera_on, gift_card_blocked, gift_card_block_reason, gift_card_blocked_at, gift_card_blocked_by, recorded_by, created_at, updated_at'
+  let hasGiftCardSchema = true
   for (let offset = 0; ; offset += CLASS_ATTENDANCE_FETCH_BATCH_SIZE) {
-    const { data, error } = await adminClient
+    let { data, error } = await adminClient
       .from('class_attendance')
-      .select('id, class_id, profile_id, status, photo_status, camera_on, recorded_by, created_at, updated_at')
+      .select(classAttendanceSelect)
       .order('created_at', { ascending: false })
       .range(offset, offset + CLASS_ATTENDANCE_FETCH_BATCH_SIZE - 1)
+
+    if (error && hasGiftCardSchema && classAttendanceSelect.includes('gift_card_blocked') && isSchemaMismatchError(error)) {
+      hasGiftCardSchema = false
+      classAttendanceSelect =
+        'id, class_id, profile_id, status, photo_status, camera_on, recorded_by, created_at, updated_at'
+      const fallbackResult = await adminClient
+        .from('class_attendance')
+        .select(classAttendanceSelect)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + CLASS_ATTENDANCE_FETCH_BATCH_SIZE - 1)
+      data = fallbackResult.data
+      error = fallbackResult.error
+    }
 
     if (error) {
       throw new Response(error.message, { status: 500 })
     }
 
-    const chunk = (data ?? []) as AttendanceRow[]
+    const chunk = ((data ?? []) as unknown as Array<
+      Omit<AttendanceRow, 'gift_card_blocked' | 'gift_card_block_reason' | 'gift_card_blocked_at' | 'gift_card_blocked_by'> &
+        Partial<Pick<AttendanceRow, 'gift_card_blocked' | 'gift_card_block_reason' | 'gift_card_blocked_at' | 'gift_card_blocked_by'>>
+    >).map(row => ({
+      ...row,
+      gift_card_blocked: row.gift_card_blocked === true,
+      gift_card_block_reason: row.gift_card_block_reason ?? null,
+      gift_card_blocked_at: row.gift_card_blocked_at ?? null,
+      gift_card_blocked_by: row.gift_card_blocked_by ?? null,
+    })) as AttendanceRow[]
     attendanceRows.push(...chunk)
     if (chunk.length < CLASS_ATTENDANCE_FETCH_BATCH_SIZE) {
       break
@@ -127,40 +257,64 @@ export async function loader({ request }: Route.LoaderArgs) {
   const profileIds = Array.from(new Set(attendanceRows.map(row => row.profile_id).filter(Boolean)))
   const recordedByIds = Array.from(new Set(attendanceRows.map(row => row.recorded_by).filter((id): id is string => Boolean(id))))
 
-  const [
-    { data: classRows, error: classError },
-    { data: meetingRows, error: meetingError },
-    { data: registrantRows, error: registrantError },
-    { data: photoRows, error: photoError },
-  ] =
-    await Promise.all([
-      classIds.length
-        ? adminClient.from('class').select('id, workshop_id, starts_at, ends_at').in('id', classIds)
-        : Promise.resolve({ data: [] as ClassRow[], error: null }),
-      classIds.length
-        ? adminClient
-            .from('class_zoom_meeting')
-            .select('id, class_id, status, error_message, last_synced_at, zoom_meeting_id, topic, start_time, duration_minutes, join_url, host_zoom_user_email')
-            .in('class_id', classIds)
-        : Promise.resolve({ data: [] as MeetingRow[], error: null }),
-      classIds.length
-        ? adminClient
-            .from('class_zoom_registrant')
-            .select('class_id, profile_id, zoom_registrant_id, zoom_join_url, last_sent_at')
-            .in('class_id', classIds)
-        : Promise.resolve({ data: [] as RegistrantRow[], error: null }),
-      classIds.length
-        ? adminClient
-            .from('class_attendance_photo' as any)
-            .select('class_id, profile_id, uploaded_at')
-            .in('class_id', classIds)
-        : Promise.resolve({ data: [] as AttendancePhotoRow[], error: null }),
-    ])
+  let giftCardSchemaAvailable = hasGiftCardSchema
+  const classRows: ClassRow[] = []
+  const meetingRows: MeetingRow[] = []
+  const registrantRows: RegistrantRow[] = []
+  const photoRows: AttendancePhotoRow[] = []
+  const allocationRowsRaw: GiftCardAllocationRow[] = []
 
-  if (classError) throw new Response(classError.message, { status: 500 })
-  if (meetingError) throw new Response(meetingError.message, { status: 500 })
-  if (registrantError) throw new Response(registrantError.message, { status: 500 })
-  if (photoError) throw new Response(photoError.message, { status: 500 })
+  for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('class')
+      .select('id, workshop_id, starts_at, ends_at')
+      .in('id', chunk)
+    if (error) throw new Response(error.message, { status: 500 })
+    classRows.push(...((data ?? []) as ClassRow[]))
+  }
+
+  for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('class_zoom_meeting')
+      .select('id, class_id, status, error_message, last_synced_at, zoom_meeting_id, topic, start_time, duration_minutes, join_url, host_zoom_user_email')
+      .in('class_id', chunk)
+    if (error) throw new Response(error.message, { status: 500 })
+    meetingRows.push(...((data ?? []) as MeetingRow[]))
+  }
+
+  for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('class_zoom_registrant')
+      .select('class_id, profile_id, zoom_registrant_id, zoom_join_url, last_sent_at')
+      .in('class_id', chunk)
+    if (error) throw new Response(error.message, { status: 500 })
+    registrantRows.push(...((data ?? []) as RegistrantRow[]))
+  }
+
+  for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await (adminClient.from('class_attendance_photo' as any) as any)
+      .select('class_id, profile_id, uploaded_at')
+      .in('class_id', chunk)
+    if (error) throw new Response(error.message, { status: 500 })
+    photoRows.push(...((data ?? []) as AttendancePhotoRow[]))
+  }
+
+  for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('gift_card_allocation')
+      .select('id, class_id, profile_id, gift_card_asset_id, status, blocked, blocked_reason, reminder_sent_at, first_opened_at, last_opened_at, open_count')
+      .in('class_id', chunk)
+
+    if (error) {
+      if (isSchemaMismatchError(error)) {
+        giftCardSchemaAvailable = false
+        break
+      }
+      throw new Response(error.message, { status: 500 })
+    }
+
+    allocationRowsRaw.push(...((data ?? []) as GiftCardAllocationRow[]))
+  }
 
   const profilesByIdRows: Array<ProfileRow & { user_id?: string | null }> = []
   for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
@@ -182,28 +336,213 @@ export async function loader({ request }: Route.LoaderArgs) {
     profilesByUserRows.push(...((profileChunk ?? []) as Array<ProfileRow & { user_id?: string | null }>))
   }
 
-  const classes = (classRows ?? []) as ClassRow[]
+  let enrollmentEnrichmentByProfileId: Record<string, { giftcard_display: string }> = {}
+  if (profileIds.length) {
+    for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
+      try {
+        const enrichment = await loadWorkshopEnrollmentEnrichment(chunk)
+        for (const [profileId, value] of Object.entries(enrichment)) {
+          enrollmentEnrichmentByProfileId[profileId] = {
+            giftcard_display: value.giftcard_display,
+          }
+        }
+      } catch (error) {
+        console.warn('[class attendance] failed to load workshop enrichment for provider preference', {
+          chunkSize: chunk.length,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+  }
+
+  const classes = classRows
   const workshopsIds = Array.from(new Set(classes.map(row => row.workshop_id).filter((id): id is string => Boolean(id))))
-  const meetingIds = Array.from(new Set(((meetingRows ?? []) as MeetingRow[]).map(row => row.id)))
+  const meetingIds = Array.from(new Set(meetingRows.map(row => row.id)))
 
-  const [{ data: workshopRows, error: workshopError }, { data: syncRows, error: syncError }] = await Promise.all([
-    workshopsIds.length
-      ? adminClient.from('workshop').select('id, description').in('id', workshopsIds)
-      : Promise.resolve({ data: [] as WorkshopRow[], error: null }),
-    meetingIds.length
-      ? adminClient
-          .from('class_zoom_participant_sync')
-          .select('id, class_zoom_meeting_id, status, created_at, started_at, completed_at, error_message, payload')
-          .in('class_zoom_meeting_id', meetingIds)
+  const workshopRows: WorkshopRow[] = []
+  for (const chunk of chunkArray(workshopsIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient.from('workshop').select('id, description').in('id', chunk)
+    if (error) throw new Response(error.message, { status: 500 })
+    workshopRows.push(...((data ?? []) as WorkshopRow[]))
+  }
+
+  const syncRows: SyncRunRow[] = []
+  for (const chunk of chunkArray(meetingIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('class_zoom_participant_sync')
+      .select('id, class_zoom_meeting_id, status, created_at, started_at, completed_at, error_message, payload')
+      .in('class_zoom_meeting_id', chunk)
+      .order('created_at', { ascending: false })
+    if (error) throw new Response(error.message, { status: 500 })
+    syncRows.push(...((data ?? []) as SyncRunRow[]))
+  }
+
+  const allocationRows = giftCardSchemaAvailable ? allocationRowsRaw : []
+  const assetIds = Array.from(new Set(allocationRows.map(row => row.gift_card_asset_id).filter(Boolean)))
+
+  let assetRowsRaw: GiftCardAssetRow[] = []
+  let clickRowsRaw: GiftCardClickRow[] = []
+
+  if (giftCardSchemaAvailable) {
+    for (const chunk of chunkArray(assetIds, IN_CLAUSE_BATCH_SIZE)) {
+      const { data, error } = await adminClient.from('gift_card_asset').select('id, provider, value').in('id', chunk)
+      if (error) {
+        if (isSchemaMismatchError(error)) {
+          giftCardSchemaAvailable = false
+          assetRowsRaw = []
+          clickRowsRaw = []
+          break
+        }
+        throw new Response(error.message, { status: 500 })
+      }
+      assetRowsRaw.push(...((data ?? []) as GiftCardAssetRow[]))
+    }
+
+    if (giftCardSchemaAvailable) {
+      const allocationIds = allocationRows.map(row => row.id)
+      for (const chunk of chunkArray(allocationIds, IN_CLAUSE_BATCH_SIZE)) {
+        const { data, error } = await adminClient
+          .from('gift_card_click_event')
+          .select('gift_card_allocation_id, profile_id, ip_address, created_at')
+          .in('gift_card_allocation_id', chunk)
           .order('created_at', { ascending: false })
-      : Promise.resolve({ data: [] as SyncRunRow[], error: null }),
-  ])
+        if (error) {
+          if (isSchemaMismatchError(error)) {
+            giftCardSchemaAvailable = false
+            assetRowsRaw = []
+            clickRowsRaw = []
+            break
+          }
+          throw new Response(error.message, { status: 500 })
+        }
+        clickRowsRaw.push(...((data ?? []) as GiftCardClickRow[]))
+      }
+    }
+  }
 
-  if (workshopError) throw new Response(workshopError.message, { status: 500 })
-  if (syncError) throw new Response(syncError.message, { status: 500 })
+  const assetById = new Map(assetRowsRaw.map(row => [row.id, row]))
+  const allocationByClassProfile = new Map<string, GiftCardAllocationRow>()
+  for (const row of allocationRows) {
+    allocationByClassProfile.set(`${row.class_id}::${row.profile_id}`, row)
+  }
+
+  const latestClickByAllocationId = new Map<string, GiftCardClickRow>()
+  const clickRows = clickRowsRaw
+  for (const row of clickRows) {
+    if (!latestClickByAllocationId.has(row.gift_card_allocation_id)) {
+      latestClickByAllocationId.set(row.gift_card_allocation_id, row)
+    }
+  }
+
+  const attendanceProfileByUserId = new Map<string, string[]>()
+  for (const profile of profilesByIdRows) {
+    if (typeof profile.user_id !== 'string' || !profile.user_id) continue
+    const bucket = attendanceProfileByUserId.get(profile.user_id) ?? []
+    if (!bucket.includes(profile.id)) {
+      bucket.push(profile.id)
+      attendanceProfileByUserId.set(profile.user_id, bucket)
+    }
+  }
+
+  const latestNetworkByProfileId = new Map<string, { occurredAt: string; ip: string }>()
+  const setLatestNetwork = (profileId: string, occurredAt: string, ip: string) => {
+    if (!profileId || !occurredAt || !ip) return
+    const existing = latestNetworkByProfileId.get(profileId)
+    if (!existing || occurredAt > existing.occurredAt) {
+      latestNetworkByProfileId.set(profileId, { occurredAt, ip })
+    }
+  }
+
+  for (const row of clickRows) {
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    const occurredAt = typeof row.created_at === 'string' ? row.created_at : ''
+    const ip = parsePrimaryIp(row.ip_address, row.ip_address, null)
+    setLatestNetwork(profileId, occurredAt, ip)
+  }
+
+  let formSubmissionSelect = 'profile_id, submitted_at, ip_selected, ip_address, forwarded_for'
+  for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
+    let query = (adminClient.from('form_submission' as any) as any)
+      .select(formSubmissionSelect)
+      .in('profile_id', chunk)
+      .order('submitted_at', { ascending: false })
+
+    let { data: submissionRows, error: submissionError } = await query
+
+    if (submissionError && formSubmissionSelect.includes('ip_selected')) {
+      const fallbackSelect = 'profile_id, submitted_at, ip_address, forwarded_for'
+      let fallbackQuery = (adminClient.from('form_submission' as any) as any)
+        .select(fallbackSelect)
+        .in('profile_id', chunk)
+        .order('submitted_at', { ascending: false })
+      const fallbackResult = await fallbackQuery
+      if (!fallbackResult.error) {
+        formSubmissionSelect = fallbackSelect
+        submissionRows = fallbackResult.data
+        submissionError = null
+      }
+    }
+
+    if (submissionError) throw new Response(submissionError.message, { status: 500 })
+
+    for (const row of (submissionRows ?? []) as FormSubmissionIpRow[]) {
+      const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+      const occurredAt = typeof row.submitted_at === 'string' ? row.submitted_at : ''
+      const ip = parsePrimaryIp(row.ip_selected, row.ip_address, row.forwarded_for)
+      setLatestNetwork(profileId, occurredAt, ip)
+    }
+  }
+
+  const userIds = Array.from(attendanceProfileByUserId.keys())
+  let loginEventSelect = 'user_id, event_at, ip_selected, ip_address, forwarded_for'
+  for (const chunk of chunkArray(userIds, IN_CLAUSE_BATCH_SIZE)) {
+    let query = (adminClient.from('login_event' as any) as any)
+      .select(loginEventSelect)
+      .in('user_id', chunk)
+      .order('event_at', { ascending: false })
+
+    let { data: loginRows, error: loginError } = await query
+
+    if (loginError && loginEventSelect.includes('ip_selected')) {
+      const fallbackSelect = 'user_id, event_at, ip_address, forwarded_for'
+      let fallbackQuery = (adminClient.from('login_event' as any) as any)
+        .select(fallbackSelect)
+        .in('user_id', chunk)
+        .order('event_at', { ascending: false })
+      const fallbackResult = await fallbackQuery
+      if (!fallbackResult.error) {
+        loginEventSelect = fallbackSelect
+        loginRows = fallbackResult.data
+        loginError = null
+      }
+    }
+
+    if (loginError) throw new Response(loginError.message, { status: 500 })
+
+    for (const row of (loginRows ?? []) as LoginEventIpRow[]) {
+      const userId = typeof row.user_id === 'string' ? row.user_id : ''
+      const occurredAt = typeof row.event_at === 'string' ? row.event_at : ''
+      const ip = parsePrimaryIp(row.ip_selected, row.ip_address, row.forwarded_for)
+      if (!userId) continue
+      for (const profileId of attendanceProfileByUserId.get(userId) ?? []) {
+        setLatestNetwork(profileId, occurredAt, ip)
+      }
+    }
+  }
+
+  const uniqueClickIps = Array.from(new Set(Array.from(latestNetworkByProfileId.values()).map(entry => entry.ip)))
+  const geoByIp = new Map<string, Awaited<ReturnType<typeof resolveIpGeolocation>>>()
+  await Promise.all(
+    uniqueClickIps.map(async ip => {
+      const geo = await resolveIpGeolocation(ip)
+      if (geo) {
+        geoByIp.set(ip, geo)
+      }
+    })
+  )
 
   const classById = new Map(classes.map(row => [row.id, row]))
-  const workshopById = new Map(((workshopRows ?? []) as WorkshopRow[]).map(row => [row.id, row]))
+  const workshopById = new Map(workshopRows.map(row => [row.id, row]))
   const profileRowsTyped = [...profilesByIdRows, ...profilesByUserRows]
   const profileById = new Map(profileRowsTyped.map(row => [row.id, row]))
   const profileByUserId = new Map(
@@ -229,7 +568,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       payload: unknown
     }
   >()
-  for (const row of (syncRows ?? []) as SyncRunRow[]) {
+  for (const row of syncRows) {
     if (!latestSyncByMeetingId.has(row.class_zoom_meeting_id)) {
       latestSyncByMeetingId.set(row.class_zoom_meeting_id, {
         id: row.id,
@@ -288,8 +627,20 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     const studentRegistrant = registrants.find(item => item.profile_id === row.profile_id)
     const photoSummary = photoSummaryByAttendanceKey.get(`${row.class_id}::${row.profile_id}`)
+    const giftCardAllocation = allocationByClassProfile.get(`${row.class_id}::${row.profile_id}`)
+    const giftCardAsset = giftCardAllocation ? assetById.get(giftCardAllocation.gift_card_asset_id) ?? null : null
+    const latestGiftCardClick = giftCardAllocation ? latestClickByAllocationId.get(giftCardAllocation.id) ?? null : null
+    const latestProfileNetwork = latestNetworkByProfileId.get(row.profile_id)
     const registrantReady = Boolean(studentRegistrant?.zoom_registrant_id && studentRegistrant.zoom_join_url)
     const reminderSent = Boolean(studentRegistrant?.last_sent_at)
+
+    const latestGeo = (() => {
+      const ip = latestProfileNetwork?.ip ?? ''
+      if (!ip) return ''
+      const geo = geoByIp.get(ip)
+      if (!geo) return 'Unknown location'
+      return formatGeoLabel(geo)
+    })()
 
     let stepAttendanceSync = 'Pending'
     if (!meeting || meeting.status !== 'created') {
@@ -358,14 +709,27 @@ export async function loader({ request }: Route.LoaderArgs) {
       step_meeting: meeting && meeting.status === 'created' && meeting.join_url ? 'Done' : 'Missing',
       step_registrants: registrantReady ? 'Done' : 'Missing',
       step_attendance_rows: 'Done',
-      step_reminder: reminderSent ? 'Done' : 'Missing',
-      step_attendance_sync: stepAttendanceSync,
+      step_reminder: reminderSent ? '✓' : '✗',
+      step_attendance_sync: stepAttendanceSync === 'Done' ? '✓' : '✗',
       step_meeting_detail: stepMeetingDetail,
       step_registrants_detail: stepRegistrantDetail,
       step_reminder_detail: stepReminderDetail,
       step_attendance_sync_detail: stepAttendanceSyncDetail,
       latest_sync_payload: latestSyncPayload,
       latest_sync_error: latestSync?.error_message ?? null,
+      giftcard_display: enrollmentEnrichmentByProfileId[row.profile_id]?.giftcard_display ?? 'N/A',
+      latest_geo: latestGeo || 'N/A',
+      gift_card_status: giftCardAllocation ? giftCardAllocation.status : row.gift_card_blocked ? 'blocked' : 'pending',
+      gift_card_provider: giftCardAsset?.provider ?? null,
+      gift_card_value: giftCardAsset?.value ?? null,
+      gift_card_reminder_sent_at: giftCardAllocation?.reminder_sent_at ?? null,
+      gift_card_first_opened_at: giftCardAllocation?.first_opened_at ?? null,
+      gift_card_last_opened_at: giftCardAllocation?.last_opened_at ?? null,
+      gift_card_open_count: giftCardAllocation?.open_count ?? 0,
+      gift_card_last_click_at: latestGiftCardClick?.created_at ?? null,
+      gift_card_blocked: row.gift_card_blocked,
+      gift_card_block_reason: row.gift_card_block_reason,
+      gift_card_block_action: row.gift_card_blocked ? 'Unblock' : 'Block',
       photo_count: photoSummary?.count ?? 0,
       latest_photo_uploaded_at: photoSummary?.latestUploadedAt ?? null,
       recorded_by_email:
@@ -396,14 +760,29 @@ export async function loader({ request }: Route.LoaderArgs) {
     columns: [
       'workshop_description',
       'class_starts_at',
-      'class_ends_at',
       'profile_display',
       'status',
+      'camera_on',
       'photo_status',
       'photo_count',
-      'latest_photo_uploaded_at',
-      'camera_on',
       'student_join_url',
+      'step_reminder',
+      'step_attendance_sync',
+      'latest_geo',
+      'giftcard_display',
+      'gift_card_status',
+      'gift_card_provider',
+      'gift_card_value',
+      'gift_card_reminder_sent_at',
+      'gift_card_first_opened_at',
+      'gift_card_last_opened_at',
+      'gift_card_open_count',
+      'gift_card_last_click_at',
+      'gift_card_blocked',
+      'gift_card_block_reason',
+      'gift_card_block_action',
+      'class_ends_at',
+      'latest_photo_uploaded_at',
       'zoom_meeting_id',
       'zoom_topic',
       'zoom_start_at',
@@ -413,8 +792,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       'step_meeting',
       'step_registrants',
       'step_attendance_rows',
-      'step_reminder',
-      'step_attendance_sync',
       'step_meeting_detail',
       'step_registrants_detail',
       'step_reminder_detail',
@@ -436,6 +813,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       class_ends_at: { label: 'Class ends', filterable: true },
       profile_display: { label: 'Profile', filterable: true, fitContentOnLoad: true },
       status: { label: 'Attendance', filterable: true },
+      latest_geo: { label: 'Geo', filterable: true, truncate: true },
+      giftcard_display: { label: 'Provider', filterable: true, truncate: true },
+      gift_card_status: { label: 'Gift card status', filterable: true },
+      gift_card_provider: { label: 'Gift card provider', filterable: true },
+      gift_card_value: { label: 'Gift card value', filterable: true },
+      gift_card_reminder_sent_at: { label: 'Gift reminder sent', filterable: true },
+      gift_card_first_opened_at: { label: 'Gift first opened', filterable: true },
+      gift_card_last_opened_at: { label: 'Gift last opened', filterable: true },
+      gift_card_open_count: { label: 'Gift opens', filterable: true },
+      gift_card_last_click_at: { label: 'Gift last click', filterable: true },
+      gift_card_blocked: { label: 'Gift blocked', filterable: true },
+      gift_card_block_reason: { label: 'Gift block reason', filterable: true, truncate: true },
+      gift_card_block_action: { label: 'Gift block action', filterable: false },
       photo_status: { label: 'Photo status', filterable: true },
       photo_count: { label: 'Photos', filterable: true },
       latest_photo_uploaded_at: { label: 'Latest photo upload', filterable: true },
@@ -450,8 +840,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       step_meeting: { label: 'Step 1: Meeting', filterable: true },
       step_registrants: { label: 'Step 2: Zoom registrant', filterable: true },
       step_attendance_rows: { label: 'Step 3: Attendance row', filterable: true },
-      step_reminder: { label: 'Step 4: Reminder', filterable: true },
-      step_attendance_sync: { label: 'Step 5: Attendance sync', filterable: true },
+      step_reminder: { label: 'Reminder', filterable: true },
+      step_attendance_sync: { label: 'Attendance sync', filterable: true },
       step_meeting_detail: { label: 'Step 1 detail', filterable: true, truncate: true },
       step_registrants_detail: { label: 'Step 2 detail', filterable: true, truncate: true },
       step_reminder_detail: { label: 'Step 4 detail', filterable: true, truncate: true },
@@ -719,6 +1109,66 @@ export async function action({ request }: Route.ActionArgs) {
       intent: 'delete-attendance-row',
       class_id: classId,
       profile_id: profileId,
+    }
+  }
+
+  if (intent === 'toggle-gift-card-block') {
+    const classId = formData.get('class_id') as string
+    const profileId = formData.get('profile_id') as string
+    const nextBlocked = String(formData.get('blocked') ?? '') === 'true'
+    const reason = (formData.get('reason') as string | null)?.trim() ?? ''
+
+    if (!classId || !profileId) {
+      return new Response('Missing identifiers', { status: 400, headers: auth.headers })
+    }
+
+    const { supabase } = createClient(request)
+    const nowIso = new Date().toISOString()
+    const { error } = await supabase
+      .from('class_attendance')
+      .update({
+        gift_card_blocked: nextBlocked,
+        gift_card_block_reason: nextBlocked ? reason || 'Blocked by staff' : null,
+        gift_card_blocked_at: nextBlocked ? nowIso : null,
+        gift_card_blocked_by: nextBlocked ? auth.user.id : null,
+      })
+      .eq('class_id', classId)
+      .eq('profile_id', profileId)
+
+    if (error) {
+      return new Response(error.message, { status: 500, headers: auth.headers })
+    }
+
+    if (nextBlocked) {
+      await supabase
+        .from('gift_card_allocation')
+        .update({
+          blocked: true,
+          blocked_reason: reason || 'Blocked by staff',
+          blocked_at: nowIso,
+          blocked_by: auth.user.id,
+        })
+        .eq('class_id', classId)
+        .eq('profile_id', profileId)
+    } else {
+      await supabase
+        .from('gift_card_allocation')
+        .update({
+          blocked: false,
+          blocked_reason: null,
+          blocked_at: null,
+          blocked_by: null,
+        })
+        .eq('class_id', classId)
+        .eq('profile_id', profileId)
+    }
+
+    return {
+      ok: true,
+      intent: 'toggle-gift-card-block',
+      class_id: classId,
+      profile_id: profileId,
+      blocked: nextBlocked,
     }
   }
 
