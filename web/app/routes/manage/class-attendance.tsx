@@ -100,6 +100,7 @@ type GiftCardAllocationRow = {
 type GiftCardAssetRow = {
   id: string
   provider: 'PC' | 'Sobeys'
+  asset_url: string
   value: number
 }
 
@@ -124,6 +125,11 @@ type LoginEventIpRow = {
   ip_selected?: unknown
   ip_address: unknown
   forwarded_for: unknown
+}
+
+type GuardianChildEdge = {
+  guardian_profile_id: string
+  child_profile_id: string
 }
 
 type FormSubmissionPreferenceRow = {
@@ -217,6 +223,15 @@ const parsePrimaryIp = (ipSelected: unknown, ipAddress: unknown, forwardedFor: u
     .find(Boolean)
 
   return normalizeIp(first)
+}
+
+const normalizeGiftCardPreference = (value: string | null | undefined) => {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (!normalized) return 'N/A'
+  if (normalized.includes('meal kit')) return 'Meal Kit'
+  if (normalized.includes('sobeys')) return 'Sobeys'
+  if (normalized.includes('pc') || normalized.includes('president')) return 'PC'
+  return value?.trim() || 'N/A'
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -347,9 +362,59 @@ export async function loader({ request }: Route.LoaderArgs) {
     profilesByUserRows.push(...((profileChunk ?? []) as Array<ProfileRow & { user_id?: string | null }>))
   }
 
+  const relatedProfilesByTarget = new Map<string, Set<string>>()
+  for (const profileId of profileIds) {
+    relatedProfilesByTarget.set(profileId, new Set([profileId]))
+  }
+
+  const guardianRowsByChild: GuardianChildEdge[] = []
+  for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('person_guardian_child')
+      .select('guardian_profile_id, child_profile_id')
+      .in('child_profile_id', chunk)
+    if (error) throw new Response(error.message, { status: 500 })
+    guardianRowsByChild.push(...((data ?? []) as GuardianChildEdge[]))
+  }
+
+  const childRowsByGuardian: GuardianChildEdge[] = []
+  for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('person_guardian_child')
+      .select('guardian_profile_id, child_profile_id')
+      .in('guardian_profile_id', chunk)
+    if (error) throw new Response(error.message, { status: 500 })
+    childRowsByGuardian.push(...((data ?? []) as GuardianChildEdge[]))
+  }
+
+  for (const edge of guardianRowsByChild) {
+    const related = relatedProfilesByTarget.get(edge.child_profile_id)
+    if (related) related.add(edge.guardian_profile_id)
+  }
+  for (const edge of childRowsByGuardian) {
+    const related = relatedProfilesByTarget.get(edge.guardian_profile_id)
+    if (related) related.add(edge.child_profile_id)
+  }
+
+  const preferenceProfileScopeIds = Array.from(
+    new Set(
+      Array.from(relatedProfilesByTarget.values()).flatMap(set => Array.from(set))
+    )
+  )
+
+  const preferenceScopeProfiles: Array<ProfileRow & { user_id?: string | null }> = []
+  for (const chunk of chunkArray(preferenceProfileScopeIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: profileChunk, error: profileError } = await adminClient
+      .from('profile')
+      .select('id, firstname, surname, email, user_id')
+      .in('id', chunk)
+    if (profileError) throw new Response(profileError.message, { status: 500 })
+    preferenceScopeProfiles.push(...((profileChunk ?? []) as Array<ProfileRow & { user_id?: string | null }>))
+  }
+
   const userIdsByProfileId = new Map<string, string>()
   const profileIdsByUserId = new Map<string, string[]>()
-  for (const row of profilesByIdRows) {
+  for (const row of preferenceScopeProfiles) {
     if (typeof row.user_id !== 'string' || !row.user_id) continue
     userIdsByProfileId.set(row.id, row.user_id)
     const existing = profileIdsByUserId.get(row.user_id) ?? []
@@ -359,8 +424,25 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
+  const expandedRelatedProfilesByTarget = new Map<string, Set<string>>()
+  for (const profileId of profileIds) {
+    const expanded = new Set(relatedProfilesByTarget.get(profileId) ?? [profileId])
+    for (const relatedProfileId of Array.from(expanded)) {
+      const userId = userIdsByProfileId.get(relatedProfileId)
+      if (!userId) continue
+      for (const sameUserProfileId of profileIdsByUserId.get(userId) ?? []) {
+        expanded.add(sameUserProfileId)
+      }
+    }
+    expandedRelatedProfilesByTarget.set(profileId, expanded)
+  }
+
+  const preferenceSubmissionScopeProfileIds = Array.from(
+    new Set(Array.from(expandedRelatedProfilesByTarget.values()).flatMap(set => Array.from(set)))
+  )
+
   const submissionsById = new Map<string, FormSubmissionPreferenceRow>()
-  for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
+  for (const chunk of chunkArray(preferenceSubmissionScopeProfileIds, IN_CLAUSE_BATCH_SIZE)) {
     const { data: submissionRows, error } = await adminClient
       .from('form_submission')
       .select('id, profile_id, user_id, submitted_at')
@@ -372,7 +454,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
-  const preferenceUserIds = Array.from(new Set(Array.from(userIdsByProfileId.values())))
+  const preferenceUserIds = Array.from(
+    new Set(
+      preferenceSubmissionScopeProfileIds
+        .map(profileId => userIdsByProfileId.get(profileId) ?? '')
+        .filter(Boolean)
+    )
+  )
   for (const chunk of chunkArray(preferenceUserIds, IN_CLAUSE_BATCH_SIZE)) {
     const { data: submissionRows, error } = await adminClient
       .from('form_submission')
@@ -406,7 +494,11 @@ export async function loader({ request }: Route.LoaderArgs) {
         : 0
 
       const associatedProfileIds = new Set<string>()
-      if (typeof submission.profile_id === 'string' && submission.profile_id && profileIds.includes(submission.profile_id)) {
+      if (
+        typeof submission.profile_id === 'string' &&
+        submission.profile_id &&
+        preferenceSubmissionScopeProfileIds.includes(submission.profile_id)
+      ) {
         associatedProfileIds.add(submission.profile_id)
       }
       if (typeof submission.user_id === 'string' && submission.user_id) {
@@ -423,6 +515,19 @@ export async function loader({ request }: Route.LoaderArgs) {
             submittedAtMs,
           })
         }
+      }
+    }
+  }
+
+  const latestGiftCardPreferenceByTargetProfileId = new Map<string, { value: string; submittedAtMs: number }>()
+  for (const targetProfileId of profileIds) {
+    const relatedIds = expandedRelatedProfilesByTarget.get(targetProfileId) ?? new Set([targetProfileId])
+    for (const relatedId of relatedIds) {
+      const candidate = latestGiftCardPreferenceByProfileId.get(relatedId)
+      if (!candidate) continue
+      const existing = latestGiftCardPreferenceByTargetProfileId.get(targetProfileId)
+      if (!existing || candidate.submittedAtMs > existing.submittedAtMs) {
+        latestGiftCardPreferenceByTargetProfileId.set(targetProfileId, candidate)
       }
     }
   }
@@ -457,7 +562,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   if (giftCardSchemaAvailable) {
     for (const chunk of chunkArray(assetIds, IN_CLAUSE_BATCH_SIZE)) {
-      const { data, error } = await adminClient.from('gift_card_asset').select('id, provider, value').in('id', chunk)
+      const { data, error } = await adminClient.from('gift_card_asset').select('id, provider, asset_url, value').in('id', chunk)
       if (error) {
         if (isSchemaMismatchError(error)) {
           giftCardSchemaAvailable = false
@@ -789,10 +894,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       step_attendance_sync_detail: stepAttendanceSyncDetail,
       latest_sync_payload: latestSyncPayload,
       latest_sync_error: latestSync?.error_message ?? null,
-      giftcard_display: latestGiftCardPreferenceByProfileId.get(row.profile_id)?.value ?? 'N/A',
+      giftcard_display: normalizeGiftCardPreference(latestGiftCardPreferenceByTargetProfileId.get(row.profile_id)?.value),
       latest_geo: latestGeo || 'N/A',
-      gift_card_status: giftCardAllocation ? giftCardAllocation.status : row.gift_card_blocked ? 'blocked' : 'pending',
+      gift_card_status: row.gift_card_blocked
+        ? 'blocked'
+        : !giftCardAllocation
+          ? 'unallocated'
+          : giftCardAllocation.status === 'opened'
+            ? 'opened'
+            : giftCardAllocation.status === 'sent'
+              ? 'reminder sent'
+              : 'allocated',
       gift_card_provider: giftCardAsset?.provider ?? null,
+      gift_card_link: giftCardAsset?.asset_url ?? null,
       gift_card_value: giftCardAsset?.value ?? null,
       gift_card_reminder_sent_at: giftCardAllocation?.reminder_sent_at ?? null,
       gift_card_first_opened_at: giftCardAllocation?.first_opened_at ?? null,
@@ -844,6 +958,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       'giftcard_display',
       'gift_card_status',
       'gift_card_provider',
+      'gift_card_link',
       'gift_card_value',
       'gift_card_reminder_sent_at',
       'gift_card_first_opened_at',
@@ -889,6 +1004,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       giftcard_display: { label: 'Provider', filterable: true, truncate: true },
       gift_card_status: { label: 'Gift card status', filterable: true },
       gift_card_provider: { label: 'Gift card provider', filterable: true },
+      gift_card_link: { label: 'Gift card link', filterable: true, truncate: true },
       gift_card_value: { label: 'Gift card value', filterable: true },
       gift_card_reminder_sent_at: { label: 'Gift reminder sent', filterable: true },
       gift_card_first_opened_at: { label: 'Gift first opened', filterable: true },

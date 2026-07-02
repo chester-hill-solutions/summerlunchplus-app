@@ -43,6 +43,9 @@ const normalizeHeader = (header: string) => header.trim().toLowerCase().replace(
 const parseProvider = (value: string) => {
   const normalized = value.trim().toLowerCase()
   if (normalized === 'pc') return 'PC'
+  if (normalized === 'presidents choice') return 'PC'
+  if (normalized === "president's choice") return 'PC'
+  if (normalized === 'president’s choice') return 'PC'
   if (normalized === 'sobeys') return 'Sobeys'
   return null
 }
