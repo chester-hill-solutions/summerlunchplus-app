@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { TABLE_DEFINITIONS } from './table-definitions'
+import { createTableLoader } from './table-loader'
 import type { LoaderFunctionArgs } from 'react-router'
 
 const FETCH_BATCH_SIZE = 1000
@@ -97,6 +98,49 @@ const sortFilterOptions = (values: string[]) => {
   return deduped
 }
 
+const rowMatchesFilters = (
+  row: Record<string, unknown>,
+  parsedFilters: Record<string, ParsedFilter>,
+  excludedColumn: string
+) => {
+  for (const [filterColumn, filter] of Object.entries(parsedFilters)) {
+    if (filterColumn === excludedColumn) continue
+    const rowValue = toOptionValue(row[filterColumn])
+    if (filter.includeEmpty && filter.values.length === 0) {
+      if (rowValue !== '') return false
+      continue
+    }
+    if (filter.values.length > 0 && !filter.values.includes(rowValue)) {
+      return false
+    }
+  }
+  return true
+}
+
+const loadAllRowsViaTableLoader = async (
+  request: Request,
+  tableName: string
+): Promise<Record<string, unknown>[]> => {
+  const forcedUrl = new URL(request.url)
+  forcedUrl.searchParams.delete('page')
+  forcedUrl.searchParams.delete('pageSize')
+  forcedUrl.searchParams.set('sort', '__full_scan__')
+  forcedUrl.searchParams.delete('dir')
+
+  const forcedRequest = new Request(forcedUrl.toString(), request)
+  const loader = createTableLoader(tableName)
+  const payload = await loader(
+    {
+      request: forcedRequest,
+      context: undefined,
+      params: {},
+    } as LoaderFunctionArgs,
+    { includeForeignKeyOptions: false }
+  )
+
+  return payload.rows as Record<string, unknown>[]
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const tableName = (url.searchParams.get('table') ?? '').trim()
@@ -128,10 +172,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const isSelectableColumn = selectableColumns.has(column)
 
   if (hasUnsupportedFilter || hasMixedEmptyAndExplicit || !isSelectableColumn) {
-    return Response.json(
-      { status: 'unsupported', allOptions: [], totalCount: 0 },
-      { headers }
-    )
+    try {
+      const rows = await loadAllRowsViaTableLoader(request, tableName)
+      const options = sortFilterOptions(
+        rows
+          .filter(row => rowMatchesFilters(row, parsedFilters, column))
+          .map(row => toOptionValue(row[column]))
+      )
+
+      return Response.json(
+        {
+          status: 'loaded',
+          allOptions: options,
+          totalCount: options.length,
+        },
+        { headers }
+      )
+    } catch (error) {
+      const message = error instanceof Response ? await error.text() : 'Unable to load filter options'
+      return Response.json({ status: 'error', allOptions: [], totalCount: 0, error: message }, { status: 500, headers })
+    }
   }
 
   const unique = new Set<string>()
