@@ -268,6 +268,20 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
       },
     ],
   },
+  'class-attendance-raw': {
+    label: 'Raw Class Attendance',
+    table: 'class_attendance',
+    select: 'id, class_id, profile_id, status, photo_status, camera_on, recorded_by, created_at, updated_at',
+    columns: ['class_id', 'profile_id', 'status', 'photo_status', 'camera_on', 'recorded_by', 'created_at', 'updated_at', 'id'],
+    order: 'created_at',
+    orderAscending: false,
+    editor: {
+      primaryKey: ['id'],
+      allowInsert: false,
+      allowUpdate: false,
+      fields: {},
+    },
+  },
   'class-attendance-photo-upload-attempt': {
     label: 'Class Attendance Photo Upload Attempts',
     table: 'class_attendance_photo_upload_attempt',
