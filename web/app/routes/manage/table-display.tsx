@@ -119,6 +119,8 @@ type FederalDistrictEnrichmentResponse = {
 type LoaderData = {
   columns: string[]
   rows: Record<string, unknown>[]
+  totalRows?: number
+  serverSideQuery?: boolean
   label: string
   tableName: string
   tableVariant?: 'default' | 'pivot'
@@ -724,6 +726,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortStage, setSortStage] = useState<0 | 1 | 2>(0)
   const [filters, setFilters] = useState<Record<string, string[]>>({})
+  const [filterDraftByColumn, setFilterDraftByColumn] = useState<Record<string, string[]>>({})
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(50)
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null)
@@ -772,6 +775,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [attendanceModalSavingStatus, setAttendanceModalSavingStatus] = useState(false)
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
+  const serverSideQuery = Boolean(source?.serverSideQuery)
   const debugPerf = searchParams.get('debugPerf') === '1'
   const timezoneOptions = useMemo(() => {
     const supported =
@@ -1314,8 +1318,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   }, [filters, openFilterCacheKey, openFilterColumn, rowsWithEnrichment, tableName])
 
   const derivedRows = useMemo(() => {
-    let adjustedRows = rowsWithEnrichment.filter(row => rowMatchesFilters(row, filters))
-    if (sortColumn && sortStage > 0) {
+    let adjustedRows = serverSideQuery
+      ? rowsWithEnrichment
+      : rowsWithEnrichment.filter(row => rowMatchesFilters(row, filters))
+    if (!serverSideQuery && sortColumn && sortStage > 0) {
       adjustedRows.sort((a, b) => {
         const aValue = getCellValue(sortColumn, a)
         const bValue = getCellValue(sortColumn, b)
@@ -1325,9 +1331,9 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       })
     }
     return adjustedRows
-  }, [rowsWithEnrichment, columns, filters, sortColumn, sortStage, tableName])
+  }, [rowsWithEnrichment, serverSideQuery, columns, filters, sortColumn, sortStage, tableName])
 
-  const totalRows = derivedRows.length
+  const totalRows = serverSideQuery ? Number(source?.totalRows ?? rowsWithEnrichment.length) : derivedRows.length
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
   const effectivePage = Math.min(page, totalPages)
   const hasActiveEnrichmentBackedFilters = useMemo(
@@ -1354,9 +1360,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   }, [effectivePage, page, filters, sortColumn, sortStage, pageSize])
 
   const paginatedRows = useMemo(() => {
+    if (serverSideQuery) return derivedRows
     const start = (effectivePage - 1) * pageSize
     return derivedRows.slice(start, start + pageSize)
-  }, [derivedRows, effectivePage, pageSize])
+  }, [serverSideQuery, derivedRows, effectivePage, pageSize])
 
   useEffect(() => {
     if (!isWorkshopEnrollmentTable) return
@@ -1681,6 +1688,36 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     return allOptionsForColumn
   }
 
+  const openFilterOptions = openFilterCacheEntry?.allOptions ?? []
+
+  const openFilterSelectedValues = openFilterColumn
+    ? effectiveSelectedValuesForColumn(openFilterColumn, openFilterOptions)
+    : []
+
+  const openFilterDraftValues = openFilterColumn
+    ? (hasOwn(filterDraftByColumn, openFilterColumn)
+        ? filterDraftByColumn[openFilterColumn]
+        : openFilterSelectedValues)
+    : []
+
+  const setOpenFilterDraft = (values: string[]) => {
+    if (!openFilterColumn) return
+    setFilterDraftByColumn(prev => ({
+      ...prev,
+      [openFilterColumn]: normalizeFilterValues(values),
+    }))
+  }
+
+  const discardOpenFilterDraft = () => {
+    if (!openFilterColumn) return
+    setFilterDraftByColumn(prev => {
+      if (!hasOwn(prev, openFilterColumn)) return prev
+      const next = { ...prev }
+      delete next[openFilterColumn]
+      return next
+    })
+  }
+
   const isClassAttendance = tableName === 'class-attendance'
   const isWorkshopEnrollment = isWorkshopEnrollmentTable
   const canInlineInsert = Boolean(editorConfig?.allowInsert)
@@ -1753,6 +1790,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     const onWindowChange = () => updateFilterPopoverPosition()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        setFilterDraftByColumn(prev => {
+          if (!hasOwn(prev, openFilterColumn)) return prev
+          const next = { ...prev }
+          delete next[openFilterColumn]
+          return next
+        })
         setOpenFilterColumn(null)
       }
     }
@@ -1761,6 +1804,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       const button = filterButtonRefs.current[openFilterColumn]
       const popover = filterPopoverRef.current
       if (button?.contains(target) || popover?.contains(target)) return
+      setFilterDraftByColumn(prev => {
+        if (!hasOwn(prev, openFilterColumn)) return prev
+        const next = { ...prev }
+        delete next[openFilterColumn]
+        return next
+      })
       setOpenFilterColumn(null)
     }
 
@@ -2139,7 +2188,6 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     )
   }
 
-  const openFilterOptions = openFilterCacheEntry?.allOptions ?? []
   const openFilterSearchInput = openFilterColumn ? filterSearch[openFilterColumn] ?? '' : ''
   const openFilterSearch = openFilterSearchInput
   const visibleFilterOptions = openFilterOptions.filter(option =>
@@ -2155,29 +2203,16 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     : shouldHideOptionsList
       ? 'there are over 1500 unique values, search to narrow'
       : `Showing ${visibleFilterOptions.length} of ${openFilterCacheEntry?.totalCount ?? 0} options`
-  const openFilterSelectedValues = openFilterColumn
-    ? effectiveSelectedValuesForColumn(openFilterColumn, openFilterOptions)
-    : []
-  const isOpenFilterApplied = openFilterColumn ? hasOwn(filters, openFilterColumn) : false
-
   const clearOpenFilter = () => {
     if (!openFilterColumn) return
-    setFilters(prev => {
-      if (!hasOwn(prev, openFilterColumn)) return prev
-      const next = { ...prev }
-      delete next[openFilterColumn]
-      setPage(1)
-      syncSearch(next, sortColumn, sortStage, 1, pageSize)
-      return next
-    })
+    setOpenFilterDraft(openFilterOptions)
   }
 
   const selectVisibleFilterOptions = () => {
     if (!openFilterColumn) return
-    const allOptionsForColumn = openFilterOptions
-    const current = effectiveSelectedValuesForColumn(openFilterColumn, allOptionsForColumn)
+    const current = openFilterDraftValues
     const next = normalizeFilterValues([...current, ...visibleFilterOptions])
-    updateFilterValues(openFilterColumn, next, allOptionsForColumn)
+    setOpenFilterDraft(next)
   }
 
   const clearVisibleFilterOptions = () => {
@@ -2186,12 +2221,32 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       clearOpenFilter()
       return
     }
-    const allOptionsForColumn = openFilterOptions
-    const current = effectiveSelectedValuesForColumn(openFilterColumn, allOptionsForColumn)
+    const current = openFilterDraftValues
     const visibleSet = new Set(visibleFilterOptions)
     const next = current.filter(value => !visibleSet.has(value))
-    updateFilterValues(openFilterColumn, next, allOptionsForColumn)
+    setOpenFilterDraft(next)
   }
+
+  const applyOpenFilter = () => {
+    if (!openFilterColumn) return
+    const allOptionsForColumn = openFilterOptions
+    const next = hasOwn(filterDraftByColumn, openFilterColumn)
+      ? filterDraftByColumn[openFilterColumn]
+      : openFilterSelectedValues
+    updateFilterValues(openFilterColumn, next, allOptionsForColumn)
+    discardOpenFilterDraft()
+    setOpenFilterColumn(null)
+  }
+
+  const cancelOpenFilter = () => {
+    if (!openFilterColumn) return
+    discardOpenFilterDraft()
+    setOpenFilterColumn(null)
+  }
+
+  const normalizedAppliedSignature = openFilterSelectedValues.slice().sort((a, b) => a.localeCompare(b)).join('|')
+  const normalizedDraftSignature = openFilterDraftValues.slice().sort((a, b) => a.localeCompare(b)).join('|')
+  const hasOpenFilterChanges = normalizedAppliedSignature !== normalizedDraftSignature
 
   return (
     <div className="-mx-6 flex min-w-0 flex-col gap-4">
@@ -2322,7 +2377,25 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                           }}
                           onClick={event => {
                             event.stopPropagation()
-                            setOpenFilterColumn(prev => (prev === column ? null : column))
+                            if (openFilterColumn === column) {
+                              setFilterDraftByColumn(prev => {
+                                if (!hasOwn(prev, column)) return prev
+                                const next = { ...prev }
+                                delete next[column]
+                                return next
+                              })
+                              setOpenFilterColumn(null)
+                              return
+                            }
+                            if (openFilterColumn) {
+                              setFilterDraftByColumn(prev => {
+                                if (!hasOwn(prev, openFilterColumn)) return prev
+                                const next = { ...prev }
+                                delete next[openFilterColumn]
+                                return next
+                              })
+                            }
+                            setOpenFilterColumn(column)
                           }}
                           className={`shrink-0 rounded p-1 hover:bg-muted ${hasActiveFilter ? 'text-foreground' : 'text-muted-foreground'}`}
                           aria-label={`Filter ${column}`}
@@ -3100,7 +3173,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                 <button
                   type="button"
                   onClick={clearOpenFilter}
-                  disabled={!isOpenFilterApplied}
+                  disabled={openFilterDraftValues.length === openFilterOptions.length}
                   aria-label="Clear current filter"
                   className="rounded border border-input px-2 py-1 hover:bg-muted"
                 >
@@ -3109,7 +3182,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                 <button
                   type="button"
                   onClick={clearVisibleFilterOptions}
-                  disabled={!canRenderFilterOptionsList && !isOpenFilterApplied}
+                  disabled={!canRenderFilterOptionsList && openFilterDraftValues.length === openFilterOptions.length}
                   aria-label="Clear visible options"
                   className="rounded border border-input px-2 py-1 hover:bg-muted"
                 >
@@ -3120,7 +3193,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
               {canRenderFilterOptionsList ? (
                 <div className="max-h-56 space-y-1 overflow-auto rounded border border-border/50 p-1" role="listbox">
                 {visibleFilterOptions.map(option => {
-                  const selected = openFilterSelectedValues.includes(option)
+                  const selected = openFilterDraftValues.includes(option)
                   const labelText = displayFilterOption(option)
                   return (
                     <label
@@ -3132,19 +3205,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                         type="checkbox"
                         checked={selected}
                         onChange={event => {
-                          const allOptionsForColumn = openFilterOptions
                           if (event.target.checked) {
-                            updateFilterValues(
-                              openFilterColumn,
-                              [...openFilterSelectedValues, option],
-                              allOptionsForColumn
-                            )
+                            setOpenFilterDraft([...openFilterDraftValues, option])
                           } else {
-                            updateFilterValues(
-                              openFilterColumn,
-                              openFilterSelectedValues.filter(value => value !== option),
-                              allOptionsForColumn
-                            )
+                            setOpenFilterDraft(openFilterDraftValues.filter(value => value !== option))
                           }
                         }}
                       />
@@ -3157,6 +3221,24 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                 ) : null}
                 </div>
               ) : null}
+
+              <div className="mt-2 flex items-center justify-end gap-2 border-t border-border/50 pt-2">
+                <button
+                  type="button"
+                  onClick={cancelOpenFilter}
+                  className="rounded border border-input px-3 py-1.5 hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={applyOpenFilter}
+                  disabled={!hasOpenFilterChanges}
+                  className="rounded bg-primary px-3 py-1.5 text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                >
+                  Apply
+                </button>
+              </div>
             </div>,
             document.body
           )

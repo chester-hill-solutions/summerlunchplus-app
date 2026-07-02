@@ -8,6 +8,15 @@ type ForeignKeyOption = {
 }
 
 const IN_CLAUSE_BATCH_SIZE = 150
+const FETCH_BATCH_SIZE = 1000
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500, 1000, 1500] as const
+const DEFAULT_PAGE_SIZE = 50
+const FILTER_EMPTY_TOKEN = '__none__'
+
+type ParsedFilter = {
+  values: string[]
+  includeEmpty: boolean
+}
 
 const chunkArray = <T,>(items: T[], size: number) => {
   if (size <= 0 || !items.length) return [] as T[][]
@@ -16,6 +25,105 @@ const chunkArray = <T,>(items: T[], size: number) => {
     chunks.push(items.slice(index, index + size))
   }
   return chunks
+}
+
+const parseTopLevelSelectColumns = (select: string) => {
+  const columns: string[] = []
+  let depth = 0
+  let token = ''
+
+  const pushToken = () => {
+    const trimmed = token.trim()
+    token = ''
+    if (!trimmed) return
+    if (trimmed.includes('(')) return
+    const [left] = trimmed.split(':')
+    const column = left.trim()
+    if (!column || column === '*') return
+    columns.push(column)
+  }
+
+  for (const char of select) {
+    if (char === '(') {
+      depth += 1
+      token += char
+      continue
+    }
+    if (char === ')') {
+      depth = Math.max(0, depth - 1)
+      token += char
+      continue
+    }
+    if (char === ',' && depth === 0) {
+      pushToken()
+      continue
+    }
+    token += char
+  }
+  pushToken()
+
+  return Array.from(new Set(columns))
+}
+
+const parsePaginationState = (request: Request) => {
+  const searchParams = new URL(request.url).searchParams
+  const pageRaw = Number(searchParams.get('page') ?? '1')
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1
+  const pageSizeRaw = Number(searchParams.get('pageSize') ?? String(DEFAULT_PAGE_SIZE))
+  const pageSize = PAGE_SIZE_OPTIONS.includes(pageSizeRaw as (typeof PAGE_SIZE_OPTIONS)[number])
+    ? pageSizeRaw
+    : DEFAULT_PAGE_SIZE
+
+  return { page, pageSize, searchParams }
+}
+
+const parseFiltersFromSearch = (columns: string[], searchParams: URLSearchParams): Record<string, ParsedFilter> => {
+  return columns.reduce<Record<string, ParsedFilter>>((acc, column) => {
+    const values = Array.from(new Set(searchParams.getAll(`f_${column}`)))
+    if (!values.length) return acc
+
+    const includeEmpty = values.includes(FILTER_EMPTY_TOKEN)
+    const explicitValues = values.filter(value => value !== FILTER_EMPTY_TOKEN)
+    acc[column] = {
+      values: explicitValues,
+      includeEmpty,
+    }
+    return acc
+  }, {})
+}
+
+const fetchAllRowsInBatches = async ({
+  supabase,
+  table,
+  select,
+  order,
+  ascending,
+}: {
+  supabase: ReturnType<typeof createClient>['supabase']
+  table: string
+  select: string
+  order: string
+  ascending: boolean
+}) => {
+  const rows: Record<string, unknown>[] = []
+  for (let offset = 0; ; offset += FETCH_BATCH_SIZE) {
+    const { data, error } = await fromQualifiedTable(supabase, table)
+      .select(select)
+      .order(order, { ascending })
+      .range(offset, offset + FETCH_BATCH_SIZE - 1)
+
+    if (error) {
+      throw new Response(error.message, { status: 500 })
+    }
+
+    const chunk = ((data ?? []) as unknown as Record<string, unknown>[])
+    rows.push(...chunk)
+    if (chunk.length < FETCH_BATCH_SIZE) {
+      break
+    }
+  }
+
+  return rows
 }
 
 const fromQualifiedTable = (supabase: ReturnType<typeof createClient>['supabase'], qualifiedTable: string) => {
@@ -485,16 +593,73 @@ export function createTableLoader(tableName: string) {
     }
 
     const { supabase } = createClient(request)
+    const { page, pageSize, searchParams } = parsePaginationState(request)
+    const requestedSortColumn = (searchParams.get('sort') ?? '').trim()
+    const requestedSortDirection = (searchParams.get('dir') ?? '').trim().toLowerCase()
+    const requestedSortAscending = requestedSortDirection === 'asc'
     const orderAscending = definition.orderAscending ?? true
-    const { data, error } = await fromQualifiedTable(supabase, definition.table)
-      .select(definition.select)
-      .order(definition.order, { ascending: orderAscending })
+    const selectableColumns = new Set(parseTopLevelSelectColumns(definition.select))
+    const parsedFilters = parseFiltersFromSearch(definition.columns, searchParams)
 
-    if (error) {
-      throw new Response(error.message, { status: 500 })
+    const hasUnsupportedFilter = Object.keys(parsedFilters).some(column => !selectableColumns.has(column))
+    const hasUnsupportedSort = requestedSortColumn.length > 0 && !selectableColumns.has(requestedSortColumn)
+    const hasMixedEmptyAndExplicit = Object.values(parsedFilters).some(
+      filter => filter.includeEmpty && filter.values.length > 0
+    )
+    const useServerSideQuery = !(hasUnsupportedFilter || hasUnsupportedSort || hasMixedEmptyAndExplicit)
+
+    let rows: Record<string, unknown>[] = []
+    let totalRows = 0
+
+    if (useServerSideQuery) {
+      let query = fromQualifiedTable(supabase, definition.table)
+        .select(definition.select, { count: 'exact' })
+
+      for (const [column, filter] of Object.entries(parsedFilters)) {
+        if (!selectableColumns.has(column)) continue
+        if (filter.includeEmpty && filter.values.length === 0) {
+          query = query.is(column, null)
+          continue
+        }
+        if (filter.values.length === 1) {
+          query = query.eq(column, filter.values[0])
+          continue
+        }
+        if (filter.values.length > 1) {
+          query = query.in(column, filter.values)
+        }
+      }
+
+      const orderColumn =
+        requestedSortColumn && selectableColumns.has(requestedSortColumn)
+          ? requestedSortColumn
+          : definition.order
+      const ascending = requestedSortColumn
+        ? requestedSortAscending
+        : orderAscending
+
+      const from = (page - 1) * pageSize
+      const to = from + pageSize - 1
+
+      const { data, error, count } = await query.order(orderColumn, { ascending }).range(from, to)
+
+      if (error) {
+        throw new Response(error.message, { status: 500 })
+      }
+
+      rows = (data ?? []) as unknown as Record<string, unknown>[]
+      totalRows = count ?? rows.length
+    } else {
+      rows = await fetchAllRowsInBatches({
+        supabase,
+        table: definition.table,
+        select: definition.select,
+        order: definition.order,
+        ascending: orderAscending,
+      })
+      totalRows = rows.length
     }
 
-    const rows = (data ?? []) as unknown as Record<string, unknown>[]
     if (definition.lookupMappings?.length && rows.length) {
       for (const mapping of definition.lookupMappings) {
         const keyCol = mapping.keyColumn
@@ -612,6 +777,8 @@ export function createTableLoader(tableName: string) {
     return {
       columns: definition.columns,
       rows,
+      totalRows,
+      serverSideQuery: useServerSideQuery,
       label: definition.label,
       tableName,
       tableVariant: 'default' as const,
