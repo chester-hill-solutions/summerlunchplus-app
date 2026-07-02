@@ -659,7 +659,7 @@ export function createTableLoader(tableName: string) {
         let remainingLimit = pageSize
         const orderedRows: Record<string, unknown>[] = []
 
-        const totalCountQueryBase = fromQualifiedTable(supabase, definition.table).select('id', { count: 'exact', head: true })
+        const totalCountQueryBase = fromQualifiedTable(supabase, definition.table).select('id', { count: 'planned', head: true })
         const totalCountQuery = applyParsedFilters({
           query: totalCountQueryBase,
           parsedFilters,
@@ -667,9 +667,14 @@ export function createTableLoader(tableName: string) {
         })
         const { count: totalCount, error: totalCountError } = await totalCountQuery
         if (totalCountError) {
-          throw new Response(totalCountError.message, { status: 500 })
+          console.error('[table-loader] class-enrollment total count failed', {
+            tableName,
+            error: totalCountError.message,
+          })
+          totalRows = 0
+        } else {
+          totalRows = totalCount ?? 0
         }
-        totalRows = totalCount ?? 0
 
         for (const status of allowedStatuses) {
           let statusCursor = 0
@@ -742,6 +747,10 @@ export function createTableLoader(tableName: string) {
         }
 
         rows = orderedRows
+        if (totalRows <= 0) {
+          const inferredTotal = (page - 1) * pageSize + orderedRows.length
+          totalRows = inferredTotal + (orderedRows.length === pageSize ? 1 : 0)
+        }
       } else {
         const queryBase = fromQualifiedTable(supabase, definition.table)
           .select(definition.select, { count: 'exact' })
