@@ -76,7 +76,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     label: 'Families',
     table: 'person_guardian_child',
     select: 'guardian_profile_id, child_profile_id, primary_child',
-    columns: ['guardian_display', 'child_display', 'primary_child'],
+    columns: ['guardian_display', 'guardian_email', 'child_display', 'primary_child'],
     lookupMappings: [
       {
         keyColumn: 'guardian_profile_id',
@@ -84,6 +84,13 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         resultColumn: 'guardian_display',
         select: 'id, firstname, surname, email',
         format: 'profile_display',
+      },
+      {
+        keyColumn: 'guardian_profile_id',
+        table: 'profile',
+        resultColumn: 'guardian_email',
+        select: 'id, email',
+        valueColumn: 'email',
       },
       {
         keyColumn: 'child_profile_id',
