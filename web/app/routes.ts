@@ -68,6 +68,7 @@ export default [
     route("class-zoom-participant", "routes/manage/class-zoom-participant.tsx"),
     route("zlr-click-event", "routes/manage/zlr-click-event.tsx"),
     route("workshop-enrollment", "routes/manage/workshop-enrollment.tsx"),
+    route("table-filter-options", "routes/manage/table-filter-options.ts"),
     route("workshop-enrollment/enrichment", "routes/manage/workshop-enrollment.enrichment.ts"),
     route("form", "routes/manage/form.tsx"),
     route("form/:formID/answers", "routes/manage/form.$id.answers.tsx"),
