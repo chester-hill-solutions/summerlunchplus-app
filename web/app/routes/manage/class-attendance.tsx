@@ -5,7 +5,6 @@ import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import { runZoomJobsForClass } from '@/lib/zoom-jobs/runner.server'
-import { loadWorkshopEnrollmentEnrichment } from './workshop-enrollment-enrichment.server'
 import type { Route } from './+types/class-attendance'
 import TableDisplay from './table-display'
 import { isIP } from 'node:net'
@@ -125,6 +124,18 @@ type LoginEventIpRow = {
   ip_selected?: unknown
   ip_address: unknown
   forwarded_for: unknown
+}
+
+type FormSubmissionPreferenceRow = {
+  id: string
+  profile_id: string | null
+  user_id: string | null
+  submitted_at: string | null
+}
+
+type FormAnswerPreferenceRow = {
+  submission_id: string
+  value: unknown
 }
 
 const IN_CLAUSE_BATCH_SIZE = 150
@@ -336,21 +347,82 @@ export async function loader({ request }: Route.LoaderArgs) {
     profilesByUserRows.push(...((profileChunk ?? []) as Array<ProfileRow & { user_id?: string | null }>))
   }
 
-  let enrollmentEnrichmentByProfileId: Record<string, { giftcard_display: string }> = {}
-  if (profileIds.length) {
-    for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
-      try {
-        const enrichment = await loadWorkshopEnrollmentEnrichment(chunk)
-        for (const [profileId, value] of Object.entries(enrichment)) {
-          enrollmentEnrichmentByProfileId[profileId] = {
-            giftcard_display: value.giftcard_display,
-          }
+  const userIdsByProfileId = new Map<string, string>()
+  const profileIdsByUserId = new Map<string, string[]>()
+  for (const row of profilesByIdRows) {
+    if (typeof row.user_id !== 'string' || !row.user_id) continue
+    userIdsByProfileId.set(row.id, row.user_id)
+    const existing = profileIdsByUserId.get(row.user_id) ?? []
+    if (!existing.includes(row.id)) {
+      existing.push(row.id)
+      profileIdsByUserId.set(row.user_id, existing)
+    }
+  }
+
+  const submissionsById = new Map<string, FormSubmissionPreferenceRow>()
+  for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: submissionRows, error } = await adminClient
+      .from('form_submission')
+      .select('id, profile_id, user_id, submitted_at')
+      .in('profile_id', chunk)
+
+    if (error) throw new Response(error.message, { status: 500 })
+    for (const row of (submissionRows ?? []) as FormSubmissionPreferenceRow[]) {
+      submissionsById.set(row.id, row)
+    }
+  }
+
+  const preferenceUserIds = Array.from(new Set(Array.from(userIdsByProfileId.values())))
+  for (const chunk of chunkArray(preferenceUserIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: submissionRows, error } = await adminClient
+      .from('form_submission')
+      .select('id, profile_id, user_id, submitted_at')
+      .in('user_id', chunk)
+
+    if (error) throw new Response(error.message, { status: 500 })
+    for (const row of (submissionRows ?? []) as FormSubmissionPreferenceRow[]) {
+      submissionsById.set(row.id, row)
+    }
+  }
+
+  const latestGiftCardPreferenceByProfileId = new Map<string, { value: string; submittedAtMs: number }>()
+  const submissionIds = Array.from(submissionsById.keys())
+  for (const chunk of chunkArray(submissionIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: answerRows, error } = await adminClient
+      .from('form_answer')
+      .select('submission_id, value')
+      .eq('question_code', 'gift_card_store_preference')
+      .in('submission_id', chunk)
+
+    if (error) throw new Response(error.message, { status: 500 })
+
+    for (const row of (answerRows ?? []) as FormAnswerPreferenceRow[]) {
+      const submission = submissionsById.get(row.submission_id)
+      if (!submission) continue
+      const value = typeof row.value === 'string' ? row.value.trim() : ''
+      if (!value) continue
+      const submittedAtMs = Number.isFinite(Date.parse(submission.submitted_at ?? ''))
+        ? Date.parse(submission.submitted_at ?? '')
+        : 0
+
+      const associatedProfileIds = new Set<string>()
+      if (typeof submission.profile_id === 'string' && submission.profile_id && profileIds.includes(submission.profile_id)) {
+        associatedProfileIds.add(submission.profile_id)
+      }
+      if (typeof submission.user_id === 'string' && submission.user_id) {
+        for (const profileId of profileIdsByUserId.get(submission.user_id) ?? []) {
+          associatedProfileIds.add(profileId)
         }
-      } catch (error) {
-        console.warn('[class attendance] failed to load workshop enrichment for provider preference', {
-          chunkSize: chunk.length,
-          error: error instanceof Error ? error.message : String(error),
-        })
+      }
+
+      for (const profileId of associatedProfileIds) {
+        const existing = latestGiftCardPreferenceByProfileId.get(profileId)
+        if (!existing || submittedAtMs > existing.submittedAtMs) {
+          latestGiftCardPreferenceByProfileId.set(profileId, {
+            value,
+            submittedAtMs,
+          })
+        }
       }
     }
   }
@@ -717,7 +789,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       step_attendance_sync_detail: stepAttendanceSyncDetail,
       latest_sync_payload: latestSyncPayload,
       latest_sync_error: latestSync?.error_message ?? null,
-      giftcard_display: enrollmentEnrichmentByProfileId[row.profile_id]?.giftcard_display ?? 'N/A',
+      giftcard_display: latestGiftCardPreferenceByProfileId.get(row.profile_id)?.value ?? 'N/A',
       latest_geo: latestGeo || 'N/A',
       gift_card_status: giftCardAllocation ? giftCardAllocation.status : row.gift_card_blocked ? 'blocked' : 'pending',
       gift_card_provider: giftCardAsset?.provider ?? null,
