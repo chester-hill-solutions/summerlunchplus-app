@@ -168,6 +168,14 @@ const submissionDisplay = (formRow: Record<string, unknown> | null, profileRow: 
   return [formName, profileLabel, submittedDate].filter(Boolean).join(' - ')
 }
 
+const submissionProfileDisplay = (profileRow: Record<string, unknown> | null, fallbackId: string) => {
+  return profileDisplay(profileRow, fallbackId)
+}
+
+const submissionFormDisplay = (formRow: Record<string, unknown> | null, fallbackId: string) => {
+  return formDisplay(formRow, fallbackId)
+}
+
 const formatDateLabel = (value: unknown) => {
   if (typeof value !== 'string' || !value) return ''
   const date = new Date(value)
@@ -761,6 +769,17 @@ export function createTableLoader(tableName: string) {
               const profileRow = normalizeLookupRow(lookupRow?.profile)
               const profileId = typeof profileRow?.id === 'string' ? profileRow.id : idValue
               row[mapping.resultColumn] = submissionDisplay(formRow, profileRow, profileId, lookupRow?.submitted_at)
+              continue
+            }
+            if (mapping.format === 'submission_profile_display') {
+              const profileRow = normalizeLookupRow(lookupRow?.profile)
+              const profileId = typeof profileRow?.id === 'string' ? profileRow.id : idValue
+              row[mapping.resultColumn] = submissionProfileDisplay(profileRow, profileId)
+              continue
+            }
+            if (mapping.format === 'submission_form_display') {
+              const formRow = normalizeLookupRow(lookupRow?.form)
+              row[mapping.resultColumn] = submissionFormDisplay(formRow, idValue)
               continue
             }
           }
