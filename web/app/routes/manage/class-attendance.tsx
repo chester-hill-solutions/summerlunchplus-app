@@ -78,6 +78,7 @@ type SyncRunRow = {
 }
 
 const IN_CLAUSE_BATCH_SIZE = 150
+const CLASS_ATTENDANCE_FETCH_BATCH_SIZE = 1000
 
 const chunkArray = <T,>(items: T[], size: number) => {
   if (size <= 0 || !items.length) return [] as T[][]
@@ -104,16 +105,24 @@ const displayNameOrId = (profile: ProfileRow | null, fallbackId: string) => {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
-  const { data, error } = await adminClient
-    .from('class_attendance')
-    .select('id, class_id, profile_id, status, photo_status, camera_on, recorded_by, created_at, updated_at')
-    .order('created_at', { ascending: false })
+  const attendanceRows: AttendanceRow[] = []
+  for (let offset = 0; ; offset += CLASS_ATTENDANCE_FETCH_BATCH_SIZE) {
+    const { data, error } = await adminClient
+      .from('class_attendance')
+      .select('id, class_id, profile_id, status, photo_status, camera_on, recorded_by, created_at, updated_at')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + CLASS_ATTENDANCE_FETCH_BATCH_SIZE - 1)
 
-  if (error) {
-    throw new Response(error.message, { status: 500 })
+    if (error) {
+      throw new Response(error.message, { status: 500 })
+    }
+
+    const chunk = (data ?? []) as AttendanceRow[]
+    attendanceRows.push(...chunk)
+    if (chunk.length < CLASS_ATTENDANCE_FETCH_BATCH_SIZE) {
+      break
+    }
   }
-
-  const attendanceRows = (data ?? []) as AttendanceRow[]
   const classIds = Array.from(new Set(attendanceRows.map(row => row.class_id).filter(Boolean)))
   const profileIds = Array.from(new Set(attendanceRows.map(row => row.profile_id).filter(Boolean)))
   const recordedByIds = Array.from(new Set(attendanceRows.map(row => row.recorded_by).filter((id): id is string => Boolean(id))))
