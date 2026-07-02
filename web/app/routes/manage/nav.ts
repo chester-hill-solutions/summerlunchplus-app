@@ -26,12 +26,6 @@ export const manageSections: ManageNavSection[] = [
     defaultCollapsed: false,
     items: [
       { to: '/manage/class-attendance', label: 'Class attendance', description: 'Attendance by class and student.' },
-      {
-        to: '/manage/class-attendance-raw',
-        label: 'Raw attendance',
-        description: 'Raw class_attendance rows before enrichment and derived debug fields.',
-      },
-      { to: '/manage/class-attendance-photo-upload-attempt', label: 'Photo upload attempts', description: 'Debug class photo upload failures and retries.' },
       { to: '/manage/workshop-enrollment', label: 'Workshop enrollments', description: 'Pending, waitlisted, approved, and rejected workshop enrollments.' },
       { to: '/manage/class', label: 'Classes', description: 'Individual class schedule entries.' },
       { to: '/manage/gift-cards', label: 'Gift cards', description: 'Upload and process gift card batches.' },
@@ -111,6 +105,12 @@ export const manageSections: ManageNavSection[] = [
     defaultCollapsed: true,
     items: [
       { to: '/manage/login-event', label: 'Login events', description: 'Successful sign-in metadata and source context.' },
+      {
+        to: '/manage/class-attendance-raw',
+        label: 'Raw attendance',
+        description: 'Raw class_attendance rows before enrichment and derived debug fields.',
+      },
+      { to: '/manage/class-attendance-photo-upload-attempt', label: 'Photo upload attempts', description: 'Debug class photo upload failures and retries.' },
       { to: '/manage/ip-org-policy', label: 'IP org policy', description: 'Classify network org strings for proxy, ISP, and greylist discrepancy handling.' },
       { to: '/manage/semester-form-requirement', label: 'Semester surveys', description: 'Map one pre/post survey form per semester.' },
       { to: '/manage/role-permission', label: 'Role permissions', description: 'Permissions assigned to each role.' },
