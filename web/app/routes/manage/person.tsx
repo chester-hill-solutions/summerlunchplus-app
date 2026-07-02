@@ -10,7 +10,11 @@ import { refreshSuspiciousSignalsForProfile } from '@/lib/suspicious-signals.ser
 import { adminClient } from '@/lib/supabase/adminClient'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE, upsertAdminFamilyFormAnswer } from '@/lib/admin-form-answers.server'
+import {
+  GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
+  loadEditableQuestionOptions,
+  upsertAdminFamilyFormAnswer,
+} from '@/lib/admin-form-answers.server'
 
 import type { LoaderFunctionArgs } from 'react-router'
 import type { PersonLoaderData, ProfileRow, SuspiciousSignalRow } from './person.shared'
@@ -505,9 +509,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
 
   const enrichment = await loadWorkshopEnrollmentEnrichment([profileRow.id])
+  let giftCardOptions: string[] = []
+  try {
+    giftCardOptions = await loadEditableQuestionOptions(GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+  } catch (error) {
+    console.error('[manage/person] unable to load gift card question options', error)
+  }
   const familyFormAnswers = {
     giftcard_display: enrichment[profileRow.id]?.giftcard_display ?? 'N/A',
     prior_participation_display: enrichment[profileRow.id]?.prior_participation_display ?? 'N/A',
+    giftcard_options: giftCardOptions,
   }
 
   return {

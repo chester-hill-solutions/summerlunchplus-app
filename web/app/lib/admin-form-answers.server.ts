@@ -8,6 +8,70 @@ export const ADMIN_EDITABLE_FAMILY_QUESTION_CODES = new Set<string>([
   GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
 ])
 
+const normalizeOptionValue = (value: unknown) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed || null
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const asRecord = value as Record<string, unknown>
+    const candidate = asRecord.value ?? asRecord.label ?? null
+    return normalizeOptionValue(candidate)
+  }
+  return null
+}
+
+const parseQuestionOptions = (raw: unknown) => {
+  const sourceArray = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).options)
+      ? ((raw as Record<string, unknown>).options as unknown[])
+      : []
+
+  return Array.from(
+    new Set(
+      sourceArray
+        .map(item => normalizeOptionValue(item))
+        .filter((value): value is string => Boolean(value))
+    )
+  )
+}
+
+export async function loadEditableQuestionOptions(questionCode: string): Promise<string[]> {
+  if (!ADMIN_EDITABLE_FAMILY_QUESTION_CODES.has(questionCode)) return []
+
+  const { data: mappedRow, error: mappedError } = await adminClient
+    .from('form_question_map')
+    .select('options_override')
+    .eq('question_code', questionCode)
+    .not('options_override', 'is', null)
+    .order('position', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (mappedError) {
+    throw new Error(mappedError.message)
+  }
+
+  const mappedOptions = parseQuestionOptions(mappedRow?.options_override)
+  if (mappedOptions.length) return mappedOptions
+
+  const { data: questionRow, error: questionError } = await adminClient
+    .from('form_question')
+    .select('options')
+    .eq('question_code', questionCode)
+    .maybeSingle()
+
+  if (questionError) {
+    throw new Error(questionError.message)
+  }
+
+  return parseQuestionOptions(questionRow?.options)
+}
+
 type FamilyGraph = {
   profileIds: string[]
 }
@@ -135,6 +199,17 @@ export async function upsertAdminFamilyFormAnswer(
     return { ok: false, error: 'Question code is not editable.' }
   }
   if (!value) return { ok: false, error: 'Value is required.' }
+
+  let allowedOptions: string[] = []
+  try {
+    allowedOptions = await loadEditableQuestionOptions(questionCode)
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Unable to load question options.' }
+  }
+
+  if (allowedOptions.length && !allowedOptions.includes(value)) {
+    return { ok: false, error: 'Value must match configured question options.' }
+  }
 
   const { candidateProfileIds, candidateUserIds } = await loadCandidateProfileIds(seedProfileId)
   if (!candidateProfileIds.length) {

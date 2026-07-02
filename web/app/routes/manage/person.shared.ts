@@ -124,6 +124,7 @@ export type PersonLoaderData = {
   familyFormAnswers: {
     giftcard_display: string
     prior_participation_display: string
+    giftcard_options: string[]
   }
 }
 

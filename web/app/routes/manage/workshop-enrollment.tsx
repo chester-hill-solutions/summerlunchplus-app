@@ -16,7 +16,11 @@ import type { Route } from './+types/workshop-enrollment'
 import TableDisplay from './table-display'
 import { EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV } from '@/lib/exports/types'
 import { transitionWorkshopEnrollmentStatus } from '@/lib/workshop-enrollment-status.server'
-import { GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE, upsertAdminFamilyFormAnswer } from '@/lib/admin-form-answers.server'
+import {
+  GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
+  loadEditableQuestionOptions,
+  upsertAdminFamilyFormAnswer,
+} from '@/lib/admin-form-answers.server'
 
 const isLikelyEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
@@ -46,7 +50,18 @@ const parseEnrollmentField = (
 }
 
 export async function loader(args: Route.LoaderArgs) {
-  return loadWorkshopEnrollmentData(args.request)
+  const base = await loadWorkshopEnrollmentData(args.request)
+  let giftCardOptions: string[] = []
+  try {
+    giftCardOptions = await loadEditableQuestionOptions(GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+  } catch (error) {
+    console.error('[workshop enrollment] unable to load gift card question options', error)
+  }
+
+  return {
+    ...base,
+    giftCardOptions,
+  }
 }
 
 export async function action({ request }: Route.ActionArgs) {
