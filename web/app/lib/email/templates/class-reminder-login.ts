@@ -8,22 +8,19 @@ const escapeHtml = (value: string) =>
 
 export type ClassReminderLoginTemplateData = {
   workshopName: string
-  classStartsAt: string
   loginUrl: string
 }
 
 export const renderClassReminderLoginEmail = ({
   workshopName,
-  classStartsAt,
   loginUrl,
 }: ClassReminderLoginTemplateData) => {
   const safeWorkshopName = escapeHtml(workshopName)
-  const safeStartsAt = escapeHtml(classStartsAt)
   const safeLoginUrl = escapeHtml(loginUrl)
 
   return {
     subject: `Reminder: ${workshopName} starts soon`,
-    text: `Reminder: ${workshopName} starts at ${classStartsAt}. Log in to join your class: ${loginUrl}`,
+    text: `Reminder: ${workshopName} starts soon. Log in to join your class: ${loginUrl}`,
     html: `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background-color:#f6f8fb;">
@@ -38,7 +35,7 @@ export const renderClassReminderLoginEmail = ({
             </tr>
             <tr>
               <td style="padding:8px 24px 24px 24px;font-family:Arial,sans-serif;color:#1f2937;font-size:16px;line-height:24px;">
-                <p style="margin:0 0 16px 0;"><strong>${safeWorkshopName}</strong> starts at <strong>${safeStartsAt}</strong>.</p>
+                <p style="margin:0 0 16px 0;"><strong>${safeWorkshopName}</strong> starts soon.</p>
                 <p style="margin:0 0 16px 0;">Please log in to SummerLunch+ to join your class.</p>
                 <p style="margin:0;"><a href="${safeLoginUrl}">Log in to join class</a></p>
               </td>
