@@ -26,8 +26,16 @@ const toTime = (value: unknown) => {
 export async function loadWorkshopEnrollmentData(request: Request) {
   const auth = await requireAuth(request)
   const canManageEnrollments = isRoleAtLeast(auth.claims.role, 'admin')
+
+  // Keep workshop enrollment on the full-row path so custom derived columns
+  // and filter options are computed from the full dataset, like class attendance.
+  const loaderUrl = new URL(request.url)
+  loaderUrl.searchParams.set('sort', '__full_scan__')
+  loaderUrl.searchParams.delete('dir')
+  const loaderRequest = new Request(loaderUrl.toString(), request)
+
   const base = await baseLoader(
-    { request } as LoaderFunctionArgs,
+    { request: loaderRequest } as LoaderFunctionArgs,
     { includeForeignKeyOptions: canManageEnrollments }
   )
 
