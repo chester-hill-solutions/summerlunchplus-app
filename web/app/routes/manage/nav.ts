@@ -26,6 +26,11 @@ export const manageSections: ManageNavSection[] = [
     defaultCollapsed: false,
     items: [
       { to: '/manage/class-attendance', label: 'Class attendance', description: 'Attendance by class and student.' },
+      {
+        to: '/manage/class-attendance-raw',
+        label: 'Raw attendance',
+        description: 'Raw Zoom participant rows used to derive class attendance status.',
+      },
       { to: '/manage/class-attendance-photo-upload-attempt', label: 'Photo upload attempts', description: 'Debug class photo upload failures and retries.' },
       { to: '/manage/workshop-enrollment', label: 'Workshop enrollments', description: 'Pending, waitlisted, approved, and rejected workshop enrollments.' },
       { to: '/manage/class', label: 'Classes', description: 'Individual class schedule entries.' },
