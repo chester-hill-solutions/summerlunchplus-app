@@ -158,24 +158,25 @@ export default function ManagePersonOverviewPage() {
             <Combobox
               value={giftcardValue}
               onChange={setGiftcardValue}
-              options={[
-                { value: 'Meal Kit', label: 'Meal Kit' },
-                { value: 'Walmart', label: 'Walmart' },
-                { value: 'No Frills', label: 'No Frills' },
-                { value: 'Loblaws', label: 'Loblaws' },
-                { value: 'FreshCo', label: 'FreshCo' },
-                { value: 'Food Basics', label: 'Food Basics' },
-                { value: 'Metro', label: 'Metro' },
-                { value: 'Sobeys', label: 'Sobeys' },
-                { value: 'Costco', label: 'Costco' },
-                { value: 'N/A', label: 'N/A' },
-              ]}
+              options={familyFormAnswers.giftcard_options.map(option => ({ value: option, label: option }))}
               placeholder="Select gift card"
-              disabled={familyAnswerFetcher.state !== 'idle'}
+              disabled={familyAnswerFetcher.state !== 'idle' || familyFormAnswers.giftcard_options.length === 0}
             />
-            <Button type="submit" size="sm" variant="outline" disabled={familyAnswerFetcher.state !== 'idle' || !giftcardValue.trim()}>
+            <Button
+              type="submit"
+              size="sm"
+              variant="outline"
+              disabled={
+                familyAnswerFetcher.state !== 'idle' ||
+                !giftcardValue.trim() ||
+                familyFormAnswers.giftcard_options.length === 0
+              }
+            >
               {familyAnswerFetcher.state !== 'idle' ? 'Saving...' : 'Save gift card'}
             </Button>
+            {familyFormAnswers.giftcard_options.length === 0 ? (
+              <p className="basis-full text-xs text-muted-foreground">No configured options found for gift card preference.</p>
+            ) : null}
             {familyAnswerFetcher.data?.error ? <p className="basis-full text-xs text-destructive">{familyAnswerFetcher.data.error}</p> : null}
             {familyAnswerFetcher.data?.success ? <p className="basis-full text-xs text-emerald-600">Gift card preference updated.</p> : null}
           </familyAnswerFetcher.Form>

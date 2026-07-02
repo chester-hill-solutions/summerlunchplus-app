@@ -6,7 +6,14 @@ export type LookupMapping = {
   resultColumn: string
   keyColumnInTable?: string
   select?: string
-  format?: 'profile_display' | 'semester_range' | 'semester_title' | 'class_display' | 'submission_display'
+  format?:
+    | 'profile_display'
+    | 'semester_range'
+    | 'semester_title'
+    | 'class_display'
+    | 'submission_display'
+    | 'submission_profile_display'
+    | 'submission_form_display'
 }
 
 export type EditorFieldType =
@@ -839,7 +846,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     label: 'Form Answers',
     table: 'form_answer',
     select: 'id, submission_id, question_code, value',
-    columns: ['submission_display', 'question_code', 'value'],
+    columns: ['form_display', 'profile_display', 'submission_display', 'question_code', 'value'],
     order: 'id',
     lookupMappings: [
       {
@@ -848,6 +855,20 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
         resultColumn: 'submission_display',
         select: 'id, submitted_at, form:form_id ( name ), profile:profile_id ( id, firstname, surname, email )',
         format: 'submission_display',
+      },
+      {
+        keyColumn: 'submission_id',
+        table: 'form_submission',
+        resultColumn: 'profile_display',
+        select: 'id, profile:profile_id ( id, firstname, surname, email )',
+        format: 'submission_profile_display',
+      },
+      {
+        keyColumn: 'submission_id',
+        table: 'form_submission',
+        resultColumn: 'form_display',
+        select: 'id, form:form_id ( name )',
+        format: 'submission_form_display',
       },
     ],
     editor: {

@@ -139,6 +139,7 @@ type LoaderData = {
   canEditStatus?: boolean
   editorConfig?: EditorConfig
   foreignKeyOptions?: Record<string, ForeignKeyOption[]>
+  giftCardOptions?: string[]
 }
 
 type RegisterStudentActionResult = {
@@ -788,6 +789,9 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
   const serverSideQuery = Boolean(source?.serverSideQuery)
+  const giftCardOptions = Array.isArray(source?.giftCardOptions)
+    ? source.giftCardOptions.filter(option => typeof option === 'string' && option.trim())
+    : []
   const debugPerf = searchParams.get('debugPerf') === '1'
   const timezoneOptions = useMemo(() => {
     const supported =
@@ -2102,15 +2106,23 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
   const updateWorkshopEnrollmentGiftcard = (row: Record<string, unknown>) => {
     if (!isWorkshopEnrollment || !canEditStatus) return
+    if (giftCardOptions.length === 0) {
+      window.alert('No configured gift card options are available for editing.')
+      return
+    }
     const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
     if (!profileId) return
 
     const current = typeof row.giftcard_display === 'string' ? row.giftcard_display : ''
     const suggested = current === 'N/A' ? '' : current
-    const next = window.prompt('Gift card preference', suggested)
+    const next = window.prompt(`Gift card preference (${giftCardOptions.join(', ')})`, suggested)
     if (next == null) return
     const value = next.trim()
     if (!value) return
+    if (!giftCardOptions.includes(value)) {
+      window.alert('Gift card value must match configured form options exactly.')
+      return
+    }
 
     const formData = new FormData()
     formData.set('intent', 'update-family-form-answer')
@@ -2769,6 +2781,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                                   event.stopPropagation()
                                   updateWorkshopEnrollmentGiftcard(row)
                                 }}
+                                disabled={giftCardOptions.length === 0}
                                 className="rounded border border-input px-2 py-1 text-xs hover:bg-muted"
                               >
                                 Edit
