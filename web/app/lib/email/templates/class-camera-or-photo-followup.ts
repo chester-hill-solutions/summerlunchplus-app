@@ -1,11 +1,3 @@
-const escapeHtml = (value: string) =>
-  value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-
 export type ClassCameraOrPhotoFollowupTemplateData = {
   guardianName: string
 }
@@ -13,27 +5,28 @@ export type ClassCameraOrPhotoFollowupTemplateData = {
 export const renderClassCameraOrPhotoFollowupEmail = ({
   guardianName,
 }: ClassCameraOrPhotoFollowupTemplateData) => {
-  const safeGuardianName = escapeHtml(guardianName)
+  void guardianName
 
   return {
     subject: 'Please upload your class recipe photo in the SummerLunch+ Hub',
     text:
-      `Hi ${guardianName},\n` +
+      'Hi everyone,\n' +
       '\n' +
-      "Thanks for being part of today's summerlunch+ class.\n" +
+      'Thank you for another fantastic class! We loved cooking with everyone and seeing your recipes and smiling faces.\n' +
       '\n' +
-      "To confirm participation for today's session, please upload a photo of your completed recipe in the SummerLunch+ Hub:\n" +
+      "If you couldn't attend the live class, or joined with your camera off, you can still complete this week's participation requirement by uploading 2 photos of recipes you made from this week.\n" +
       '\n' +
-      '1. Log in to your SummerLunch+ account\n' +
-      '2. Go to the Workshops section\n' +
-      '3. Find today\'s class and click Upload Images\n' +
-      '4. Select your photo(s) and submit\n' +
+      'How to upload your photos:\n' +
+      '1. Log in to your summerlunch+ Hub account.\n' +
+      '2. Go to the Workshops section.\n' +
+      "3. Find today's class and click Upload Images.\n" +
+      '4. Select your photos and click Submit.\n' +
       '\n' +
-      'Please do not reply to this email, as this inbox is not monitored.\n' +
+      "If you attended the live class with your camera on, we'd also love to see photos of your finished dishes! Sharing your creations helps us celebrate everyone's hard work and makes our cooking community even more fun.\n" +
       '\n' +
-      'Thank you!\n' +
+      "Thank you, and we can't wait to see what you made!\n" +
       '\n' +
-      '- The summerlunch+ Team',
+      'The summerlunch+ Team',
     html: `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background-color:#f6f8fb;">
@@ -48,18 +41,19 @@ export const renderClassCameraOrPhotoFollowupEmail = ({
             </tr>
             <tr>
               <td style="padding:8px 24px 24px 24px;font-family:Arial,sans-serif;color:#1f2937;font-size:16px;line-height:24px;">
-                <p style="margin:0 0 16px 0;">Hi ${safeGuardianName},</p>
-                <p style="margin:0 0 16px 0;">Thanks for being part of today's summerlunch+ class.</p>
-                <p style="margin:0 0 16px 0;">To confirm participation for today's session, please upload a photo of your completed recipe in the SummerLunch+ Hub:</p>
+                <p style="margin:0 0 16px 0;">Hi everyone,</p>
+                <p style="margin:0 0 16px 0;">Thank you for another fantastic class! We loved cooking with everyone and seeing your recipes and smiling faces.</p>
+                <p style="margin:0 0 16px 0;">If you couldn't attend the live class, or joined with your camera off, you can still complete this week's participation requirement by uploading 2 photos of recipes you made from this week.</p>
+                <p style="margin:0 0 16px 0;">How to upload your photos:</p>
                 <ol style="margin:0 0 16px 24px;padding:0;">
-                  <li style="margin:0 0 8px 0;">Log in to your SummerLunch+ account</li>
-                  <li style="margin:0 0 8px 0;">Go to the Workshops section</li>
-                  <li style="margin:0 0 8px 0;">Find today's class and click Upload Images</li>
-                  <li style="margin:0;">Select your photo(s) and submit</li>
+                  <li style="margin:0 0 8px 0;">Log in to your summerlunch+ Hub account.</li>
+                  <li style="margin:0 0 8px 0;">Go to the Workshops section.</li>
+                  <li style="margin:0 0 8px 0;">Find today's class and click Upload Images.</li>
+                  <li style="margin:0;">Select your photos and click Submit.</li>
                 </ol>
-                <p style="margin:0 0 16px 0;">Please do not reply to this email, as this inbox is not monitored.</p>
-                <p style="margin:0 0 16px 0;">Thank you!</p>
-                <p style="margin:0;">- The summerlunch+ Team</p>
+                <p style="margin:0 0 16px 0;">If you attended the live class with your camera on, we'd also love to see photos of your finished dishes! Sharing your creations helps us celebrate everyone's hard work and makes our cooking community even more fun.</p>
+                <p style="margin:0 0 16px 0;">Thank you, and we can't wait to see what you made!</p>
+                <p style="margin:0;">The summerlunch+ Team</p>
               </td>
             </tr>
           </table>
