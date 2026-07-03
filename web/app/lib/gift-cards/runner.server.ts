@@ -334,7 +334,9 @@ const sendDueReminders = async (appOrigin: string) => {
 
   const { data: allocations, error: allocationError } = await adminClient
     .from('gift_card_allocation')
-    .select('id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, class:class_id(ends_at), profile:profile_id(email), asset:gift_card_asset_id(provider, value)')
+    .select(
+      'id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, class:class_id(ends_at), profile:profile_id(email), asset:gift_card_asset_id(provider, value, status, assigned_profile_id)'
+    )
     .eq('status', 'allocated')
     .is('reminder_sent_at', null)
 
@@ -358,7 +360,10 @@ const sendDueReminders = async (appOrigin: string) => {
     metadata: { release_at?: string | null } | null
     class: { ends_at: string | null } | Array<{ ends_at: string | null }> | null
     profile: { email: string | null } | Array<{ email: string | null }> | null
-    asset: { provider: 'PC' | 'Sobeys'; value: number } | Array<{ provider: 'PC' | 'Sobeys'; value: number }> | null
+    asset:
+      | { provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }
+      | Array<{ provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }>
+      | null
   }>
 
   for (const row of rows) {
@@ -396,10 +401,19 @@ const sendDueReminders = async (appOrigin: string) => {
       continue
     }
 
+    const assetRelation = Array.isArray(row.asset) ? row.asset[0] : row.asset
+    const assetAllocatedToProfile =
+      assetRelation?.status === 'allocated' &&
+      typeof assetRelation.assigned_profile_id === 'string' &&
+      assetRelation.assigned_profile_id === row.profile_id
+    if (!assetAllocatedToProfile) {
+      remindersSkipped += 1
+      continue
+    }
+
     const token = newGlrToken()
     const tokenHash = hashGlrToken(token)
     const eventKey = `gift-card-reminder:${row.id}`
-    const assetRelation = Array.isArray(row.asset) ? row.asset[0] : row.asset
 
     const emailResult = await sendTemplateEmail({
       toEmail,
