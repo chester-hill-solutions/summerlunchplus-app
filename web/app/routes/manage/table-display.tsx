@@ -2512,7 +2512,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                 return (
                   <th
                     key={`head-${column}`}
-                    className={isNumericColumn(column) ? 'relative w-24 px-4 py-2 text-left' : 'relative px-4 py-2 text-left'}
+                    className={`${isNumericColumn(column) ? 'w-24' : ''} relative px-4 py-2 text-left ${hasStickyTopBar ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''}`}
                   >
                     <div className="relative flex items-center gap-1">
                       <button
@@ -2577,7 +2577,13 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                   </th>
                 )
               })}
-              {canInlineUpdate ? <th className="px-4 py-2 text-left">actions</th> : null}
+              {canInlineUpdate ? (
+                <th
+                  className={`px-4 py-2 text-left ${hasStickyTopBar ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''}`}
+                >
+                  actions
+                </th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
