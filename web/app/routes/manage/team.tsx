@@ -18,6 +18,7 @@ const STAFF_ALLOWED_MANAGE_PATHS = new Set([
   '/manage/workshop/setup',
   '/manage/gift-cards',
   '/manage/gift-cards/upload',
+  '/manage/families',
 ])
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -54,6 +55,15 @@ export default function TeamLayout() {
                 defaultCollapsed: false,
                 items: manageSections
                   .find(section => section.key === 'class-management')
+                  ?.items.filter(item => STAFF_ALLOWED_MANAGE_PATHS.has(item.to)) ?? [],
+              },
+              {
+                key: 'user-management' as const,
+                label: 'User Management',
+                stickerSrc: '/stickers/green_hair_orange_girl.png',
+                defaultCollapsed: true,
+                items: manageSections
+                  .find(section => section.key === 'user-management')
                   ?.items.filter(item => STAFF_ALLOWED_MANAGE_PATHS.has(item.to)) ?? [],
               },
             ]
