@@ -1,9 +1,10 @@
-import { useLoaderData } from 'react-router'
+import { Link } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
+import TableDisplay from './table-display'
 
 import type { Route } from './+types/gift-cards'
 
@@ -33,15 +34,6 @@ const mask = (value: string, visibleDigits = 4) => {
   return `${'•'.repeat(Math.max(0, trimmed.length - visibleDigits))}${trimmed.slice(-visibleDigits)}`
 }
 
-const formatDateTime = (value: string) =>
-  new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(new Date(value))
-
 export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   if (!isRoleAtLeast(auth.claims.role, 'staff')) {
@@ -58,72 +50,45 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Response(error.message, { status: 500 })
   }
 
+  const rows = ((assets ?? []) as GiftCardAssetRow[]).map(asset => ({
+    provider: asset.provider,
+    account_number: mask(asset.account_number),
+    pin: mask(asset.pin),
+    value: formatMoney(asset.value),
+    status: asset.status,
+    asset_url: asset.asset_url,
+    assigned_profile_id: asset.assigned_profile_id ? asset.assigned_profile_id.slice(0, 8) : '',
+    upload_id: asset.upload_id.slice(0, 8),
+    created_at: asset.created_at,
+  }))
+
   return {
-    assets: (assets ?? []) as GiftCardAssetRow[],
+    label: 'Gift card assets',
+    tableName: 'gift-cards',
+    columns: ['provider', 'account_number', 'pin', 'value', 'status', 'asset_url', 'assigned_profile_id', 'upload_id', 'created_at'],
+    rows,
+    columnMeta: {
+      provider: { label: 'Provider' },
+      account_number: { label: 'Account' },
+      pin: { label: 'PIN' },
+      value: { label: 'Value' },
+      status: { label: 'Status' },
+      asset_url: { label: 'Link' },
+      assigned_profile_id: { label: 'Assigned profile' },
+      upload_id: { label: 'Upload ID' },
+      created_at: { label: 'Created' },
+    },
   }
 }
 
 export default function GiftCardsPage() {
-  const { assets } = useLoaderData<typeof loader>()
-
   return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-semibold">Gift card assets</h1>
-          <p className="text-sm text-muted-foreground">Inventory of uploaded gift cards and current lifecycle status.</p>
-        </div>
+    <TableDisplay
+      headerActions={
         <Button asChild>
-          <a href="/manage/gift-cards/upload">Upload gift cards</a>
+          <Link to="/manage/gift-cards/upload">Upload gift cards</Link>
         </Button>
-      </header>
-
-      <div className="rounded-lg border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-6 py-3 text-left">Provider</th>
-                <th className="px-6 py-3 text-left">Account</th>
-                <th className="px-6 py-3 text-left">PIN</th>
-                <th className="px-6 py-3 text-left">Value</th>
-                <th className="px-6 py-3 text-left">Status</th>
-                <th className="px-6 py-3 text-left">Link</th>
-                <th className="px-6 py-3 text-left">Assigned profile</th>
-                <th className="px-6 py-3 text-left">Upload ID</th>
-                <th className="px-6 py-3 text-left">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assets.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-6 py-6 text-center text-sm text-muted-foreground">
-                    No gift card assets yet.
-                  </td>
-                </tr>
-              ) : (
-                assets.map(asset => (
-                  <tr key={asset.id} className="border-b last:border-b-0">
-                    <td className="px-6 py-3">{asset.provider}</td>
-                    <td className="px-6 py-3 font-mono">{mask(asset.account_number)}</td>
-                    <td className="px-6 py-3 font-mono">{mask(asset.pin)}</td>
-                    <td className="px-6 py-3">{formatMoney(asset.value)}</td>
-                    <td className="px-6 py-3 capitalize">{asset.status}</td>
-                    <td className="px-6 py-3">
-                      <a href={asset.asset_url} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-primary">
-                        Open
-                      </a>
-                    </td>
-                    <td className="px-6 py-3 font-mono">{asset.assigned_profile_id ? asset.assigned_profile_id.slice(0, 8) : '—'}</td>
-                    <td className="px-6 py-3 font-mono">{asset.upload_id.slice(0, 8)}</td>
-                    <td className="px-6 py-3">{formatDateTime(asset.created_at)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+      }
+    />
   )
 }
