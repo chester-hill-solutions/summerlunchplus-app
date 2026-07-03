@@ -15,18 +15,88 @@ type GiftCardJobResult = {
 
 const allocationKey = (classId: string, profileId: string) => `${classId}::${profileId}`
 
+const TORONTO_TIME_ZONE = 'America/Toronto'
+
+const torontoDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TORONTO_TIME_ZONE,
+  weekday: 'short',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
+const torontoPartsForDate = (date: Date) => {
+  const parts = torontoDateTimeFormatter.formatToParts(date)
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? ''
+  return {
+    weekday: get('weekday'),
+    year: Number.parseInt(get('year'), 10),
+    month: Number.parseInt(get('month'), 10),
+    day: Number.parseInt(get('day'), 10),
+    hour: Number.parseInt(get('hour'), 10),
+    minute: Number.parseInt(get('minute'), 10),
+  }
+}
+
+const addDaysToDateParts = (year: number, month: number, day: number, daysAhead: number) => {
+  const next = new Date(Date.UTC(year, month - 1, day + daysAhead))
+  return {
+    year: next.getUTCFullYear(),
+    month: next.getUTCMonth() + 1,
+    day: next.getUTCDate(),
+  }
+}
+
+const torontoNoonUtcForDate = (year: number, month: number, day: number) => {
+  for (const utcHour of [16, 17, 15, 18]) {
+    const candidate = new Date(Date.UTC(year, month - 1, day, utcHour, 0, 0, 0))
+    const toronto = torontoPartsForDate(candidate)
+    if (
+      toronto.year === year &&
+      toronto.month === month &&
+      toronto.day === day &&
+      toronto.hour === 12 &&
+      toronto.minute === 0
+    ) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+const currentTorontoReleaseSlotIso = (now: Date) => {
+  const toronto = torontoPartsForDate(now)
+  if ((toronto.weekday !== 'Mon' && toronto.weekday !== 'Fri') || toronto.hour !== 12 || toronto.minute >= 5) {
+    return null
+  }
+
+  const slot = torontoNoonUtcForDate(toronto.year, toronto.month, toronto.day)
+  return slot ? slot.toISOString() : null
+}
+
 const nextReleaseAtIso = (classEndsAt: string | null) => {
   if (!classEndsAt) return null
   const end = new Date(classEndsAt)
   if (!Number.isFinite(end.getTime())) return null
 
-  for (let daysAhead = 0; daysAhead <= 14; daysAhead += 1) {
-    const candidate = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() + daysAhead, 12, 0, 0, 0))
+  const torontoEnd = torontoPartsForDate(end)
+  if (!Number.isFinite(torontoEnd.year) || !Number.isFinite(torontoEnd.month) || !Number.isFinite(torontoEnd.day)) {
+    return null
+  }
+
+  for (let daysAhead = 0; daysAhead <= 21; daysAhead += 1) {
+    const localDate = addDaysToDateParts(torontoEnd.year, torontoEnd.month, torontoEnd.day, daysAhead)
+    const weekday = new Date(Date.UTC(localDate.year, localDate.month - 1, localDate.day)).getUTCDay()
+    if (weekday !== 1 && weekday !== 5) continue
+
+    const candidate = torontoNoonUtcForDate(localDate.year, localDate.month, localDate.day)
+    if (!candidate) continue
     if (candidate.getTime() < end.getTime()) continue
-    const day = candidate.getUTCDay()
-    if (day === 1 || day === 5) {
-      return candidate.toISOString()
-    }
+    return candidate.toISOString()
   }
 
   return null
@@ -235,10 +305,19 @@ const allocateGiftCards = async () => {
 const sendDueReminders = async (appOrigin: string) => {
   const now = new Date()
   const nowIso = now.toISOString()
+  const releaseSlotIso = currentTorontoReleaseSlotIso(now)
+  if (!releaseSlotIso) {
+    return {
+      remindersSent: 0,
+      remindersSkipped: 0,
+      reminderFailures: 0,
+      errors: [],
+    }
+  }
 
   const { data: allocations, error: allocationError } = await adminClient
     .from('gift_card_allocation')
-    .select('id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, profile:profile_id(email), asset:gift_card_asset_id(provider, value)')
+    .select('id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, class:class_id(ends_at), profile:profile_id(email), asset:gift_card_asset_id(provider, value)')
     .eq('status', 'allocated')
     .is('reminder_sent_at', null)
 
@@ -260,6 +339,7 @@ const sendDueReminders = async (appOrigin: string) => {
     blocked: boolean
     reminder_sent_at: string | null
     metadata: { release_at?: string | null } | null
+    class: { ends_at: string | null } | Array<{ ends_at: string | null }> | null
     profile: { email: string | null } | Array<{ email: string | null }> | null
     asset: { provider: 'PC' | 'Sobeys'; value: number } | Array<{ provider: 'PC' | 'Sobeys'; value: number }> | null
   }>
@@ -270,14 +350,10 @@ const sendDueReminders = async (appOrigin: string) => {
       continue
     }
 
-    const releaseAt = (row.metadata?.release_at ?? '').trim()
-    if (!releaseAt) {
-      remindersSkipped += 1
-      continue
-    }
-
-    const releaseAtMs = new Date(releaseAt).getTime()
-    if (!Number.isFinite(releaseAtMs) || releaseAtMs > now.getTime()) {
+    const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
+    const expectedReleaseAt = nextReleaseAtIso(classRelation?.ends_at ?? null)
+    const releaseAt = (row.metadata?.release_at ?? '').trim() || expectedReleaseAt || ''
+    if (!releaseAt || releaseAt !== releaseSlotIso) {
       continue
     }
 
