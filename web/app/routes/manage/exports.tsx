@@ -4,6 +4,9 @@ import { Form, redirect, useActionData, useFetcher, useLoaderData, useNavigation
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import { triggerExportRunner } from '@/lib/exports/dispatch.server'
+import { buildClassAttendanceSnapshot } from '@/lib/exports/class-attendance-snapshot.server'
+import { buildEmailMessageSnapshot } from '@/lib/exports/email-message-snapshot.server'
+import { buildFederalElectoralDistrictSnapshot } from '@/lib/exports/federal-electoral-district-snapshot.server'
 import { processExportJobById } from '@/lib/exports/runner.server'
 import {
   createExportJob,
@@ -13,7 +16,12 @@ import {
   setExportJobStatus,
 } from '@/lib/exports/repository.server'
 import { buildWorkshopEnrollmentSnapshot } from '@/lib/exports/workshop-enrollment-snapshot.server'
-import { EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV } from '@/lib/exports/types'
+import {
+  EXPORT_TYPE_CLASS_ATTENDANCE_CSV,
+  EXPORT_TYPE_EMAIL_MESSAGE_CSV,
+  EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV,
+  EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV,
+} from '@/lib/exports/types'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
 
@@ -37,6 +45,29 @@ type ToastState = {
 } | null
 
 const isActiveStatus = (status: string) => status === 'queued' || status === 'running'
+
+const EXPORT_CONFIG = {
+  [EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV]: {
+    sourcePathname: '/manage/workshop-enrollment',
+    sourceTable: 'workshop_enrollment',
+    buildSnapshot: buildWorkshopEnrollmentSnapshot,
+  },
+  [EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV]: {
+    sourcePathname: '/manage/federal-electoral-district',
+    sourceTable: 'federal_electoral_district',
+    buildSnapshot: buildFederalElectoralDistrictSnapshot,
+  },
+  [EXPORT_TYPE_EMAIL_MESSAGE_CSV]: {
+    sourcePathname: '/manage/email-message',
+    sourceTable: 'email_message',
+    buildSnapshot: buildEmailMessageSnapshot,
+  },
+  [EXPORT_TYPE_CLASS_ATTENDANCE_CSV]: {
+    sourcePathname: '/manage/class-attendance',
+    sourceTable: 'class_attendance',
+    buildSnapshot: buildClassAttendanceSnapshot,
+  },
+} as const
 
 const triggerExportRunnerWithFallback = async ({ request, jobId }: { request: Request; jobId: string }) => {
   const triggerResult = await triggerExportRunner({ request })
@@ -93,27 +124,27 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === 'create-export') {
     const exportType = String(formData.get('export_type') ?? '')
     const sourcePath = String(formData.get('source_path') ?? '').trim()
+    const exportConfig = EXPORT_CONFIG[exportType as keyof typeof EXPORT_CONFIG]
 
-    if (exportType !== EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV) {
+    if (!exportConfig) {
       return { error: 'Unsupported export type.' } satisfies ActionData
     }
 
-    if (!sourcePath.startsWith('/manage/workshop-enrollment')) {
+    const sourceUrl = new URL(sourcePath, request.url)
+    if (sourceUrl.pathname !== exportConfig.sourcePathname) {
       return { error: 'Invalid export source path.' } satisfies ActionData
     }
-
-    const sourceUrl = new URL(sourcePath, request.url)
     const sourceRequest = new Request(sourceUrl.toString(), {
       method: 'GET',
       headers: request.headers,
     })
 
-    const snapshot = await buildWorkshopEnrollmentSnapshot({ request: sourceRequest })
+    const snapshot = await exportConfig.buildSnapshot({ request: sourceRequest })
     const job = await createExportJob({
       supabase,
       requestedBy: auth.user.id,
       exportType,
-      sourceTable: 'workshop_enrollment',
+      sourceTable: exportConfig.sourceTable,
       queryParams: snapshot.queryParams,
       filters: snapshot.filters,
       sort: snapshot.sort,

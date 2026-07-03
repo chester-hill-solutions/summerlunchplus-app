@@ -21,6 +21,13 @@ type GiftCardAssetRow = {
   created_at: string
 }
 
+type ProfileRow = {
+  id: string
+  firstname: string | null
+  surname: string | null
+  email: string | null
+}
+
 const TORONTO_TIME_ZONE = 'America/Toronto'
 
 const parseHourMinuteEnv = (name: string, fallback: number) => {
@@ -50,6 +57,15 @@ const mask = (value: string, visibleDigits = 4) => {
   return `${'•'.repeat(Math.max(0, trimmed.length - visibleDigits))}${trimmed.slice(-visibleDigits)}`
 }
 
+const profileDisplay = (profile: ProfileRow | null, fallbackId: string) => {
+  const first = (profile?.firstname ?? '').trim()
+  const last = (profile?.surname ?? '').trim()
+  const full = [first, last].filter(Boolean).join(' ').trim()
+  if (full) return full
+  if (profile?.email?.trim()) return profile.email.trim()
+  return fallbackId ? `Profile ${fallbackId.slice(0, 8)}` : '—'
+}
+
 const formatTorontoClock = (hour: number, minute: number) => {
   const probe = new Date(Date.UTC(2026, 0, 2, hour + 5, minute, 0, 0))
   return new Intl.DateTimeFormat(undefined, {
@@ -76,6 +92,30 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Response(error.message, { status: 500 })
   }
 
+  const assignedProfileIds = Array.from(
+    new Set(
+      ((assets ?? []) as GiftCardAssetRow[])
+        .map(asset => (typeof asset.assigned_profile_id === 'string' ? asset.assigned_profile_id : ''))
+        .filter(Boolean)
+    )
+  )
+
+  const profileById = new Map<string, ProfileRow>()
+  if (assignedProfileIds.length) {
+    const { data: profiles, error: profileError } = await supabase
+      .from('profile')
+      .select('id, firstname, surname, email')
+      .in('id', assignedProfileIds)
+
+    if (profileError) {
+      throw new Response(profileError.message, { status: 500 })
+    }
+
+    for (const profile of (profiles ?? []) as ProfileRow[]) {
+      profileById.set(profile.id, profile)
+    }
+  }
+
   const rows = ((assets ?? []) as GiftCardAssetRow[]).map(asset => ({
     provider: asset.provider,
     account_number: mask(asset.account_number),
@@ -83,7 +123,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     value: formatMoney(asset.value),
     status: asset.status,
     asset_url: asset.asset_url,
-    assigned_profile_id: asset.assigned_profile_id ? asset.assigned_profile_id.slice(0, 8) : '',
+    profile_id: asset.assigned_profile_id ?? '',
+    profile_display: profileDisplay(asset.assigned_profile_id ? profileById.get(asset.assigned_profile_id) ?? null : null, asset.assigned_profile_id ?? ''),
     upload_id: asset.upload_id.slice(0, 8),
     created_at: asset.created_at,
   }))
@@ -96,7 +137,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       release: `Mon/Fri ${formatTorontoClock(RELEASE_HOUR_TORONTO, RELEASE_MINUTE_TORONTO)}`,
       reminder: `Mon/Fri ${formatTorontoClock(REMINDER_HOUR_TORONTO, REMINDER_MINUTE_TORONTO)}`,
     },
-    columns: ['provider', 'account_number', 'pin', 'value', 'status', 'asset_url', 'assigned_profile_id', 'upload_id', 'created_at'],
+    columns: ['provider', 'account_number', 'pin', 'value', 'status', 'asset_url', 'profile_display', 'upload_id', 'created_at'],
     rows,
     columnMeta: {
       provider: { label: 'Provider' },
@@ -105,7 +146,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       value: { label: 'Value' },
       status: { label: 'Status' },
       asset_url: { label: 'Link' },
-      assigned_profile_id: { label: 'Assigned profile' },
+      profile_display: { label: 'Assigned profile' },
       upload_id: { label: 'Upload ID' },
       created_at: { label: 'Created' },
     },

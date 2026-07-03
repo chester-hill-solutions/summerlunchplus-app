@@ -7,6 +7,9 @@ import {
   listExportJobRows,
 } from './repository.server'
 import {
+  EXPORT_TYPE_CLASS_ATTENDANCE_CSV,
+  EXPORT_TYPE_EMAIL_MESSAGE_CSV,
+  EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV,
   EXPORT_DEFAULT_TTL_DAYS,
   EXPORT_STORAGE_BUCKET,
   EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV,
@@ -24,6 +27,13 @@ const WORKSHOP_PROFILE_SPLIT_COLUMNS = [
   'guardian_email',
   'guardian_phone',
 ] as const
+
+const SUPPORTED_EXPORT_TYPES = new Set([
+  EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV,
+  EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV,
+  EXPORT_TYPE_EMAIL_MESSAGE_CSV,
+  EXPORT_TYPE_CLASS_ATTENDANCE_CSV,
+])
 
 const normalizeWorkshopExportColumns = (columns: string[]) => {
   if (!columns.includes('profile_display')) {
@@ -86,7 +96,7 @@ const processClaimedExportJob = async (job: {
 }) => {
 
   try {
-    if (job.export_type !== EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV) {
+    if (!SUPPORTED_EXPORT_TYPES.has(job.export_type)) {
       throw new Error(`Unsupported export type: ${job.export_type}`)
     }
 
