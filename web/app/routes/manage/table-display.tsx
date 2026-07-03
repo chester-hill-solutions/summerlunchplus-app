@@ -116,7 +116,7 @@ type FederalDistrictEnrichmentResponse = {
   byRiding: Record<string, FederalDistrictCounts>
 }
 
-type LoaderData = {
+export type LoaderData = {
   columns: string[]
   rows: Record<string, unknown>[]
   totalRows?: number

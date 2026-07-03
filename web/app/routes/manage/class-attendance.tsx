@@ -1,10 +1,15 @@
 import { requireAuth } from '@/lib/auth.server'
+import { Button } from '@/components/ui/button'
 import { Constants, type Database } from '@/lib/database.types'
+import { EXPORT_TYPE_CLASS_ATTENDANCE_CSV } from '@/lib/exports/types'
 import { resolveIpGeolocation } from '@/lib/geoip.server'
+import { isGiftCardReleasedNow } from '@/lib/gift-cards/release.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import { runZoomJobsForClass } from '@/lib/zoom-jobs/runner.server'
+import { Download } from 'lucide-react'
+import { Form, useLocation } from 'react-router'
 import type { Route } from './+types/class-attendance'
 import TableDisplay from './table-display'
 import { isIP } from 'node:net'
@@ -95,6 +100,7 @@ type GiftCardAllocationRow = {
   first_opened_at: string | null
   last_opened_at: string | null
   open_count: number
+  metadata: { release_at?: string | null } | null
 }
 
 type GiftCardAssetRow = {
@@ -328,7 +334,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
     const { data, error } = await adminClient
       .from('gift_card_allocation')
-      .select('id, class_id, profile_id, gift_card_asset_id, status, blocked, blocked_reason, reminder_sent_at, first_opened_at, last_opened_at, open_count')
+      .select('id, class_id, profile_id, gift_card_asset_id, status, blocked, blocked_reason, reminder_sent_at, first_opened_at, last_opened_at, open_count, metadata')
       .in('class_id', chunk)
 
     if (error) {
@@ -807,6 +813,17 @@ export async function loader({ request }: Route.LoaderArgs) {
     const giftCardAllocation = allocationByClassProfile.get(`${row.class_id}::${row.profile_id}`)
     const giftCardAsset = giftCardAllocation ? assetById.get(giftCardAllocation.gift_card_asset_id) ?? null : null
     const latestGiftCardClick = giftCardAllocation ? latestClickByAllocationId.get(giftCardAllocation.id) ?? null : null
+    const giftCardAllocated = Boolean(giftCardAllocation)
+    const giftCardReminderSent = Boolean(giftCardAllocation?.reminder_sent_at)
+    const giftCardAvailable =
+      giftCardAllocated &&
+      !row.gift_card_blocked &&
+      Boolean(
+        isGiftCardReleasedNow({
+          releaseAt: giftCardAllocation?.metadata?.release_at,
+          classEndsAt: classRow?.ends_at ?? null,
+        })
+      )
     const latestProfileNetwork = latestNetworkByProfileId.get(row.profile_id)
     const registrantReady = Boolean(studentRegistrant?.zoom_registrant_id && studentRegistrant.zoom_join_url)
     const reminderSent = Boolean(studentRegistrant?.last_sent_at)
@@ -896,15 +913,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       latest_sync_error: latestSync?.error_message ?? null,
       giftcard_display: normalizeGiftCardPreference(latestGiftCardPreferenceByTargetProfileId.get(row.profile_id)?.value),
       latest_geo: latestGeo || 'N/A',
-      gift_card_status: row.gift_card_blocked
-        ? 'blocked'
-        : !giftCardAllocation
-          ? 'unallocated'
-          : giftCardAllocation.status === 'opened'
-            ? 'opened'
-            : giftCardAllocation.status === 'sent'
-              ? 'reminder sent'
-              : 'allocated',
+      gift_card_allocated: giftCardAllocated,
+      gift_card_available: giftCardAvailable,
+      gift_card_reminder_sent: giftCardReminderSent,
       gift_card_provider: giftCardAsset?.provider ?? null,
       gift_card_link: giftCardAsset?.asset_url ?? null,
       gift_card_value: giftCardAsset?.value ?? null,
@@ -956,7 +967,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       'step_attendance_sync',
       'latest_geo',
       'giftcard_display',
-      'gift_card_status',
+      'gift_card_allocated',
+      'gift_card_available',
+      'gift_card_reminder_sent',
       'gift_card_provider',
       'gift_card_block_action',
       'gift_card_link',
@@ -1002,7 +1015,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       status: { label: 'Attendance', filterable: true },
       latest_geo: { label: 'Geo', filterable: true, truncate: true },
       giftcard_display: { label: 'Provider', filterable: true, truncate: true },
-      gift_card_status: { label: 'Gift card status', filterable: true },
+      gift_card_allocated: { label: 'Gift allocated', filterable: true },
+      gift_card_available: { label: 'Gift available', filterable: true },
+      gift_card_reminder_sent: { label: 'Gift reminder sent', filterable: true },
       gift_card_provider: { label: 'Gift card provider', filterable: true },
       gift_card_link: { label: 'Gift card link', filterable: true, truncate: true },
       gift_card_value: { label: 'Gift card value', filterable: true },
@@ -1424,5 +1439,21 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function ClassAttendancePage() {
-  return <TableDisplay />
+  const location = useLocation()
+  const sourcePath = `/manage/class-attendance${location.search}`
+
+  return (
+    <TableDisplay
+      paginationActions={
+        <Form method="post" action="/manage/exports" className="flex items-center gap-2">
+          <input type="hidden" name="intent" value="create-export" />
+          <input type="hidden" name="export_type" value={EXPORT_TYPE_CLASS_ATTENDANCE_CSV} />
+          <input type="hidden" name="source_path" value={sourcePath} />
+          <Button type="submit" variant="outline" size="icon-sm" aria-label="Export CSV" title="Export CSV">
+            <Download className="size-4" />
+          </Button>
+        </Form>
+      }
+    />
+  )
 }

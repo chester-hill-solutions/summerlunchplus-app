@@ -13,6 +13,9 @@
 - Signup details route is `/auth/sign-up-details` (with hyphen).
 - `createClient` in `web/app/lib/supabase/server.ts` returns `{ supabase, headers }`; propagate `headers` on redirects/responses or auth cookies are lost.
 - Path aliases `~/` and `@/` both resolve to `web/app/*` (`web/tsconfig.json`).
+- For heavy manage tables that should not block nav (`email-message`, class attendance flows), use a lightweight route loader + client `fetcher.load()` loading state, then fetch full table payload with a query flag (for example `_deferTable=1`).
+- Do not export ad-hoc server helper functions from route modules that also render client components; React Router only strips server code from `loader`/`action`/`headers`/`middleware`, and extra exports can trigger "Server-only module referenced by client" Vite errors.
+- If a manage table must support "all-values" filtering and complete row coverage (for example `email-message`), force a full-scan table loader request (clear `page`/`pageSize`, use unsupported sort sentinel) so filtering runs against the full dataset, not just one page.
 
 ## Local setup and verification
 - First-time local app setup (repo root): `cp web/.env.template web/.env.local` -> `supabase start --debug` -> copy values from `supabase status -o json` into `web/.env.local`.
