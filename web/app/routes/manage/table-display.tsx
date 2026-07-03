@@ -731,6 +731,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     editorConfig,
     foreignKeyOptions = {},
   } = source ?? ({} as LoaderData)
+  const hasStickyTopBar = tableName === 'class-enrollment' || tableName === 'class-attendance'
   const location = useLocation()
 
   const statusFetcher = useFetcher()
@@ -2443,7 +2444,13 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
       {editorFetcher.data?.error ? <p className="px-6 text-sm text-destructive">{editorFetcher.data.error}</p> : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 px-6">
+      <div
+        className={`flex flex-wrap items-center justify-between gap-3 px-6 ${
+          hasStickyTopBar
+            ? 'sticky top-16 z-20 border-y bg-background/95 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+            : ''
+        }`}
+      >
         <p className="text-xs text-muted-foreground">
           Page {effectivePage} of {totalPages}
         </p>
