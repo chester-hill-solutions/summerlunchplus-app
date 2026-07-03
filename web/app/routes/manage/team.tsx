@@ -16,6 +16,8 @@ const STAFF_ALLOWED_MANAGE_PATHS = new Set([
   '/manage/class',
   '/manage/workshop',
   '/manage/workshop/setup',
+  '/manage/gift-cards',
+  '/manage/gift-cards/upload',
 ])
 
 export async function loader({ request }: Route.LoaderArgs) {

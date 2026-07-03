@@ -1,4 +1,4 @@
-import { Link, useLoaderData } from 'react-router'
+import { useLoaderData } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
@@ -74,7 +74,7 @@ export default function GiftCardsPage() {
           <p className="text-sm text-muted-foreground">Inventory of uploaded gift cards and current lifecycle status.</p>
         </div>
         <Button asChild>
-          <Link to="/manage/gift-cards/upload">Upload gift cards</Link>
+          <a href="/manage/gift-cards/upload">Upload gift cards</a>
         </Button>
       </header>
 
