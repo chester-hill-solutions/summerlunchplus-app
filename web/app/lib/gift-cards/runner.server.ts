@@ -28,10 +28,18 @@ const torontoDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
   hourCycle: 'h23',
 })
 
-const RELEASE_HOUR_TORONTO = 11
-const RELEASE_MINUTE_TORONTO = 45
-const REMINDER_HOUR_TORONTO = 12
-const REMINDER_MINUTE_TORONTO = 0
+const parseHourMinuteEnv = (name: string, fallback: number) => {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const isProductionRuntime = process.env.NODE_ENV === 'production'
+const RELEASE_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_RELEASE_HOUR_TORONTO', 11)
+const RELEASE_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_RELEASE_MINUTE_TORONTO', isProductionRuntime ? 45 : 0)
+const REMINDER_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_HOUR_TORONTO', isProductionRuntime ? 12 : 11)
+const REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_MINUTE_TORONTO', isProductionRuntime ? 0 : 15)
 
 const torontoPartsForDate = (date: Date) => {
   const parts = torontoDateTimeFormatter.formatToParts(date)
@@ -94,8 +102,8 @@ const currentTorontoReminderSlotIso = (now: Date) => {
   return slot ? slot.toISOString() : null
 }
 
-const releaseSlotIsoForTorontoDate = (year: number, month: number, day: number) => {
-  const slot = torontoTimeUtcForDate(year, month, day, RELEASE_HOUR_TORONTO, RELEASE_MINUTE_TORONTO)
+const reminderSlotIsoForTorontoDate = (year: number, month: number, day: number) => {
+  const slot = torontoTimeUtcForDate(year, month, day, REMINDER_HOUR_TORONTO, REMINDER_MINUTE_TORONTO)
   return slot ? slot.toISOString() : null
 }
 
@@ -390,7 +398,7 @@ const sendDueReminders = async (appOrigin: string) => {
     }
 
     const releaseToronto = torontoPartsForDate(releaseDate)
-    const reminderSlotForReleaseDate = releaseSlotIsoForTorontoDate(
+    const reminderSlotForReleaseDate = reminderSlotIsoForTorontoDate(
       releaseToronto.year,
       releaseToronto.month,
       releaseToronto.day
