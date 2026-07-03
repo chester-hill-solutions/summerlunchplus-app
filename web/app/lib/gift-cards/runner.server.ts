@@ -28,6 +28,11 @@ const torontoDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
   hourCycle: 'h23',
 })
 
+const RELEASE_HOUR_TORONTO = 11
+const RELEASE_MINUTE_TORONTO = 45
+const REMINDER_HOUR_TORONTO = 12
+const REMINDER_MINUTE_TORONTO = 0
+
 const torontoPartsForDate = (date: Date) => {
   const parts = torontoDateTimeFormatter.formatToParts(date)
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? ''
@@ -50,16 +55,16 @@ const addDaysToDateParts = (year: number, month: number, day: number, daysAhead:
   }
 }
 
-const torontoNoonUtcForDate = (year: number, month: number, day: number) => {
+const torontoTimeUtcForDate = (year: number, month: number, day: number, hour: number, minute: number) => {
   for (const utcHour of [16, 17, 15, 18]) {
-    const candidate = new Date(Date.UTC(year, month - 1, day, utcHour, 0, 0, 0))
+    const candidate = new Date(Date.UTC(year, month - 1, day, utcHour, minute, 0, 0))
     const toronto = torontoPartsForDate(candidate)
     if (
       toronto.year === year &&
       toronto.month === month &&
       toronto.day === day &&
-      toronto.hour === 12 &&
-      toronto.minute === 0
+      toronto.hour === hour &&
+      toronto.minute === minute
     ) {
       return candidate
     }
@@ -68,13 +73,29 @@ const torontoNoonUtcForDate = (year: number, month: number, day: number) => {
   return null
 }
 
-const currentTorontoReleaseSlotIso = (now: Date) => {
+const currentTorontoReminderSlotIso = (now: Date) => {
   const toronto = torontoPartsForDate(now)
-  if ((toronto.weekday !== 'Mon' && toronto.weekday !== 'Fri') || toronto.hour !== 12 || toronto.minute >= 5) {
+  if (
+    (toronto.weekday !== 'Mon' && toronto.weekday !== 'Fri') ||
+    toronto.hour !== REMINDER_HOUR_TORONTO ||
+    toronto.minute < REMINDER_MINUTE_TORONTO ||
+    toronto.minute >= REMINDER_MINUTE_TORONTO + 5
+  ) {
     return null
   }
 
-  const slot = torontoNoonUtcForDate(toronto.year, toronto.month, toronto.day)
+  const slot = torontoTimeUtcForDate(
+    toronto.year,
+    toronto.month,
+    toronto.day,
+    REMINDER_HOUR_TORONTO,
+    REMINDER_MINUTE_TORONTO
+  )
+  return slot ? slot.toISOString() : null
+}
+
+const releaseSlotIsoForTorontoDate = (year: number, month: number, day: number) => {
+  const slot = torontoTimeUtcForDate(year, month, day, RELEASE_HOUR_TORONTO, RELEASE_MINUTE_TORONTO)
   return slot ? slot.toISOString() : null
 }
 
@@ -93,7 +114,13 @@ const nextReleaseAtIso = (classEndsAt: string | null) => {
     const weekday = new Date(Date.UTC(localDate.year, localDate.month - 1, localDate.day)).getUTCDay()
     if (weekday !== 1 && weekday !== 5) continue
 
-    const candidate = torontoNoonUtcForDate(localDate.year, localDate.month, localDate.day)
+    const candidate = torontoTimeUtcForDate(
+      localDate.year,
+      localDate.month,
+      localDate.day,
+      RELEASE_HOUR_TORONTO,
+      RELEASE_MINUTE_TORONTO
+    )
     if (!candidate) continue
     if (candidate.getTime() < end.getTime()) continue
     return candidate.toISOString()
@@ -305,8 +332,8 @@ const allocateGiftCards = async () => {
 const sendDueReminders = async (appOrigin: string) => {
   const now = new Date()
   const nowIso = now.toISOString()
-  const releaseSlotIso = currentTorontoReleaseSlotIso(now)
-  if (!releaseSlotIso) {
+  const reminderSlotIso = currentTorontoReminderSlotIso(now)
+  if (!reminderSlotIso) {
     return {
       remindersSent: 0,
       remindersSkipped: 0,
@@ -353,7 +380,22 @@ const sendDueReminders = async (appOrigin: string) => {
     const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
     const expectedReleaseAt = nextReleaseAtIso(classRelation?.ends_at ?? null)
     const releaseAt = (row.metadata?.release_at ?? '').trim() || expectedReleaseAt || ''
-    if (!releaseAt || releaseAt !== releaseSlotIso) {
+    if (!releaseAt) {
+      continue
+    }
+
+    const releaseDate = new Date(releaseAt)
+    if (!Number.isFinite(releaseDate.getTime()) || releaseDate.getTime() > now.getTime()) {
+      continue
+    }
+
+    const releaseToronto = torontoPartsForDate(releaseDate)
+    const reminderSlotForReleaseDate = releaseSlotIsoForTorontoDate(
+      releaseToronto.year,
+      releaseToronto.month,
+      releaseToronto.day
+    )
+    if (!reminderSlotForReleaseDate || reminderSlotForReleaseDate !== reminderSlotIso) {
       continue
     }
 
