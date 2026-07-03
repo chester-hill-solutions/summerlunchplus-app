@@ -1,4 +1,5 @@
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
+import { nextReleaseAtIso } from '@/lib/gift-cards/release.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
 
@@ -36,8 +37,6 @@ const parseHourMinuteEnv = (name: string, fallback: number) => {
 }
 
 const isProductionRuntime = process.env.NODE_ENV === 'production'
-const RELEASE_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_RELEASE_HOUR_TORONTO', 11)
-const RELEASE_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_RELEASE_MINUTE_TORONTO', isProductionRuntime ? 45 : 0)
 const REMINDER_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_HOUR_TORONTO', isProductionRuntime ? 12 : 11)
 const REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_MINUTE_TORONTO', isProductionRuntime ? 0 : 15)
 
@@ -51,15 +50,6 @@ const torontoPartsForDate = (date: Date) => {
     day: Number.parseInt(get('day'), 10),
     hour: Number.parseInt(get('hour'), 10),
     minute: Number.parseInt(get('minute'), 10),
-  }
-}
-
-const addDaysToDateParts = (year: number, month: number, day: number, daysAhead: number) => {
-  const next = new Date(Date.UTC(year, month - 1, day + daysAhead))
-  return {
-    year: next.getUTCFullYear(),
-    month: next.getUTCMonth() + 1,
-    day: next.getUTCDate(),
   }
 }
 
@@ -105,36 +95,6 @@ const currentTorontoReminderSlotIso = (now: Date) => {
 const reminderSlotIsoForTorontoDate = (year: number, month: number, day: number) => {
   const slot = torontoTimeUtcForDate(year, month, day, REMINDER_HOUR_TORONTO, REMINDER_MINUTE_TORONTO)
   return slot ? slot.toISOString() : null
-}
-
-const nextReleaseAtIso = (classEndsAt: string | null) => {
-  if (!classEndsAt) return null
-  const end = new Date(classEndsAt)
-  if (!Number.isFinite(end.getTime())) return null
-
-  const torontoEnd = torontoPartsForDate(end)
-  if (!Number.isFinite(torontoEnd.year) || !Number.isFinite(torontoEnd.month) || !Number.isFinite(torontoEnd.day)) {
-    return null
-  }
-
-  for (let daysAhead = 0; daysAhead <= 21; daysAhead += 1) {
-    const localDate = addDaysToDateParts(torontoEnd.year, torontoEnd.month, torontoEnd.day, daysAhead)
-    const weekday = new Date(Date.UTC(localDate.year, localDate.month - 1, localDate.day)).getUTCDay()
-    if (weekday !== 1 && weekday !== 5) continue
-
-    const candidate = torontoTimeUtcForDate(
-      localDate.year,
-      localDate.month,
-      localDate.day,
-      RELEASE_HOUR_TORONTO,
-      RELEASE_MINUTE_TORONTO
-    )
-    if (!candidate) continue
-    if (candidate.getTime() < end.getTime()) continue
-    return candidate.toISOString()
-  }
-
-  return null
 }
 
 const resolveRecipientEmail = async (profileId: string, fallbackEmail: string | null) => {

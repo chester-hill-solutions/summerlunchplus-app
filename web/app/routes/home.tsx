@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
+import { isGiftCardReleasedNow } from '@/lib/gift-cards/release.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
@@ -251,6 +252,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     acc[classRow.workshop_id].push(classRow)
     return acc
   }, {})
+  const classEndsAtById = Object.fromEntries(classes.map(classRow => [classRow.id, classRow.ends_at])) as Record<string, string>
 
   const classIds = classes.map(classRow => classRow.id)
 
@@ -365,9 +367,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     metadata: { release_at?: string | null } | null
   }>).reduce<Record<string, string>>((acc, row) => {
     if (row.blocked) return acc
-    const releaseAt = (row.metadata?.release_at ?? '').trim()
-    const releaseAtMs = Date.parse(releaseAt)
-    const released = Number.isFinite(releaseAtMs) && releaseAtMs <= Date.now()
+    const released = isGiftCardReleasedNow({
+      releaseAt: row.metadata?.release_at,
+      classEndsAt: classEndsAtById[row.class_id] ?? null,
+      now,
+    })
     const availableByReminder = Boolean(row.reminder_sent_at && (row.status === 'sent' || row.status === 'opened'))
     if (!released && !availableByReminder) return acc
     const selectedProfileId = selectedProfileIdByClass[row.class_id]
