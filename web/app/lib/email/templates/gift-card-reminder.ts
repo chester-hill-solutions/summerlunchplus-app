@@ -9,21 +9,21 @@ const escapeHtml = (value: string) =>
 export type GiftCardReminderTemplateData = {
   provider: 'PC' | 'Sobeys'
   amount: number
-  redemptionUrl: string
+  hubUrl: string
 }
 
 export const renderGiftCardReminderEmail = ({
   provider,
   amount,
-  redemptionUrl,
+  hubUrl,
 }: GiftCardReminderTemplateData) => {
   const safeProvider = escapeHtml(provider)
-  const safeUrl = escapeHtml(redemptionUrl)
+  const safeUrl = escapeHtml(hubUrl)
   const amountLabel = Number.isFinite(amount) ? amount.toFixed(2) : '0.00'
 
   return {
     subject: `Your ${safeProvider} gift card is ready`,
-    text: `Your ${safeProvider} gift card ($${amountLabel}) is now available. Open your gift card link: ${redemptionUrl}`,
+    text: `Your ${safeProvider} gift card ($${amountLabel}) is now available. Sign in to SummerLunch Plus Hub to view your gift card: ${hubUrl}`,
     html: `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background-color:#f6f8fb;">
@@ -40,7 +40,8 @@ export const renderGiftCardReminderEmail = ({
               <td style="padding:8px 24px 24px 24px;font-family:Arial,sans-serif;color:#1f2937;font-size:16px;line-height:24px;">
                 <p style="margin:0 0 12px 0;">Your <strong>${safeProvider}</strong> gift card is ready.</p>
                 <p style="margin:0 0 16px 0;">Card value: <strong>$${amountLabel}</strong></p>
-                <p style="margin:0;"><a href="${safeUrl}">Open gift card</a></p>
+                <p style="margin:0 0 12px 0;">Sign in to SummerLunch Plus Hub to view your gift card.</p>
+                <p style="margin:0;"><a href="${safeUrl}">Sign in to hub.summerlunchplus.com</a></p>
               </td>
             </tr>
           </table>

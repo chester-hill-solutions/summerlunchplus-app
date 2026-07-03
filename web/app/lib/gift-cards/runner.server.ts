@@ -37,6 +37,26 @@ const parseHourMinuteEnv = (name: string, fallback: number) => {
 }
 
 const isProductionRuntime = process.env.NODE_ENV === 'production'
+const ensureOrigin = (origin: string) => origin.replace(/\/+$/, '')
+
+const resolvePublicHubOrigin = (fallbackOrigin: string) => {
+  const railwayPublicDomain = (process.env.RAILWAY_PUBLIC_DOMAIN ?? '').trim()
+  const railwayPublicOrigin = railwayPublicDomain ? `https://${railwayPublicDomain}` : ''
+  const explicitOrigin = [
+    process.env.SITE_ORIGIN,
+    process.env.PUBLIC_APP_ORIGIN,
+    process.env.APP_BASE_URL,
+    railwayPublicOrigin,
+    process.env.VITE_PUBLIC_APP_ORIGIN,
+    process.env.VITE_APP_ORIGIN,
+  ]
+    .map(value => (value ?? '').trim())
+    .find(Boolean)
+  if (explicitOrigin) return ensureOrigin(explicitOrigin)
+  if (isProductionRuntime) return 'https://hub.summerlunchplus.com'
+  return ensureOrigin(fallbackOrigin)
+}
+
 const REMINDER_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_HOUR_TORONTO', isProductionRuntime ? 12 : 11)
 const REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_MINUTE_TORONTO', isProductionRuntime ? 0 : 15)
 
@@ -300,6 +320,8 @@ const allocateGiftCards = async () => {
 const sendDueReminders = async (appOrigin: string) => {
   const now = new Date()
   const nowIso = now.toISOString()
+  const publicHubOrigin = resolvePublicHubOrigin(appOrigin)
+  const hubUrl = `${publicHubOrigin}/home`
   const reminderSlotIso = currentTorontoReminderSlotIso(now)
   if (!reminderSlotIso) {
     return {
@@ -376,7 +398,6 @@ const sendDueReminders = async (appOrigin: string) => {
 
     const token = newGlrToken()
     const tokenHash = hashGlrToken(token)
-    const glrUrl = `${appOrigin}/glr/${token}`
     const eventKey = `gift-card-reminder:${row.id}`
     const assetRelation = Array.isArray(row.asset) ? row.asset[0] : row.asset
 
@@ -386,7 +407,7 @@ const sendDueReminders = async (appOrigin: string) => {
       templateData: {
         provider: assetRelation?.provider ?? 'PC',
         amount: Number(assetRelation?.value ?? 0),
-        redemptionUrl: glrUrl,
+        hubUrl,
       },
       profileId: row.profile_id,
       eventKey,
