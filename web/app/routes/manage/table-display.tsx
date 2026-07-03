@@ -790,7 +790,9 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [attendanceModalPhotoStatus, setAttendanceModalPhotoStatus] = useState('')
   const [attendanceModalInitialPhotoStatus, setAttendanceModalInitialPhotoStatus] = useState('')
   const [attendanceModalSavingStatus, setAttendanceModalSavingStatus] = useState(false)
+  const isClassAttendance = tableName === 'class-attendance'
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
+  const supportsFamilyContextHover = isWorkshopEnrollmentTable || isClassAttendance
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
   const serverSideQuery = Boolean(source?.serverSideQuery)
   const giftCardOptions = Array.isArray(source?.giftCardOptions)
@@ -816,7 +818,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     return rows.map(row => {
       let nextRow = row
 
-      if (isWorkshopEnrollmentTable) {
+      if (supportsFamilyContextHover) {
         const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
         const enrichment = profileId ? enrichmentByProfileId[profileId] : null
         if (enrichment) {
@@ -843,7 +845,13 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
       return nextRow
     })
-  }, [districtCountsByRiding, enrichmentByProfileId, isFederalDistrictTable, isWorkshopEnrollmentTable, rows])
+  }, [
+    districtCountsByRiding,
+    enrichmentByProfileId,
+    isFederalDistrictTable,
+    rows,
+    supportsFamilyContextHover,
+  ])
 
   useEffect(() => {
     const nextSort = searchParams.get('sort')
@@ -1718,7 +1726,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   }
 
   const requestFamilyContextForProfile = (profileId: string) => {
-    if (!isWorkshopEnrollmentTable || !profileId) return
+    if (!supportsFamilyContextHover || !profileId) return
     const existing = enrichmentByProfileId[profileId]
     if (hasHydratedFamilyContext(existing) || loadingEnrichmentProfileIdsRef.current.has(profileId)) return
 
@@ -1819,7 +1827,6 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     })
   }
 
-  const isClassAttendance = tableName === 'class-attendance'
   const isWorkshopEnrollment = isWorkshopEnrollmentTable
   const canInlineInsert = Boolean(editorConfig?.allowInsert)
   const canInlineUpdate = Boolean(editorConfig?.allowUpdate)
@@ -3050,7 +3057,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                             appendFilter(column, row)
                           }}
                           onMouseEnter={() => {
-                            if (!isWorkshopEnrollment || column !== 'profile_display') return
+                            if (!supportsFamilyContextHover || column !== 'profile_display') return
                             const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
                             if (!profileId) return
                             requestFamilyContextForProfile(profileId)

@@ -1,6 +1,7 @@
 import { requireAuth } from '@/lib/auth.server'
 import { Button } from '@/components/ui/button'
 import { Constants, type Database } from '@/lib/database.types'
+import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { EXPORT_TYPE_CLASS_ATTENDANCE_CSV } from '@/lib/exports/types'
 import { resolveIpGeolocation } from '@/lib/geoip.server'
 import { isGiftCardReleasedNow } from '@/lib/gift-cards/release.server'
@@ -238,6 +239,21 @@ const normalizeGiftCardPreference = (value: string | null | undefined) => {
   if (normalized.includes('sobeys')) return 'Sobeys'
   if (normalized.includes('pc') || normalized.includes('president')) return 'PC'
   return value?.trim() || 'N/A'
+}
+
+const fallbackProfileHoverContext = {
+  profile_hover_top_discrepancy: '',
+  profile_hover_more_discrepancies: '',
+  profile_hover_name: 'N/A',
+  profile_hover_parent_name: 'N/A',
+  profile_hover_email: 'N/A',
+  profile_hover_student_phone: '',
+  profile_hover_parent_email: 'N/A',
+  profile_hover_parent_phone: 'N/A',
+  profile_hover_student_geo: 'N/A',
+  profile_hover_parent_geo: 'N/A',
+  profile_hover_student_submitted_address: 'N/A',
+  profile_hover_parent_address: 'N/A',
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -727,6 +743,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const classById = new Map(classes.map(row => [row.id, row]))
   const workshopById = new Map(workshopRows.map(row => [row.id, row]))
   const profileRowsTyped = [...profilesByIdRows, ...profilesByUserRows]
+  const familyContextByProfileId = profileIds.length ? await loadFamilyContextByProfileIds(profileIds) : {}
   const profileById = new Map(profileRowsTyped.map(row => [row.id, row]))
   const profileByUserId = new Map(
     profileRowsTyped
@@ -796,6 +813,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     const classRow = classById.get(row.class_id) ?? null
     const workshop = classRow?.workshop_id ? workshopById.get(classRow.workshop_id) ?? null : null
     const profile = profileById.get(row.profile_id) ?? null
+    const profileHoverContext = {
+      ...fallbackProfileHoverContext,
+      ...(familyContextByProfileId[row.profile_id] ?? {}),
+    }
     const meeting = meetingByClassId.get(row.class_id) ?? null
     const registrants = registrantsByClassId.get(row.class_id) ?? []
 
@@ -815,6 +836,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     const latestGiftCardClick = giftCardAllocation ? latestClickByAllocationId.get(giftCardAllocation.id) ?? null : null
     const giftCardAllocated = Boolean(giftCardAllocation)
     const giftCardReminderSent = Boolean(giftCardAllocation?.reminder_sent_at)
+    const giftCardLinkOpened =
+      Boolean(giftCardAllocation?.first_opened_at) ||
+      Boolean(giftCardAllocation?.last_opened_at) ||
+      Number(giftCardAllocation?.open_count ?? 0) > 0 ||
+      giftCardAllocation?.status === 'opened'
     const giftCardAvailable =
       giftCardAllocated &&
       !row.gift_card_blocked &&
@@ -889,6 +915,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     return {
       ...row,
+      ...profileHoverContext,
       workshop_description: workshop?.description ?? 'Workshop',
       class_starts_at: classRow?.starts_at ?? null,
       class_ends_at: classRow?.ends_at ?? null,
@@ -916,6 +943,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       gift_card_allocated: giftCardAllocated,
       gift_card_available: giftCardAvailable,
       gift_card_reminder_sent: giftCardReminderSent,
+      gift_card_link_opened: giftCardLinkOpened,
       gift_card_provider: giftCardAsset?.provider ?? null,
       gift_card_join_url: giftCardAsset?.asset_url ?? null,
       gift_card_value: giftCardAsset?.value ?? null,
@@ -970,6 +998,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       'gift_card_allocated',
       'gift_card_available',
       'gift_card_reminder_sent',
+      'gift_card_link_opened',
       'gift_card_provider',
       'gift_card_block_action',
       'gift_card_join_url',
@@ -1011,13 +1040,42 @@ export async function loader({ request }: Route.LoaderArgs) {
       workshop_description: { label: 'Workshop', filterable: true, fitContentOnLoad: true },
       class_starts_at: { label: 'Class starts', filterable: true, fitContentOnLoad: true },
       class_ends_at: { label: 'Class ends', filterable: true },
-      profile_display: { label: 'Profile', filterable: true, fitContentOnLoad: true },
+      profile_display: {
+        label: 'Profile',
+        filterable: true,
+        fitContentOnLoad: true,
+        hoverCard: {
+          titleField: 'profile_hover_name',
+          titleFallback: 'N/A',
+          columns: {
+            rightTitleField: 'profile_hover_parent_name',
+            rightTitleFallback: 'Parent',
+            left: [
+              { label: '', field: 'profile_hover_email', fallback: '' },
+              { label: '', field: 'profile_hover_student_phone', fallback: '' },
+              { label: '', field: 'profile_hover_student_geo', fallback: '' },
+              { label: '', field: 'profile_hover_student_submitted_address', fallback: '' },
+            ],
+            right: [
+              { label: '', field: 'profile_hover_parent_email', fallback: '' },
+              { label: '', field: 'profile_hover_parent_phone', fallback: '' },
+              { label: '', field: 'profile_hover_parent_geo', fallback: '' },
+              { label: '', field: 'profile_hover_parent_address', fallback: '' },
+            ],
+          },
+          fields: [
+            { label: 'Top Discrepancy', field: 'profile_hover_top_discrepancy' },
+            { label: 'More Open', field: 'profile_hover_more_discrepancies' },
+          ],
+        },
+      },
       status: { label: 'Attendance', filterable: true },
       latest_geo: { label: 'Geo', filterable: true, truncate: true },
       giftcard_display: { label: 'Provider', filterable: true, truncate: true },
       gift_card_allocated: { label: 'Gift allocated', filterable: true },
       gift_card_available: { label: 'Gift available', filterable: true },
       gift_card_reminder_sent: { label: 'Gift reminder sent', filterable: true },
+      gift_card_link_opened: { label: 'Gift link opened', filterable: true },
       gift_card_provider: { label: 'Gift card provider', filterable: true },
       gift_card_join_url: { label: 'Gift card link', filterable: true, truncate: true },
       gift_card_value: { label: 'Gift card value', filterable: true },
