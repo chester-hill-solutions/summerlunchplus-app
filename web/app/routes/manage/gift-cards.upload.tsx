@@ -160,6 +160,7 @@ export async function action({ request }: Route.ActionArgs) {
 export default function GiftCardsUploadPage() {
   const fetcher = useFetcher<typeof action>()
   const error = fetcher.data?.error
+  const success = Boolean((fetcher.data as { success?: boolean } | undefined)?.success)
   const loading = fetcher.state === 'submitting'
   const [csvHeaders, setCsvHeaders] = useState<string[]>([])
   const [mappingByColumn, setMappingByColumn] = useState<Record<ExpectedColumnKey, string>>({
@@ -261,6 +262,7 @@ export default function GiftCardsUploadPage() {
           </div>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
+          {success && <p className="text-sm text-emerald-600">Upload complete.</p>}
 
           <Button type="submit" disabled={loading}>
             {loading ? 'Uploading...' : 'Upload batch'}

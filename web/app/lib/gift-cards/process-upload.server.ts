@@ -118,14 +118,22 @@ export const processGiftCardUpload = async ({
   defaultProvider,
 }: ProcessUploadInput): Promise<ProcessUploadResult> => {
   try {
-    const rawBuffer = await uploadRawFile(supabase, uploadId, file)
-
     if (uploadType !== 'csv_link') {
       return {
         totalCards: 0,
         processedCards: 0,
         errorMessage: 'Only CSV uploads are supported.',
       }
+    }
+
+    const rawBuffer = await file.arrayBuffer()
+    try {
+      await uploadRawFile(supabase, uploadId, file)
+    } catch (error) {
+      console.warn('[gift-cards] raw CSV storage upload failed; continuing with parsed upload', {
+        uploadId,
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
 
     const { assets, errors } = await processCsvUpload(
