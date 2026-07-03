@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
-import { Link, useFetcher } from 'react-router'
+import { Link, redirect, useFetcher } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -159,9 +159,7 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: result.errorMessage }
   }
 
-  return new Response(JSON.stringify({ success: true }), {
-    headers: { ...headers, 'Content-Type': 'application/json' },
-  })
+  return redirect('/manage/gift-cards', { headers })
 }
 
 export default function GiftCardsUploadPage() {
