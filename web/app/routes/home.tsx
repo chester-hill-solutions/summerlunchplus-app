@@ -350,7 +350,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { data: allocationRowsRaw } = classIds.length
     ? await adminClient
         .from('gift_card_allocation')
-        .select('id, class_id, profile_id, status, blocked, reminder_sent_at')
+        .select('id, class_id, profile_id, status, blocked, reminder_sent_at, metadata')
         .in('class_id', classIds)
         .in('profile_id', family.familyProfileIds)
     : { data: [] }
@@ -362,10 +362,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     status: 'allocated' | 'sent' | 'opened'
     blocked: boolean
     reminder_sent_at: string | null
+    metadata: { release_at?: string | null } | null
   }>).reduce<Record<string, string>>((acc, row) => {
     if (row.blocked) return acc
-    if (!row.reminder_sent_at) return acc
-    if (row.status !== 'sent' && row.status !== 'opened') return acc
+    const releaseAt = (row.metadata?.release_at ?? '').trim()
+    const releaseAtMs = Date.parse(releaseAt)
+    const released = Number.isFinite(releaseAtMs) && releaseAtMs <= Date.now()
+    const availableByReminder = Boolean(row.reminder_sent_at && (row.status === 'sent' || row.status === 'opened'))
+    if (!released && !availableByReminder) return acc
     const selectedProfileId = selectedProfileIdByClass[row.class_id]
     if (!selectedProfileId || selectedProfileId !== row.profile_id) return acc
     acc[row.class_id] = `/glr/${row.id}`

@@ -25,7 +25,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const tokenHash = hashGlrToken(token)
   const { data: allocationByHash, error: allocationError } = await adminClient
     .from('gift_card_allocation')
-    .select('id, profile_id, blocked, status, gift_card_asset_id, asset:gift_card_asset_id(asset_url)')
+    .select('id, profile_id, blocked, status, metadata, gift_card_asset_id, asset:gift_card_asset_id(asset_url)')
     .eq('glr_token_hash', tokenHash)
     .maybeSingle()
 
@@ -42,13 +42,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!allocation && isUuidToken) {
     const { data: allocationById } = await adminClient
       .from('gift_card_allocation')
-      .select('id, profile_id, blocked, status, gift_card_asset_id, asset:gift_card_asset_id(asset_url)')
+      .select('id, profile_id, blocked, status, metadata, gift_card_asset_id, asset:gift_card_asset_id(asset_url)')
       .eq('id', token)
       .maybeSingle()
     allocation = allocationById
   }
 
-  if (!allocation || allocation.blocked || allocation.status === 'allocated') {
+  const releaseAt = (allocation?.metadata?.release_at ?? '').trim()
+  const releaseAtMs = Date.parse(releaseAt)
+  const released = Number.isFinite(releaseAtMs) && releaseAtMs <= Date.now()
+
+  if (!allocation || allocation.blocked || (allocation.status === 'allocated' && !released)) {
     return invalidLink({ request })
   }
 
