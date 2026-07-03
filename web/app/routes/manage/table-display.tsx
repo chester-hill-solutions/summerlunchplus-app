@@ -731,7 +731,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     editorConfig,
     foreignKeyOptions = {},
   } = source ?? ({} as LoaderData)
-  const hasStickyTopBar = tableName === 'class-enrollment' || tableName === 'class-attendance'
+  const hasStickyTopBar =
+    tableName === 'class-enrollment' ||
+    tableName === 'workshop-enrollment' ||
+    tableName === 'class-attendance'
   const location = useLocation()
 
   const statusFetcher = useFetcher()

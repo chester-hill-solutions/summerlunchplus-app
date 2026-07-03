@@ -3,6 +3,7 @@ import { redirect, type LoaderFunctionArgs } from 'react-router'
 import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 
+import { isGiftCardReleasedNow } from '@/lib/gift-cards/release.server'
 import { hashGlrToken } from '@/lib/gift-cards/token.server'
 
 const homeMessageRedirect = ({ request, message }: { request: Request; message: string }) => {
@@ -25,7 +26,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const tokenHash = hashGlrToken(token)
   const { data: allocationByHash, error: allocationError } = await adminClient
     .from('gift_card_allocation')
-    .select('id, profile_id, blocked, status, metadata, gift_card_asset_id, asset:gift_card_asset_id(asset_url)')
+    .select('id, profile_id, blocked, status, metadata, class_id, gift_card_asset_id, asset:gift_card_asset_id(asset_url), class:class_id(ends_at)')
     .eq('glr_token_hash', tokenHash)
     .maybeSingle()
 
@@ -42,15 +43,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!allocation && isUuidToken) {
     const { data: allocationById } = await adminClient
       .from('gift_card_allocation')
-      .select('id, profile_id, blocked, status, metadata, gift_card_asset_id, asset:gift_card_asset_id(asset_url)')
+      .select('id, profile_id, blocked, status, metadata, class_id, gift_card_asset_id, asset:gift_card_asset_id(asset_url), class:class_id(ends_at)')
       .eq('id', token)
       .maybeSingle()
     allocation = allocationById
   }
 
-  const releaseAt = (allocation?.metadata?.release_at ?? '').trim()
-  const releaseAtMs = Date.parse(releaseAt)
-  const released = Number.isFinite(releaseAtMs) && releaseAtMs <= Date.now()
+  const classRelation = allocation?.class
+  const released = isGiftCardReleasedNow({
+    releaseAt: allocation?.metadata?.release_at,
+    classEndsAt: (Array.isArray(classRelation) ? classRelation[0] : classRelation)?.ends_at ?? null,
+  })
 
   if (!allocation || allocation.blocked || (allocation.status === 'allocated' && !released)) {
     return invalidLink({ request })
