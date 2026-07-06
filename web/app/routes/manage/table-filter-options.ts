@@ -1,10 +1,33 @@
 import { createClient } from '@/lib/supabase/server'
+import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { TABLE_DEFINITIONS } from './table-definitions'
 import { createTableLoader } from './table-loader'
+import { loadWorkshopEnrollmentEnrichment } from './workshop-enrollment-enrichment.server'
 import type { LoaderFunctionArgs } from 'react-router'
 
 const FETCH_BATCH_SIZE = 1000
 const FILTER_EMPTY_TOKEN = '__none__'
+const CLASS_ENROLLMENT_WORKSHOP_ENRICHMENT_COLUMNS = new Set([
+  'riding_display',
+  'geo_locations_display',
+  'giftcard_display',
+  'prior_participation_display',
+])
+const CLASS_ENROLLMENT_FAMILY_CONTEXT_COLUMNS = new Set([
+  'prior_participation_display',
+  'profile_hover_top_discrepancy',
+  'profile_hover_more_discrepancies',
+  'profile_hover_name',
+  'profile_hover_parent_name',
+  'profile_hover_email',
+  'profile_hover_student_phone',
+  'profile_hover_parent_email',
+  'profile_hover_parent_phone',
+  'profile_hover_student_geo',
+  'profile_hover_parent_geo',
+  'profile_hover_student_submitted_address',
+  'profile_hover_parent_address',
+])
 
 type ParsedFilter = {
   values: string[]
@@ -141,6 +164,59 @@ const loadAllRowsViaTableLoader = async (
   return payload.rows as Record<string, unknown>[]
 }
 
+const hydrateClassEnrollmentRows = async (
+  rows: Record<string, unknown>[],
+  requestedColumns: Set<string>
+) => {
+  const profileIds = Array.from(
+    new Set(
+      rows
+        .map(row => (typeof row.profile_id === 'string' ? row.profile_id : ''))
+        .filter(Boolean)
+    )
+  )
+  if (!profileIds.length) {
+    return rows
+  }
+
+  const shouldLoadWorkshopEnrichment = Array.from(requestedColumns).some(column =>
+    CLASS_ENROLLMENT_WORKSHOP_ENRICHMENT_COLUMNS.has(column)
+  )
+  const shouldLoadFamilyContext = Array.from(requestedColumns).some(column =>
+    CLASS_ENROLLMENT_FAMILY_CONTEXT_COLUMNS.has(column)
+  )
+
+  const [workshopEnrichmentByProfileId, familyContextByProfileId] = await Promise.all([
+    shouldLoadWorkshopEnrichment
+      ? loadWorkshopEnrollmentEnrichment(profileIds)
+      : Promise.resolve({} as Awaited<ReturnType<typeof loadWorkshopEnrollmentEnrichment>>),
+    shouldLoadFamilyContext
+      ? loadFamilyContextByProfileIds(profileIds)
+      : Promise.resolve({} as Awaited<ReturnType<typeof loadFamilyContextByProfileIds>>),
+  ])
+
+  return rows.map(row => {
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!profileId) {
+      return row
+    }
+
+    const workshopValues = workshopEnrichmentByProfileId[profileId] ?? {
+      riding_display: 'Not looked up',
+      geo_locations_display: 'N/A',
+      giftcard_display: 'N/A',
+      prior_participation_display: 'N/A',
+    }
+    const familyValues = familyContextByProfileId[profileId] ?? {}
+
+    return {
+      ...row,
+      ...workshopValues,
+      ...familyValues,
+    }
+  })
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const tableName = (url.searchParams.get('table') ?? '').trim()
@@ -173,7 +249,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (hasUnsupportedFilter || hasMixedEmptyAndExplicit || !isSelectableColumn) {
     try {
-      const rows = await loadAllRowsViaTableLoader(request, tableName)
+      let rows = await loadAllRowsViaTableLoader(request, tableName)
+      if (tableName === 'class-enrollment') {
+        const requestedColumns = new Set<string>([
+          column,
+          ...Object.keys(parsedFilters),
+        ])
+        const needsHydration = Array.from(requestedColumns).some(
+          requestedColumn =>
+            CLASS_ENROLLMENT_WORKSHOP_ENRICHMENT_COLUMNS.has(requestedColumn) ||
+            CLASS_ENROLLMENT_FAMILY_CONTEXT_COLUMNS.has(requestedColumn)
+        )
+        if (needsHydration) {
+          rows = await hydrateClassEnrollmentRows(rows, requestedColumns)
+        }
+      }
       const options = sortFilterOptions(
         rows
           .filter(row => rowMatchesFilters(row, parsedFilters, column))
