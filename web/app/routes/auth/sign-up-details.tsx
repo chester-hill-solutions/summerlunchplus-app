@@ -12,6 +12,7 @@ import {
 import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import type { Database, Json } from '@/lib/database.types'
 import { normalizeEmail } from '@/lib/email-domain'
+import { loadSubmissionAnswerState } from '@/lib/form-submission-answers.server'
 import { getProfileSignUpCompletionWithContext } from '@/lib/onboarding.server'
 import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import { ridingLookupProvider } from '@/lib/riding-lookup.server'
@@ -192,30 +193,6 @@ const parseFormValue = (question: FormQuestionData, formData: FormData) => {
   return rawValue
 }
 
-const buildAnswerMapFromSubmissions = (
-  submissions: Array<{
-    form_id: string | null
-    submitted_at: string | null
-    form_answer: Array<{ question_code: string | null; value: Json }> | null
-  }>
-) => {
-  const answers: Record<string, Json> = {}
-  const byForm: Record<string, Record<string, Json>> = {}
-
-  for (const submission of submissions) {
-    if (!submission.form_id) continue
-    const formAnswers: Record<string, Json> = {}
-    for (const answer of submission.form_answer ?? []) {
-      if (!answer.question_code) continue
-      formAnswers[answer.question_code] = answer.value
-      answers[answer.question_code] = answer.value
-    }
-    byForm[submission.form_id] = formAnswers
-  }
-
-  return { answers, byForm }
-}
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { supabase, headers } = createClient(request)
   const { data: userData } = await supabase.auth.getUser()
@@ -255,12 +232,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     role: resolvedRole,
   })
 
-  const { data: submissions } = await supabase
-    .from('form_submission')
-    .select('form_id, submitted_at, form_answer ( question_code, value )')
-    .eq('profile_id', pid)
-    .order('submitted_at', { ascending: true })
-  const submissionData = buildAnswerMapFromSubmissions(submissions ?? [])
+  const submissionData = await loadSubmissionAnswerState(supabase, pid)
   const mealKitFlag = await districtMealKitFlag(
     typeof profile.federal_electoral_district_name === 'string' ? profile.federal_electoral_district_name : null
   )
@@ -652,12 +624,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { error: 'Form is not configured' }
   }
 
-  const { data: submissions } = await supabase
-    .from('form_submission')
-    .select('form_id, submitted_at, form_answer ( question_code, value )')
-    .eq('profile_id', pid)
-    .order('submitted_at', { ascending: true })
-  const submissionData = buildAnswerMapFromSubmissions(submissions ?? [])
+  const submissionData = await loadSubmissionAnswerState(supabase, pid)
 
   const submittedAnswers: Record<string, Json> = {}
   for (const question of questions) {
