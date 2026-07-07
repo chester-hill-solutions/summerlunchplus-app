@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database, Json } from '@/lib/database.types'
+import { getEmailDomainHint } from '@/lib/email-domain'
 import { loadSubmissionAnswerState } from '@/lib/form-submission-answers.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { getSignUpFlowContext } from '@/lib/sign-up-flow-context.server'
@@ -200,7 +201,7 @@ export async function getSignUpDetailsStatus(
     if (shouldLogOnboardingInstrumentation) {
       console.info('[onboarding-instrumentation]', {
         event: 'signup_status_missing_profile',
-        userId,
+        emailDomainHint: null,
         roleOverride: roleOverride ?? null,
         durationMs: Date.now() - startedAt,
       })
@@ -214,11 +215,12 @@ export async function getSignUpDetailsStatus(
   }
 
   const role = roleOverride && roleOverride !== 'unassigned' ? roleOverride : profile.role ?? roleOverride ?? null
+  const emailDomainHint = getEmailDomainHint(profile.email)
   if (!role || role === 'unassigned') {
     if (shouldLogOnboardingInstrumentation) {
       console.info('[onboarding-instrumentation]', {
         event: 'signup_status_unassigned',
-        userId,
+        emailDomainHint,
         profileId: profile.id,
         durationMs: Date.now() - startedAt,
       })
@@ -230,7 +232,7 @@ export async function getSignUpDetailsStatus(
     if (shouldLogOnboardingInstrumentation) {
       console.info('[onboarding-instrumentation]', {
         event: 'signup_status_non_signup_role_complete',
-        userId,
+        emailDomainHint,
         profileId: profile.id,
         role,
         durationMs: Date.now() - startedAt,
@@ -288,7 +290,7 @@ export async function getSignUpDetailsStatus(
     if (shouldLogOnboardingInstrumentation) {
       console.info('[onboarding-instrumentation]', {
         event: 'signup_status_student',
-        userId,
+        emailDomainHint,
         profileId: profile.id,
         formsComplete,
         guardianCount: guardianIds.length,
@@ -308,7 +310,7 @@ export async function getSignUpDetailsStatus(
   if (shouldLogOnboardingInstrumentation) {
     console.info('[onboarding-instrumentation]', {
       event: 'signup_status_guardian',
-      userId,
+      emailDomainHint,
       profileId: profile.id,
       formsComplete,
       durationMs: Date.now() - startedAt,
