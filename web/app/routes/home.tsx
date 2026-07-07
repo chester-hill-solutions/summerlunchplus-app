@@ -6,11 +6,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
+import { getMaskedEmailHint, normalizeEmail } from '@/lib/email-domain'
 import { isGiftCardReleasedNow } from '@/lib/gift-cards/release.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
-import { getEmailDomainHint, normalizeEmail } from '@/lib/email-domain'
 import {
   Table,
   TableBody,
@@ -228,7 +228,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (shouldLogHomeInstrumentation) {
     console.info('[home-instrumentation]', {
       event: 'home_loader_base',
-      emailDomainHint: getEmailDomainHint(auth.user.email),
+      emailHint: getMaskedEmailHint(auth.user.email),
       role: auth.claims.role,
       familyProfiles: family.familyProfileIds.length,
       enrollmentCount: enrollments.length,
