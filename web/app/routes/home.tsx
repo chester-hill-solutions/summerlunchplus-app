@@ -110,6 +110,9 @@ const personName = (profile: { firstname: string | null; surname: string | null;
   return full || profile.email || 'Unnamed'
 }
 
+const shouldLogHomeInstrumentation =
+  process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+
 const sendInvite = async ({
   email,
   role,
@@ -181,6 +184,7 @@ const sendInvite = async ({
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const startedAt = Date.now()
   const auth = await enforceOnboardingGuard(request)
   if (isRoleAtLeast(auth.claims.role, 'instructor')) {
     throw redirect('/manage', { headers: auth.headers })
@@ -191,10 +195,20 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const family = await resolveFamilyGraph(supabase, auth.user.id)
 
-  const { data: familyProfilesRaw } = await adminClient
-    .from('profile')
-    .select('id, role, firstname, surname, email, user_id')
-    .in('id', family.familyProfileIds)
+  const [familyProfilesResponse, enrollmentsResponse] = await Promise.all([
+    adminClient
+      .from('profile')
+      .select('id, role, firstname, surname, email, user_id')
+      .in('id', family.familyProfileIds),
+    supabase
+      .from('workshop_enrollment')
+      .select('id, workshop_id, semester_id, status, requested_at, profile_id')
+      .in('profile_id', family.familyProfileIds)
+      .order('requested_at', { ascending: false }),
+  ])
+
+  const familyProfilesRaw = familyProfilesResponse.data
+  const enrollmentsRaw = enrollmentsResponse.data
 
   const familyProfiles = (familyProfilesRaw ?? []) as FamilyProfile[]
 
@@ -210,13 +224,35 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const invites = (invitesRaw ?? []) as InviteRow[]
 
-  const { data: enrollmentsRaw } = await supabase
-    .from('workshop_enrollment')
-    .select('id, workshop_id, semester_id, status, requested_at, profile_id')
-    .in('profile_id', family.familyProfileIds)
-    .order('requested_at', { ascending: false })
-
   const enrollments = (enrollmentsRaw ?? []) as EnrollmentRow[]
+  if (shouldLogHomeInstrumentation) {
+    console.info('[home-instrumentation]', {
+      event: 'home_loader_base',
+      userId: auth.user.id,
+      role: auth.claims.role,
+      familyProfiles: family.familyProfileIds.length,
+      enrollmentCount: enrollments.length,
+      durationMs: Date.now() - startedAt,
+    })
+  }
+
+  if (!enrollments.length) {
+    return {
+      family,
+      familyProfiles,
+      invites,
+      workshopsById: {},
+      semesterById: {},
+      enrollments,
+      classesByWorkshop: {},
+      joinUrlByClass: {},
+      giftCardLinkByClass: {},
+      selectedProfileIdByClass: {},
+      selectedPhotoStatusByClass: {},
+      nextClass: null,
+    } satisfies LoaderData
+  }
+
   const workshopIds = Array.from(new Set(enrollments.map(row => row.workshop_id).filter((id): id is string => Boolean(id))))
 
   const { data: workshopsRaw } = workshopIds.length
