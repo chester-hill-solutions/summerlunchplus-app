@@ -113,9 +113,6 @@ create index gift_card_upload_status_idx on public.gift_card_upload(status);
 create index gift_card_allocation_status_idx on public.gift_card_allocation(status);
 create index gift_card_allocation_class_profile_idx on public.gift_card_allocation(class_id, profile_id);
 create index gift_card_allocation_sent_idx on public.gift_card_allocation(reminder_sent_at);
-create index gift_card_allocation_allocated_unsent_idx
-  on public.gift_card_allocation(status, reminder_sent_at, id)
-  where status = 'allocated' and reminder_sent_at is null;
 create index gift_card_click_event_allocation_idx on public.gift_card_click_event(gift_card_allocation_id, created_at desc);
 create index gift_card_click_event_profile_idx on public.gift_card_click_event(profile_id, created_at desc);
 

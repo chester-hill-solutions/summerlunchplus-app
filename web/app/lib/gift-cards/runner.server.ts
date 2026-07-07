@@ -1,10 +1,5 @@
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
-import {
-  classWeekFridayNoonTorontoIso,
-  eligibleAfterIso,
-  isReleaseReadyNow,
-  releaseReadyAtIso,
-} from '@/lib/gift-cards/release.server'
+import { nextReleaseAtIso } from '@/lib/gift-cards/release.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
 
@@ -19,22 +14,27 @@ type GiftCardJobResult = {
   errors: string[]
 }
 
-type GiftCardQualificationMetadata = {
-  release_at?: string | null
-  qualification_state?: 'qualified' | 'unqualified'
-  qualification_since_at?: string | null
-  qualification_last_changed_at?: string | null
-  class_week_friday_noon_at?: string | null
-  eligible_after_at?: string | null
-  release_ready_at?: string | null
-  backfill_source?: string | null
-  backfill_version?: string | null
-}
-
 const allocationKey = (classId: string, profileId: string) => `${classId}::${profileId}`
 
-const PAGE_SIZE = 500
-const QUALIFICATION_BACKFILL_VERSION = '2026-07-08-v1'
+const TORONTO_TIME_ZONE = 'America/Toronto'
+
+const torontoDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TORONTO_TIME_ZONE,
+  weekday: 'short',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
+const parseHourMinuteEnv = (name: string, fallback: number) => {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
 
 const isProductionRuntime = process.env.NODE_ENV === 'production'
 const ensureOrigin = (origin: string) => origin.replace(/\/+$/, '')
@@ -57,31 +57,64 @@ const resolvePublicHubOrigin = (fallbackOrigin: string) => {
   return ensureOrigin(fallbackOrigin)
 }
 
-const normalizeMetadata = (value: unknown): GiftCardQualificationMetadata => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return value as GiftCardQualificationMetadata
+const REMINDER_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_HOUR_TORONTO', isProductionRuntime ? 12 : 11)
+const REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_MINUTE_TORONTO', isProductionRuntime ? 0 : 15)
+
+const torontoPartsForDate = (date: Date) => {
+  const parts = torontoDateTimeFormatter.formatToParts(date)
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? ''
+  return {
+    weekday: get('weekday'),
+    year: Number.parseInt(get('year'), 10),
+    month: Number.parseInt(get('month'), 10),
+    day: Number.parseInt(get('day'), 10),
+    hour: Number.parseInt(get('hour'), 10),
+    minute: Number.parseInt(get('minute'), 10),
+  }
 }
 
-const validIsoOrNull = (value: unknown) => {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const parsed = Date.parse(trimmed)
-  if (!Number.isFinite(parsed)) return null
-  return new Date(parsed).toISOString()
+const torontoTimeUtcForDate = (year: number, month: number, day: number, hour: number, minute: number) => {
+  for (const utcHour of [16, 17, 15, 18]) {
+    const candidate = new Date(Date.UTC(year, month - 1, day, utcHour, minute, 0, 0))
+    const toronto = torontoPartsForDate(candidate)
+    if (
+      toronto.year === year &&
+      toronto.month === month &&
+      toronto.day === day &&
+      toronto.hour === hour &&
+      toronto.minute === minute
+    ) {
+      return candidate
+    }
+  }
+
+  return null
 }
 
-const isQualifiedAttendanceEvidence = ({
-  cameraOn,
-  photoStatus,
-  blocked,
-}: {
-  cameraOn: boolean | null
-  photoStatus: 'uploaded' | 'accepted' | 'rejected' | null
-  blocked: boolean
-}) => {
-  if (blocked) return false
-  return cameraOn === true || photoStatus === 'accepted' || photoStatus === 'uploaded'
+const currentTorontoReminderSlotIso = (now: Date) => {
+  const toronto = torontoPartsForDate(now)
+  if (
+    (toronto.weekday !== 'Mon' && toronto.weekday !== 'Fri') ||
+    toronto.hour !== REMINDER_HOUR_TORONTO ||
+    toronto.minute < REMINDER_MINUTE_TORONTO ||
+    toronto.minute >= REMINDER_MINUTE_TORONTO + 5
+  ) {
+    return null
+  }
+
+  const slot = torontoTimeUtcForDate(
+    toronto.year,
+    toronto.month,
+    toronto.day,
+    REMINDER_HOUR_TORONTO,
+    REMINDER_MINUTE_TORONTO
+  )
+  return slot ? slot.toISOString() : null
+}
+
+const reminderSlotIsoForTorontoDate = (year: number, month: number, day: number) => {
+  const slot = torontoTimeUtcForDate(year, month, day, REMINDER_HOUR_TORONTO, REMINDER_MINUTE_TORONTO)
+  return slot ? slot.toISOString() : null
 }
 
 const resolveRecipientEmail = async (profileId: string, fallbackEmail: string | null) => {
@@ -136,60 +169,63 @@ const requestedProviderFromDisplay = (value: string | null | undefined) => {
   return null
 }
 
-const upsertQualificationMetadata = ({
-  previous,
-  qualificationState,
-  qualificationSinceAt,
-  qualificationLastChangedAt,
-  classWeekFridayNoonAt,
-  eligibleAfterAt,
-  releaseReadyAt,
-  backfillSource,
-}: {
-  previous: GiftCardQualificationMetadata
-  qualificationState: 'qualified' | 'unqualified'
-  qualificationSinceAt: string | null
-  qualificationLastChangedAt: string | null
-  classWeekFridayNoonAt: string | null
-  eligibleAfterAt: string | null
-  releaseReadyAt: string | null
-  backfillSource: string | null
-}) => {
-  return {
-    ...previous,
-    release_at: releaseReadyAt,
-    qualification_state: qualificationState,
-    qualification_since_at: qualificationSinceAt,
-    qualification_last_changed_at: qualificationLastChangedAt,
-    class_week_friday_noon_at: classWeekFridayNoonAt,
-    eligible_after_at: eligibleAfterAt,
-    release_ready_at: releaseReadyAt,
-    backfill_source: backfillSource,
-    backfill_version: QUALIFICATION_BACKFILL_VERSION,
-  } satisfies GiftCardQualificationMetadata
-}
-
-const tryAcquireGiftCardRunnerLock = async () => {
-  const { data, error } = await adminClient.rpc('zoom_try_advisory_lock', {
-    p_lock_name: 'gift-card:runner',
-  })
-  if (error) throw new Error(`Failed to acquire gift-card runner lock: ${error.message}`)
-  return data === true
-}
-
-const releaseGiftCardRunnerLock = async () => {
-  const { data, error } = await adminClient.rpc('zoom_advisory_unlock', {
-    p_lock_name: 'gift-card:runner',
-  })
-  if (error) {
-    console.error('[gift-cards][lock] unlock failed', { error: error.message })
-    return false
-  }
-  return data === true
-}
-
 const allocateGiftCards = async () => {
   const nowIso = new Date().toISOString()
+  const { data: attendanceRows, error: attendanceError } = await adminClient
+    .from('class_attendance')
+    .select('id, class_id, profile_id, camera_on, photo_status, gift_card_blocked, class:class_id(ends_at), profile:profile_id(email)')
+    .or('camera_on.eq.true,photo_status.eq.accepted,photo_status.eq.uploaded')
+
+  if (attendanceError) {
+    throw new Error(`Failed to load attendance rows: ${attendanceError.message}`)
+  }
+
+  const typedRows = (attendanceRows ?? []) as Array<{
+    id: string
+    class_id: string
+    profile_id: string
+    camera_on: boolean | null
+    photo_status: 'uploaded' | 'accepted' | 'rejected' | null
+    gift_card_blocked: boolean | null
+    class: { ends_at: string | null } | Array<{ ends_at: string | null }> | null
+    profile: { email: string | null } | Array<{ email: string | null }> | null
+  }>
+
+  const classIds = Array.from(new Set(typedRows.map(row => row.class_id)))
+  const profileIds = Array.from(new Set(typedRows.map(row => row.profile_id)))
+
+  let requestedProviderByProfileId = new Map<string, 'PC' | 'Sobeys' | 'meal_kit' | null>()
+  if (profileIds.length) {
+    try {
+      const enrichment = await loadWorkshopEnrollmentEnrichment(profileIds)
+      for (const profileId of profileIds) {
+        const display = enrichment[profileId]?.giftcard_display
+        requestedProviderByProfileId.set(profileId, requestedProviderFromDisplay(display))
+      }
+    } catch (error) {
+      console.warn('[gift-cards] provider preference enrichment failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  const { data: allocationRows, error: allocationError } = classIds.length
+    ? await adminClient
+        .from('gift_card_allocation')
+        .select('id, class_id, profile_id')
+        .in('class_id', classIds)
+        .in('profile_id', profileIds)
+    : { data: [], error: null }
+
+  if (allocationError) {
+    throw new Error(`Failed to load allocations: ${allocationError.message}`)
+  }
+
+  const allocationByPair = new Map<string, string>()
+  for (const row of allocationRows ?? []) {
+    allocationByPair.set(allocationKey(row.class_id, row.profile_id), row.id)
+  }
+
   const { data: assets, error: assetsError } = await adminClient
     .from('gift_card_asset')
     .select('id, provider')
@@ -211,317 +247,74 @@ const allocateGiftCards = async () => {
       availableByProvider.PC.push(row.id)
     }
   }
-
-  const requestedProviderByProfileId = new Map<string, 'PC' | 'Sobeys' | 'meal_kit' | null>()
-  let lastAttendanceId: string | null = null
   let allocated = 0
 
-  while (true) {
-    let query = adminClient
-      .from('class_attendance')
-      .select(
-        'id, class_id, profile_id, camera_on, photo_status, gift_card_blocked, class:class_id(starts_at, ends_at), profile:profile_id(email)'
-      )
-      .or('camera_on.eq.true,photo_status.eq.accepted,photo_status.eq.uploaded')
-      .order('id', { ascending: true })
-      .limit(PAGE_SIZE)
+  for (const row of typedRows) {
+    const hasAttendanceEvidence = row.camera_on === true || row.photo_status === 'accepted' || row.photo_status === 'uploaded'
+    if (!hasAttendanceEvidence) continue
+    if (row.gift_card_blocked) continue
+    if (allocationByPair.has(allocationKey(row.class_id, row.profile_id))) continue
 
-    if (lastAttendanceId) {
-      query = query.gt('id', lastAttendanceId)
+    const requestedProvider = requestedProviderByProfileId.get(row.profile_id) ?? null
+    if (requestedProvider === 'meal_kit') continue
+    const providerForAllocation = requestedProvider === 'Sobeys' ? 'Sobeys' : 'PC'
+
+    const providerBucket = availableByProvider[providerForAllocation]
+    if (!providerBucket.length) continue
+
+    const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
+    const releaseAt = nextReleaseAtIso(classRelation?.ends_at ?? null)
+    if (!releaseAt) continue
+
+    const assetId = providerBucket.shift() as string
+    const { data: updatedAsset, error: claimError } = await adminClient
+      .from('gift_card_asset')
+      .update({
+        status: 'allocated',
+        assigned_profile_id: row.profile_id,
+        allocated_at: nowIso,
+      })
+      .eq('id', assetId)
+      .eq('status', 'available')
+      .select('id')
+      .maybeSingle()
+
+    if (claimError || !updatedAsset?.id) {
+      continue
     }
 
-    const { data: attendanceRows, error: attendanceError } = await query
-    if (attendanceError) {
-      throw new Error(`Failed to load attendance rows: ${attendanceError.message}`)
-    }
-
-    const typedRows = (attendanceRows ?? []) as Array<{
-      id: string
-      class_id: string
-      profile_id: string
-      camera_on: boolean | null
-      photo_status: 'uploaded' | 'accepted' | 'rejected' | null
-      gift_card_blocked: boolean | null
-      class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
-      profile: { email: string | null } | Array<{ email: string | null }> | null
-    }>
-
-    if (!typedRows.length) break
-    lastAttendanceId = typedRows[typedRows.length - 1]?.id ?? lastAttendanceId
-
-    const pageProfileIds = Array.from(new Set(typedRows.map(row => row.profile_id)))
-    const missingPreferenceProfileIds = pageProfileIds.filter(profileId => !requestedProviderByProfileId.has(profileId))
-    if (missingPreferenceProfileIds.length) {
-      try {
-        const enrichment = await loadWorkshopEnrollmentEnrichment(missingPreferenceProfileIds)
-        for (const profileId of missingPreferenceProfileIds) {
-          const display = enrichment[profileId]?.giftcard_display
-          requestedProviderByProfileId.set(profileId, requestedProviderFromDisplay(display))
-        }
-      } catch (error) {
-        console.warn('[gift-cards] provider preference enrichment failed', {
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-      for (const profileId of missingPreferenceProfileIds) {
-        if (!requestedProviderByProfileId.has(profileId)) {
-          requestedProviderByProfileId.set(profileId, null)
-        }
-      }
-    }
-
-    const classIds = Array.from(new Set(typedRows.map(row => row.class_id)))
-    const profileIds = Array.from(new Set(typedRows.map(row => row.profile_id)))
-    const { data: allocationRows, error: allocationError } = await adminClient
+    const { data: inserted, error: insertError } = await adminClient
       .from('gift_card_allocation')
-      .select('id, class_id, profile_id')
-      .in('class_id', classIds)
-      .in('profile_id', profileIds)
-
-    if (allocationError) {
-      throw new Error(`Failed to load allocations: ${allocationError.message}`)
-    }
-
-    const allocationByPair = new Map<string, string>()
-    for (const row of allocationRows ?? []) {
-      allocationByPair.set(allocationKey(row.class_id, row.profile_id), row.id)
-    }
-
-    for (const row of typedRows) {
-      const blockedNow = row.gift_card_blocked === true
-      const hasAttendanceEvidence = isQualifiedAttendanceEvidence({
-        cameraOn: row.camera_on,
-        photoStatus: row.photo_status,
-        blocked: blockedNow,
+      .insert({
+        class_id: row.class_id,
+        profile_id: row.profile_id,
+        class_attendance_id: row.id,
+        gift_card_asset_id: assetId,
+        status: 'allocated',
+        metadata: {
+          release_at: releaseAt,
+        },
       })
-      if (!hasAttendanceEvidence) continue
-      if (allocationByPair.has(allocationKey(row.class_id, row.profile_id))) continue
+      .select('id')
+      .maybeSingle()
 
-      const requestedProvider = requestedProviderByProfileId.get(row.profile_id) ?? null
-      if (requestedProvider === 'meal_kit') continue
-      const providerForAllocation = requestedProvider === 'Sobeys' ? 'Sobeys' : 'PC'
-      const providerBucket = availableByProvider[providerForAllocation]
-      if (!providerBucket.length) continue
-
-      const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
-      const classAt = classRelation?.starts_at ?? classRelation?.ends_at ?? null
-      const classWeekFridayNoonAt = classWeekFridayNoonTorontoIso(classAt)
-      const eligibleAfterAt = eligibleAfterIso(nowIso)
-      const releaseReadyAt = releaseReadyAtIso({
-        classAtIso: classAt,
-        qualificationSinceAtIso: nowIso,
-      })
-      if (!classWeekFridayNoonAt || !eligibleAfterAt || !releaseReadyAt) continue
-
-      const assetId = providerBucket.shift() as string
-      const { data: updatedAsset, error: claimError } = await adminClient
+    if (insertError || !inserted?.id) {
+      await adminClient
         .from('gift_card_asset')
         .update({
-          status: 'allocated',
-          assigned_profile_id: row.profile_id,
-          allocated_at: nowIso,
+          status: 'available',
+          assigned_profile_id: null,
+          allocated_at: null,
         })
         .eq('id', assetId)
-        .eq('status', 'available')
-        .select('id')
-        .maybeSingle()
-
-      if (claimError || !updatedAsset?.id) {
-        continue
-      }
-
-      const { data: inserted, error: insertError } = await adminClient
-        .from('gift_card_allocation')
-        .insert({
-          class_id: row.class_id,
-          profile_id: row.profile_id,
-          class_attendance_id: row.id,
-          gift_card_asset_id: assetId,
-          status: 'allocated',
-          metadata: {
-            release_at: releaseReadyAt,
-            qualification_state: 'qualified',
-            qualification_since_at: nowIso,
-            qualification_last_changed_at: nowIso,
-            class_week_friday_noon_at: classWeekFridayNoonAt,
-            eligible_after_at: eligibleAfterAt,
-            release_ready_at: releaseReadyAt,
-            backfill_source: 'allocation_insert',
-            backfill_version: QUALIFICATION_BACKFILL_VERSION,
-          } satisfies GiftCardQualificationMetadata,
-        })
-        .select('id')
-        .maybeSingle()
-
-      if (insertError || !inserted?.id) {
-        await adminClient
-          .from('gift_card_asset')
-          .update({
-            status: 'available',
-            assigned_profile_id: null,
-            allocated_at: null,
-          })
-          .eq('id', assetId)
-        continue
-      }
-
-      allocationByPair.set(allocationKey(row.class_id, row.profile_id), inserted.id)
-      allocated += 1
+      continue
     }
+
+    allocationByPair.set(allocationKey(row.class_id, row.profile_id), inserted.id)
+    allocated += 1
   }
 
   return allocated
-}
-
-const reconcileAllocationQualificationMetadata = async () => {
-  let updated = 0
-  let lastAllocationId: string | null = null
-  const nowIso = new Date().toISOString()
-
-  while (true) {
-    let query = adminClient
-      .from('gift_card_allocation')
-      .select('id, class_id, profile_id, status, blocked, reminder_sent_at, metadata, class:class_id(starts_at, ends_at)')
-      .order('id', { ascending: true })
-      .limit(PAGE_SIZE)
-
-    if (lastAllocationId) {
-      query = query.gt('id', lastAllocationId)
-    }
-
-    const { data: allocationRows, error: allocationError } = await query
-    if (allocationError) {
-      throw new Error(`Failed to load allocations for qualification reconciliation: ${allocationError.message}`)
-    }
-
-    const rows = (allocationRows ?? []) as Array<{
-      id: string
-      class_id: string
-      profile_id: string
-      status: 'allocated' | 'sent' | 'opened'
-      blocked: boolean
-      reminder_sent_at: string | null
-      metadata: unknown
-      class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
-    }>
-    if (!rows.length) break
-    lastAllocationId = rows[rows.length - 1]?.id ?? lastAllocationId
-
-    const classIds = Array.from(new Set(rows.map(row => row.class_id)))
-    const profileIds = Array.from(new Set(rows.map(row => row.profile_id)))
-
-    const { data: attendanceRows, error: attendanceError } = await adminClient
-      .from('class_attendance')
-      .select('class_id, profile_id, camera_on, photo_status, gift_card_blocked, updated_at, created_at')
-      .in('class_id', classIds)
-      .in('profile_id', profileIds)
-
-    if (attendanceError) {
-      throw new Error(`Failed to load attendance for qualification reconciliation: ${attendanceError.message}`)
-    }
-
-    const attendanceByPair = new Map(
-      ((attendanceRows ?? []) as Array<{
-        class_id: string
-        profile_id: string
-        camera_on: boolean | null
-        photo_status: 'uploaded' | 'accepted' | 'rejected' | null
-        gift_card_blocked: boolean | null
-        updated_at: string | null
-        created_at: string | null
-      }>).map(row => [allocationKey(row.class_id, row.profile_id), row])
-    )
-
-    for (const row of rows) {
-      const metadata = normalizeMetadata(row.metadata)
-      const attendance = attendanceByPair.get(allocationKey(row.class_id, row.profile_id))
-      const blockedNow = row.blocked || attendance?.gift_card_blocked === true
-      const qualifiedNow = isQualifiedAttendanceEvidence({
-        cameraOn: attendance?.camera_on ?? null,
-        photoStatus: attendance?.photo_status ?? null,
-        blocked: blockedNow,
-      })
-
-      const previousState = metadata.qualification_state === 'qualified' ? 'qualified' : 'unqualified'
-      const previousSince = validIsoOrNull(metadata.qualification_since_at)
-      let qualificationSinceAt: string | null = null
-      let backfillSource: string | null = null
-
-      if (qualifiedNow) {
-        if (previousState === 'qualified' && previousSince) {
-          qualificationSinceAt = previousSince
-          backfillSource = metadata.backfill_source ?? 'existing'
-        } else {
-          const candidateSince =
-            validIsoOrNull(attendance?.updated_at ?? null) ??
-            validIsoOrNull(attendance?.created_at ?? null) ??
-            validIsoOrNull(row.reminder_sent_at) ??
-            nowIso
-          qualificationSinceAt = candidateSince
-          if (candidateSince === nowIso) {
-            backfillSource = 'now_fallback'
-          } else if (candidateSince === validIsoOrNull(attendance?.updated_at ?? null)) {
-            backfillSource = 'attendance_updated_at'
-          } else if (candidateSince === validIsoOrNull(attendance?.created_at ?? null)) {
-            backfillSource = 'attendance_created_at'
-          } else {
-            backfillSource = 'reminder_sent_at'
-          }
-        }
-      }
-
-      const qualificationState: 'qualified' | 'unqualified' = qualifiedNow ? 'qualified' : 'unqualified'
-      const stateChanged = qualificationState !== previousState
-      const qualificationLastChangedAt = stateChanged
-        ? nowIso
-        : validIsoOrNull(metadata.qualification_last_changed_at) ?? nowIso
-
-      const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
-      const classAt = classRelation?.starts_at ?? classRelation?.ends_at ?? null
-      const classWeekFridayNoonAt = classWeekFridayNoonTorontoIso(classAt)
-      const eligibilityAfterAt = eligibleAfterIso(qualificationSinceAt)
-      const releaseReadyAt = qualifiedNow
-        ? releaseReadyAtIso({
-            classAtIso: classAt,
-            qualificationSinceAtIso: qualificationSinceAt,
-          })
-        : null
-
-      const nextMetadata = upsertQualificationMetadata({
-        previous: metadata,
-        qualificationState,
-        qualificationSinceAt,
-        qualificationLastChangedAt,
-        classWeekFridayNoonAt,
-        eligibleAfterAt: eligibilityAfterAt,
-        releaseReadyAt,
-        backfillSource,
-      })
-
-      const changed =
-        validIsoOrNull(metadata.release_ready_at) !== validIsoOrNull(nextMetadata.release_ready_at) ||
-        metadata.qualification_state !== nextMetadata.qualification_state ||
-        validIsoOrNull(metadata.qualification_since_at) !== validIsoOrNull(nextMetadata.qualification_since_at) ||
-        validIsoOrNull(metadata.qualification_last_changed_at) !== validIsoOrNull(nextMetadata.qualification_last_changed_at) ||
-        validIsoOrNull(metadata.class_week_friday_noon_at) !== validIsoOrNull(nextMetadata.class_week_friday_noon_at) ||
-        validIsoOrNull(metadata.eligible_after_at) !== validIsoOrNull(nextMetadata.eligible_after_at) ||
-        metadata.backfill_source !== nextMetadata.backfill_source ||
-        metadata.backfill_version !== nextMetadata.backfill_version
-
-      if (!changed) continue
-
-      const { error: updateError } = await adminClient
-        .from('gift_card_allocation')
-        .update({ metadata: nextMetadata })
-        .eq('id', row.id)
-
-      if (!updateError) {
-        updated += 1
-      }
-    }
-  }
-
-  return updated
 }
 
 const sendDueReminders = async (appOrigin: string) => {
@@ -529,158 +322,154 @@ const sendDueReminders = async (appOrigin: string) => {
   const nowIso = now.toISOString()
   const publicHubOrigin = resolvePublicHubOrigin(appOrigin)
   const hubUrl = `${publicHubOrigin}/home`
-  const nowMs = now.getTime()
+  const reminderSlotIso = currentTorontoReminderSlotIso(now)
+  if (!reminderSlotIso) {
+    return {
+      remindersSent: 0,
+      remindersSkipped: 0,
+      reminderFailures: 0,
+      errors: [],
+    }
+  }
+
+  const { data: allocations, error: allocationError } = await adminClient
+    .from('gift_card_allocation')
+    .select(
+      'id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, class:class_id(ends_at), profile:profile_id(email), asset:gift_card_asset_id(provider, value, status, assigned_profile_id)'
+    )
+    .eq('status', 'allocated')
+    .is('reminder_sent_at', null)
+
+  if (allocationError) {
+    throw new Error(`Failed to load due reminders: ${allocationError.message}`)
+  }
 
   let remindersSent = 0
   let remindersSkipped = 0
   let reminderFailures = 0
   const errors: string[] = []
-  let lastAllocationId: string | null = null
 
-  while (true) {
-    let query = adminClient
+  const rows = (allocations ?? []) as Array<{
+    id: string
+    class_id: string
+    profile_id: string
+    gift_card_asset_id: string
+    status: 'allocated' | 'sent' | 'opened'
+    blocked: boolean
+    reminder_sent_at: string | null
+    metadata: { release_at?: string | null } | null
+    class: { ends_at: string | null } | Array<{ ends_at: string | null }> | null
+    profile: { email: string | null } | Array<{ email: string | null }> | null
+    asset:
+      | { provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }
+      | Array<{ provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }>
+      | null
+  }>
+
+  for (const row of rows) {
+    if (row.blocked) {
+      remindersSkipped += 1
+      continue
+    }
+
+    const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
+    const expectedReleaseAt = nextReleaseAtIso(classRelation?.ends_at ?? null)
+    const releaseAt = (row.metadata?.release_at ?? '').trim() || expectedReleaseAt || ''
+    if (!releaseAt) {
+      continue
+    }
+
+    const releaseDate = new Date(releaseAt)
+    if (!Number.isFinite(releaseDate.getTime()) || releaseDate.getTime() > now.getTime()) {
+      continue
+    }
+
+    const releaseToronto = torontoPartsForDate(releaseDate)
+    const reminderSlotForReleaseDate = reminderSlotIsoForTorontoDate(
+      releaseToronto.year,
+      releaseToronto.month,
+      releaseToronto.day
+    )
+    if (!reminderSlotForReleaseDate || reminderSlotForReleaseDate !== reminderSlotIso) {
+      continue
+    }
+
+    const profileRelation = Array.isArray(row.profile) ? row.profile[0] : row.profile
+    const toEmail = await resolveRecipientEmail(row.profile_id, profileRelation?.email ?? null)
+    if (!toEmail) {
+      remindersSkipped += 1
+      continue
+    }
+
+    const assetRelation = Array.isArray(row.asset) ? row.asset[0] : row.asset
+    const assetAllocatedToProfile =
+      assetRelation?.status === 'allocated' &&
+      typeof assetRelation.assigned_profile_id === 'string' &&
+      assetRelation.assigned_profile_id === row.profile_id
+    if (!assetAllocatedToProfile) {
+      remindersSkipped += 1
+      continue
+    }
+
+    const token = newGlrToken()
+    const tokenHash = hashGlrToken(token)
+    const eventKey = `gift-card-reminder:${row.id}`
+
+    const emailResult = await sendTemplateEmail({
+      toEmail,
+      templateKey: 'gift_card_reminder_v1',
+      templateData: {
+        provider: assetRelation?.provider ?? 'PC',
+        amount: Number(assetRelation?.value ?? 0),
+        hubUrl,
+      },
+      profileId: row.profile_id,
+      eventKey,
+    })
+
+    if (emailResult.status === 'failed') {
+      reminderFailures += 1
+      errors.push(`allocation ${row.id}: ${emailResult.error ?? 'send failed'}`)
+      continue
+    }
+
+    const statusAfterSend = emailResult.status === 'skipped' ? 'sent' : 'sent'
+    const { error: allocationUpdateError } = await adminClient
       .from('gift_card_allocation')
-      .select(
-        'id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, class:class_id(starts_at, ends_at), profile:profile_id(email), asset:gift_card_asset_id(provider, value, status, assigned_profile_id)'
-      )
-      .eq('status', 'allocated')
-      .is('reminder_sent_at', null)
-      .order('id', { ascending: true })
-      .limit(PAGE_SIZE)
-
-    if (lastAllocationId) {
-      query = query.gt('id', lastAllocationId)
-    }
-
-    const { data: allocations, error: allocationError } = await query
-    if (allocationError) {
-      throw new Error(`Failed to load due reminders: ${allocationError.message}`)
-    }
-
-    const rows = (allocations ?? []) as Array<{
-      id: string
-      class_id: string
-      profile_id: string
-      gift_card_asset_id: string
-      status: 'allocated' | 'sent' | 'opened'
-      blocked: boolean
-      reminder_sent_at: string | null
-      metadata: unknown
-      class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
-      profile: { email: string | null } | Array<{ email: string | null }> | null
-      asset:
-        | { provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }
-        | Array<{ provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }>
-        | null
-    }>
-    if (!rows.length) break
-    lastAllocationId = rows[rows.length - 1]?.id ?? lastAllocationId
-
-    for (const row of rows) {
-      if (row.blocked) {
-        remindersSkipped += 1
-        continue
-      }
-
-      const assetRelation = Array.isArray(row.asset) ? row.asset[0] : row.asset
-      const assetAllocatedToProfile =
-        assetRelation?.status === 'allocated' &&
-        typeof assetRelation.assigned_profile_id === 'string' &&
-        assetRelation.assigned_profile_id === row.profile_id
-      if (!assetAllocatedToProfile) {
-        remindersSkipped += 1
-        continue
-      }
-
-      const metadata = normalizeMetadata(row.metadata)
-      const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
-      const classAt = classRelation?.starts_at ?? classRelation?.ends_at ?? null
-      const qualificationState = metadata.qualification_state ?? 'unqualified'
-      if (qualificationState !== 'qualified') {
-        remindersSkipped += 1
-        continue
-      }
-
-      const releaseReadyAt =
-        validIsoOrNull(metadata.release_ready_at) ??
-        releaseReadyAtIso({
-          classAtIso: classAt,
-          qualificationSinceAtIso: validIsoOrNull(metadata.qualification_since_at),
-        })
-
-      if (!isReleaseReadyNow({ releaseReadyAt, now: nowMs })) {
-        remindersSkipped += 1
-        continue
-      }
-
-      const profileRelation = Array.isArray(row.profile) ? row.profile[0] : row.profile
-      const toEmail = await resolveRecipientEmail(row.profile_id, profileRelation?.email ?? null)
-      if (!toEmail) {
-        remindersSkipped += 1
-        continue
-      }
-
-      const token = newGlrToken()
-      const tokenHash = hashGlrToken(token)
-      const eventKey = `gift-card-reminder:${row.id}`
-
-      const emailResult = await sendTemplateEmail({
-        toEmail,
-        templateKey: 'gift_card_reminder_v1',
-        templateData: {
-          provider: assetRelation?.provider ?? 'PC',
-          amount: Number(assetRelation?.value ?? 0),
-          hubUrl,
-        },
-        profileId: row.profile_id,
-        eventKey,
+      .update({
+        status: statusAfterSend,
+        reminder_event_key: eventKey,
+        reminder_email_message_id: emailResult.id,
+        reminder_sent_at: nowIso,
+        glr_token_hash: tokenHash,
       })
+      .eq('id', row.id)
 
-      if (emailResult.status === 'failed') {
-        reminderFailures += 1
-        errors.push(`allocation ${row.id}: ${emailResult.error ?? 'send failed'}`)
-        continue
-      }
+    if (allocationUpdateError) {
+      reminderFailures += 1
+      errors.push(`allocation ${row.id}: ${allocationUpdateError.message}`)
+      continue
+    }
 
-      const { error: allocationUpdateError } = await adminClient
-        .from('gift_card_allocation')
-        .update({
-          status: 'sent',
-          reminder_event_key: eventKey,
-          reminder_email_message_id: emailResult.id,
-          reminder_sent_at: nowIso,
-          glr_token_hash: tokenHash,
-        })
-        .eq('id', row.id)
-        .is('reminder_sent_at', null)
-        .eq('status', 'allocated')
+    const { error: assetError } = await adminClient
+      .from('gift_card_asset')
+      .update({
+        status: 'sent',
+        reminder_sent_at: nowIso,
+        sent_at: nowIso,
+      })
+      .eq('id', row.gift_card_asset_id)
 
-      if (allocationUpdateError) {
-        reminderFailures += 1
-        errors.push(`allocation ${row.id}: ${allocationUpdateError.message}`)
-        continue
-      }
+    if (assetError) {
+      reminderFailures += 1
+      errors.push(`asset ${row.gift_card_asset_id}: ${assetError.message}`)
+      continue
+    }
 
-      const { error: assetError } = await adminClient
-        .from('gift_card_asset')
-        .update({
-          status: 'sent',
-          reminder_sent_at: nowIso,
-          sent_at: nowIso,
-        })
-        .eq('id', row.gift_card_asset_id)
-
-      if (assetError) {
-        reminderFailures += 1
-        errors.push(`asset ${row.gift_card_asset_id}: ${assetError.message}`)
-        continue
-      }
-
-      if (emailResult.status === 'sent') {
-        remindersSent += 1
-      } else {
-        remindersSkipped += 1
-      }
+    if (emailResult.status === 'sent') {
+      remindersSent += 1
+    } else {
+      remindersSkipped += 1
     }
   }
 
@@ -694,54 +483,33 @@ const sendDueReminders = async (appOrigin: string) => {
 
 export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string; runId: string }): Promise<GiftCardJobResult> => {
   const errors: string[] = []
-  const lockAcquired = await tryAcquireGiftCardRunnerLock()
-  if (!lockAcquired) {
-    return {
-      runId,
-      allocated: 0,
-      remindersSent: 0,
-      remindersSkipped: 0,
-      reminderFailures: 0,
-      errors: ['gift-card runner lock not acquired'],
-    }
+
+  let allocated = 0
+  try {
+    allocated = await allocateGiftCards()
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'allocate step failed')
   }
 
+  let remindersSent = 0
+  let remindersSkipped = 0
+  let reminderFailures = 0
   try {
-    let allocated = 0
-    try {
-      allocated = await allocateGiftCards()
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : 'allocate step failed')
-    }
+    const reminderResult = await sendDueReminders(appOrigin)
+    remindersSent = reminderResult.remindersSent
+    remindersSkipped = reminderResult.remindersSkipped
+    reminderFailures = reminderResult.reminderFailures
+    errors.push(...reminderResult.errors)
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'reminder step failed')
+  }
 
-    try {
-      await reconcileAllocationQualificationMetadata()
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : 'qualification reconciliation step failed')
-    }
-
-    let remindersSent = 0
-    let remindersSkipped = 0
-    let reminderFailures = 0
-    try {
-      const reminderResult = await sendDueReminders(appOrigin)
-      remindersSent = reminderResult.remindersSent
-      remindersSkipped = reminderResult.remindersSkipped
-      reminderFailures = reminderResult.reminderFailures
-      errors.push(...reminderResult.errors)
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : 'reminder step failed')
-    }
-
-    return {
-      runId,
-      allocated,
-      remindersSent,
-      remindersSkipped,
-      reminderFailures,
-      errors,
-    }
-  } finally {
-    await releaseGiftCardRunnerLock()
+  return {
+    runId,
+    allocated,
+    remindersSent,
+    remindersSkipped,
+    reminderFailures,
+    errors,
   }
 }
