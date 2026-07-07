@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useFetcher, useLocation, useOutletContext } from 'react-router'
+import { Check, Pencil, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
@@ -39,15 +40,12 @@ export default function ManagePersonOverviewPage() {
       }
     }
   }>()
-  const [selectedRiding, setSelectedRiding] = useState(profile.federal_electoral_district_name ?? '')
   const [giftcardValue, setGiftcardValue] = useState(familyFormAnswers.giftcard_display === 'N/A' ? '' : familyFormAnswers.giftcard_display)
   const [nextEmail, setNextEmail] = useState(profile.email ?? '')
   const [emailChangeReason, setEmailChangeReason] = useState('')
-  const [isProfileEditOpen, setIsProfileEditOpen] = useState(false)
-
-  useEffect(() => {
-    setSelectedRiding(profile.federal_electoral_district_name ?? '')
-  }, [profile.federal_electoral_district_name, profile.id])
+  const [isEditingEmail, setIsEditingEmail] = useState(false)
+  const [ridingDraft, setRidingDraft] = useState(profile.federal_electoral_district_name ?? '')
+  const [isEditingRiding, setIsEditingRiding] = useState(false)
 
   const familyProfileById = new Map(familyProfiles.map(item => [item.id, item]))
 
@@ -87,14 +85,23 @@ export default function ManagePersonOverviewPage() {
 
   useEffect(() => {
     setNextEmail(profile.email ?? '')
-    setIsProfileEditOpen(false)
+    setRidingDraft(profile.federal_electoral_district_name ?? '')
+    setIsEditingEmail(false)
+    setIsEditingRiding(false)
   }, [profile.email, profile.id])
 
   useEffect(() => {
     if (emailChangeFetcher.state !== 'idle') return
     if (!emailChangeFetcher.data?.success) return
     setEmailChangeReason('')
+    setIsEditingEmail(false)
   }, [emailChangeFetcher.data, emailChangeFetcher.state])
+
+  useEffect(() => {
+    if (selectedRidingFetcher.state !== 'idle') return
+    if (!selectedRidingFetcher.data?.success) return
+    setIsEditingRiding(false)
+  }, [selectedRidingFetcher.data, selectedRidingFetcher.state])
 
   const isChangingEmail = emailChangeFetcher.state !== 'idle'
 
@@ -107,85 +114,134 @@ export default function ManagePersonOverviewPage() {
           <div className="grid gap-2">
             <p><span className="font-medium">Name:</span> {profileLabel(profile)}</p>
             <p><span className="font-medium">Role:</span> {profile.role ?? '-'}</p>
-              <p><span className="font-medium">Email:</span> {profile.email ?? '-'}</p>
-              <p><span className="font-medium">Phone:</span> {profile.phone ?? '-'}</p>
-              <p><span className="font-medium">DOB:</span> {formatDate(profile.date_of_birth)}</p>
-              <p><span className="font-medium">Address:</span> {profileAddress || '-'}</p>
-              <div>
-                <Button type="button" size="sm" variant="outline" onClick={() => setIsProfileEditOpen(open => !open)}>
-                  {isProfileEditOpen ? 'Close profile edit' : 'Open profile edit'}
-                </Button>
-              </div>
-              {isProfileEditOpen ? (
-                <div className="rounded border border-slate-200 bg-white/80 p-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Profile edit</p>
-                  {viewerRole === 'admin' ? <div className="mt-2 rounded border border-slate-200 bg-white p-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Admin email change</p>
-                    <emailChangeFetcher.Form
-                      method="post"
-                      action={`/manage/person${location.search}`}
-                      className="mt-2 grid gap-2"
-                    >
-                      <input type="hidden" name="intent" value="change-email-by-admin" />
-                      <input type="hidden" name="profile_id" value={profile.id} />
-                      <input type="hidden" name="trigger_zoom_sync" value="1" />
+            {viewerRole === 'admin' ? (
+              <emailChangeFetcher.Form method="post" action={`/manage/person${location.search}`} className="grid gap-1">
+                <input type="hidden" name="intent" value="change-email-by-admin" />
+                <input type="hidden" name="profile_id" value={profile.id} />
+                <input type="hidden" name="trigger_zoom_sync" value="1" />
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">Email:</span>
+                  {isEditingEmail ? (
+                    <>
                       <input
                         type="email"
                         name="new_email"
                         value={nextEmail}
                         onChange={event => setNextEmail(event.target.value)}
-                        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                        placeholder="name@gmail.com"
+                        className="h-8 min-w-[220px] rounded-md border border-input bg-background px-2 text-sm"
                         required
                         disabled={isChangingEmail}
                       />
-                      <textarea
-                        name="reason"
-                        value={emailChangeReason}
-                        onChange={event => setEmailChangeReason(event.target.value)}
-                        rows={2}
-                        className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        placeholder="Reason for changing this email"
-                        required
-                        disabled={isChangingEmail}
-                      />
-                      <Button type="submit" size="sm" variant="outline" disabled={isChangingEmail}>
-                        {isChangingEmail ? 'Applying email change...' : 'Change email and re-sync Zoom'}
+                      <Button type="submit" size="icon-xs" variant="outline" disabled={isChangingEmail} aria-label="Save email">
+                        <Check />
                       </Button>
-                    </emailChangeFetcher.Form>
-                    {emailChangeFetcher.data?.error ? (
-                      <p className="mt-2 text-xs text-destructive">{emailChangeFetcher.data.error}</p>
-                    ) : null}
-                    {emailChangeFetcher.data?.success && emailChangeFetcher.data.result ? (
-                      <p className="mt-2 text-xs text-emerald-700">
-                        Updated {emailChangeFetcher.data.result.oldEmail} to {emailChangeFetcher.data.result.newEmail}. status=
-                        {emailChangeFetcher.data.result.status}; invites={emailChangeFetcher.data.result.inviteRowsUpdated}; classSync=
-                        {emailChangeFetcher.data.result.classSync.results.filter(entry => entry.ok).length}/
-                        {emailChangeFetcher.data.result.classSync.results.length}; log=
-                        {emailChangeFetcher.data.result.logId ?? 'n/a'}
-                      </p>
-                    ) : null}
-                  </div> : null}
-                  <selectedRidingFetcher.Form method="post" action={`/manage/person${location.search}`} className="mt-2 flex flex-wrap items-center gap-2">
-                <input type="hidden" name="intent" value="update-riding" />
-                <input type="hidden" name="profile_id" value={profile.id} />
-                <input type="hidden" name="riding_name" value={selectedRiding} />
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Riding</span>
-                <Combobox
-                  value={selectedRiding}
-                  onChange={setSelectedRiding}
-                  options={[{ value: '', label: 'Unassigned' }, ...federalDistrictOptions]}
-                  placeholder="Select riding"
-                  disabled={selectedRidingFetcher.state !== 'idle'}
-                />
-                <Button type="submit" size="sm" variant="outline" disabled={selectedRidingFetcher.state !== 'idle'}>
-                  {selectedRidingFetcher.state !== 'idle' ? 'Saving...' : 'Save riding'}
-                </Button>
-                {selectedRidingFetcher.data?.error ? <p className="basis-full text-xs text-destructive">{selectedRidingFetcher.data.error}</p> : null}
-                {selectedRidingFetcher.data?.success ? <p className="basis-full text-xs text-emerald-600">Riding updated.</p> : null}
-              </selectedRidingFetcher.Form>
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="outline"
+                        onClick={() => {
+                          setIsEditingEmail(false)
+                          setNextEmail(profile.email ?? '')
+                          setEmailChangeReason('')
+                        }}
+                        disabled={isChangingEmail}
+                        aria-label="Cancel email edit"
+                      >
+                        <X />
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <span>{profile.email ?? '-'}</span>
+                      <Button type="button" size="icon-xs" variant="ghost" onClick={() => setIsEditingEmail(true)} aria-label="Edit email">
+                        <Pencil />
+                      </Button>
+                    </>
+                  )}
                 </div>
-              ) : null}
+                {isEditingEmail ? (
+                  <input
+                    type="text"
+                    name="reason"
+                    value={emailChangeReason}
+                    onChange={event => setEmailChangeReason(event.target.value)}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                    placeholder="Reason for changing this email"
+                    required
+                    disabled={isChangingEmail}
+                  />
+                ) : null}
+                {emailChangeFetcher.data?.error ? (
+                  <p className="text-xs text-destructive">{emailChangeFetcher.data.error}</p>
+                ) : null}
+                {emailChangeFetcher.data?.success && emailChangeFetcher.data.result ? (
+                  <p className="text-xs text-emerald-700">
+                    Updated {emailChangeFetcher.data.result.oldEmail} to {emailChangeFetcher.data.result.newEmail}. status=
+                    {emailChangeFetcher.data.result.status}; invites={emailChangeFetcher.data.result.inviteRowsUpdated}; classSync=
+                    {emailChangeFetcher.data.result.classSync.results.filter(entry => entry.ok).length}/
+                    {emailChangeFetcher.data.result.classSync.results.length}; log=
+                    {emailChangeFetcher.data.result.logId ?? 'n/a'}
+                  </p>
+                ) : null}
+              </emailChangeFetcher.Form>
+            ) : (
+              <p><span className="font-medium">Email:</span> {profile.email ?? '-'}</p>
+            )}
+            <p><span className="font-medium">Phone:</span> {profile.phone ?? '-'}</p>
+            <p><span className="font-medium">DOB:</span> {formatDate(profile.date_of_birth)}</p>
+            <p><span className="font-medium">Address:</span> {profileAddress || '-'}</p>
+            <selectedRidingFetcher.Form method="post" action={`/manage/person${location.search}`} className="grid gap-1">
+              <input type="hidden" name="intent" value="update-riding" />
+              <input type="hidden" name="profile_id" value={profile.id} />
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">Riding:</span>
+                {isEditingRiding ? (
+                  <>
+                    <input
+                      type="text"
+                      name="riding_name"
+                      value={ridingDraft}
+                      onChange={event => setRidingDraft(event.target.value)}
+                      className="h-8 min-w-[220px] rounded-md border border-input bg-background px-2 text-sm"
+                      list="riding-options"
+                      placeholder="Unassigned"
+                      disabled={selectedRidingFetcher.state !== 'idle'}
+                    />
+                    <Button type="submit" size="icon-xs" variant="outline" disabled={selectedRidingFetcher.state !== 'idle'} aria-label="Save riding">
+                      <Check />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="outline"
+                      onClick={() => {
+                        setIsEditingRiding(false)
+                        setRidingDraft(profile.federal_electoral_district_name ?? '')
+                      }}
+                      disabled={selectedRidingFetcher.state !== 'idle'}
+                      aria-label="Cancel riding edit"
+                    >
+                      <X />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <span>{profile.federal_electoral_district_name || 'Unassigned'}</span>
+                    <input type="hidden" name="riding_name" value={profile.federal_electoral_district_name ?? ''} />
+                    <Button type="button" size="icon-xs" variant="ghost" onClick={() => setIsEditingRiding(true)} aria-label="Edit riding">
+                      <Pencil />
+                    </Button>
+                  </>
+                )}
+              </div>
+              <datalist id="riding-options">
+                {federalDistrictOptions.map(option => (
+                  <option key={option.value} value={option.value} />
+                ))}
+              </datalist>
+              {selectedRidingFetcher.data?.error ? <p className="text-xs text-destructive">{selectedRidingFetcher.data.error}</p> : null}
+              {selectedRidingFetcher.data?.success ? <p className="text-xs text-emerald-600">Riding updated.</p> : null}
+            </selectedRidingFetcher.Form>
           </div>
         </div>
 
