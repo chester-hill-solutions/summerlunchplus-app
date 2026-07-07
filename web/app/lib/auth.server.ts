@@ -7,6 +7,11 @@ import { createClient } from "@/lib/supabase/server";
 
 const ONBOARDING_GUARD_TIMEOUT_MS = Number.parseInt(process.env.ONBOARDING_GUARD_TIMEOUT_MS ?? '15000', 10)
 const onboardingGuardTimeoutMs = Number.isFinite(ONBOARDING_GUARD_TIMEOUT_MS) ? ONBOARDING_GUARD_TIMEOUT_MS : 15000
+const AUTH_PERMISSION_DRIFT_ALERT_TIMEOUT_MS = 2000
+const authPermissionDriftWebhookUrl = (process.env.AUTH_PERMISSION_DRIFT_WEBHOOK_URL ?? '').trim()
+
+const shouldLogAuthInstrumentation =
+  process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -29,7 +34,55 @@ function getOnboardingMode() {
   return mode === "permission" ? "permission" : "role";
 }
 
+const sortedPermissions = (permissions: string[]) => [...permissions].sort()
+
+const emitPermissionDriftAlert = async ({
+  userId,
+  role,
+  jwtPermissions,
+  rolePermissions,
+}: {
+  userId: string
+  role: string
+  jwtPermissions: string[]
+  rolePermissions: string[]
+}) => {
+  const payload = {
+    event: 'auth_permission_drift',
+    userId,
+    role,
+    jwtPermissions,
+    rolePermissions,
+    occurredAt: new Date().toISOString(),
+  }
+
+  console.error('[auth] permission drift detected', payload)
+
+  if (!authPermissionDriftWebhookUrl) return
+
+  try {
+    await withTimeout(
+      fetch(authPermissionDriftWebhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      }).then(() => undefined),
+      AUTH_PERMISSION_DRIFT_ALERT_TIMEOUT_MS,
+      'auth_permission_drift_alert'
+    )
+  } catch (error) {
+    console.error('[auth] permission drift alert webhook failed', {
+      userId,
+      role,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
 export async function requireAuth(request: Request) {
+  const startedAt = Date.now()
   const { supabase, headers } = createClient(request);
   const { data: userData, error: userError } = await supabase.auth.getUser();
   const user = userData?.user;
@@ -49,6 +102,7 @@ export async function requireAuth(request: Request) {
     : [];
 
   let permissions = claimPermissions;
+  let rolePermissions: string[] = []
   const roleScope = rolesUpTo(role);
   if (roleScope.length) {
     const { data: permissionRows, error: permissionsError } = await adminClient
@@ -56,10 +110,40 @@ export async function requireAuth(request: Request) {
       .select("permission")
       .in("role", roleScope);
     if (!permissionsError && permissionRows) {
-      permissions = Array.from(new Set(permissionRows.map((row) => row.permission)));
+      rolePermissions = Array.from(new Set(permissionRows.map((row) => row.permission)));
+      permissions = rolePermissions;
     }
   }
+
+  if (rolePermissions.length) {
+    const sortedJwtPermissions = sortedPermissions(claimPermissions)
+    const sortedRolePermissions = sortedPermissions(rolePermissions)
+    const driftDetected =
+      sortedJwtPermissions.length !== sortedRolePermissions.length ||
+      sortedJwtPermissions.some((permission, index) => permission !== sortedRolePermissions[index])
+
+    if (driftDetected) {
+      void emitPermissionDriftAlert({
+        userId: user.id,
+        role,
+        jwtPermissions: sortedJwtPermissions,
+        rolePermissions: sortedRolePermissions,
+      })
+    }
+  }
+
   const onboardingComplete = Boolean(claims?.onboarding_complete);
+
+  if (shouldLogAuthInstrumentation) {
+    console.info('[auth-instrumentation]', {
+      event: 'require_auth',
+      userId: user.id,
+      role,
+      durationMs: Date.now() - startedAt,
+      claimsPermissionCount: claimPermissions.length,
+      rolePermissionCount: rolePermissions.length,
+    })
+  }
 
   return {
     user,
@@ -69,8 +153,17 @@ export async function requireAuth(request: Request) {
 }
 
 export async function enforceOnboardingGuard(request: Request, opts?: { allowMyForms?: boolean }) {
+  const startedAt = Date.now()
   const auth = await requireAuth(request);
   if (isRoleAtLeast(auth.claims.role, "staff")) {
+    if (shouldLogAuthInstrumentation) {
+      console.info('[auth-instrumentation]', {
+        event: 'onboarding_guard_bypass_staff',
+        userId: auth.user.id,
+        role: auth.claims.role,
+        durationMs: Date.now() - startedAt,
+      })
+    }
     return { ...auth, shouldRedirectToForms: false };
   }
 
@@ -130,6 +223,16 @@ export async function enforceOnboardingGuard(request: Request, opts?: { allowMyF
       needsOnboarding,
     });
     throw redirect("/my-forms", { headers: auth.headers });
+  }
+
+  if (shouldLogAuthInstrumentation) {
+    console.info('[auth-instrumentation]', {
+      event: 'onboarding_guard_complete',
+      userId: auth.user.id,
+      role: auth.claims.role,
+      durationMs: Date.now() - startedAt,
+      shouldRedirectToForms,
+    })
   }
 
   return { ...auth, shouldRedirectToForms };
