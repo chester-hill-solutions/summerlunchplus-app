@@ -36,6 +36,7 @@ export type SuspiciousSignalRow = {
 }
 
 export type PersonLoaderData = {
+  viewerRole: string | null
   profile: ProfileRow
   activityEvents: Array<{
     source: 'form_submission' | 'login_event'

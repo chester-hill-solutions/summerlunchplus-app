@@ -8,6 +8,7 @@ import { runIpEvidenceRecompute } from '@/lib/ip-evidence-recompute.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { refreshSuspiciousSignalsForProfile } from '@/lib/suspicious-signals.server'
 import { adminClient } from '@/lib/supabase/adminClient'
+import { changeEmailForProfileByAdmin } from '@/lib/admin/email-change.server'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -522,6 +523,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   return {
+    viewerRole: auth.claims.role,
     profile: profileRow as ProfileRow,
     activityEvents,
     ipEvidence,
@@ -548,8 +550,57 @@ export async function action({ request }: LoaderFunctionArgs) {
 
   const formData = await request.formData()
   const intent = String(formData.get('intent') ?? '')
-  if (intent !== 'update-riding' && intent !== 'rescan-family' && intent !== 'update-family-form-answer') {
+  if (
+    intent !== 'update-riding' &&
+    intent !== 'rescan-family' &&
+    intent !== 'update-family-form-answer' &&
+    intent !== 'change-email-by-admin'
+  ) {
     return new Response('Unsupported action', { status: 400, headers: auth.headers })
+  }
+
+  if (intent === 'change-email-by-admin') {
+    if (auth.claims.role !== 'admin') {
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    const profileId = String(formData.get('profile_id') ?? '').trim()
+    const newEmail = String(formData.get('new_email') ?? '').trim()
+    const reason = String(formData.get('reason') ?? '').trim()
+    const triggerZoomSync = String(formData.get('trigger_zoom_sync') ?? '1') !== '0'
+
+    if (!profileId) {
+      return { error: 'Missing profile id.' }
+    }
+    if (!newEmail) {
+      return { error: 'New email is required.' }
+    }
+    if (!reason) {
+      return { error: 'Reason is required.' }
+    }
+
+    const appOrigin = new URL(request.url).origin
+    const result = await changeEmailForProfileByAdmin({
+      profileId,
+      newEmailRaw: newEmail,
+      actorUserId: auth.user.id,
+      reason,
+      appOrigin,
+      triggerZoomSync,
+    })
+
+    if (!result.ok) {
+      return {
+        success: false,
+        error: result.error ?? 'Email change failed.',
+        result,
+      }
+    }
+
+    return {
+      success: true,
+      result,
+    }
   }
 
   if (intent === 'update-family-form-answer') {
