@@ -8,11 +8,20 @@ import { createClient } from "@/lib/supabase/server";
 
 const ONBOARDING_GUARD_TIMEOUT_MS = Number.parseInt(process.env.ONBOARDING_GUARD_TIMEOUT_MS ?? '15000', 10)
 const onboardingGuardTimeoutMs = Number.isFinite(ONBOARDING_GUARD_TIMEOUT_MS) ? ONBOARDING_GUARD_TIMEOUT_MS : 15000
+const ONBOARDING_STATUS_CACHE_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 5000
 const AUTH_PERMISSION_DRIFT_ALERT_TIMEOUT_MS = 2000
 const authPermissionDriftWebhookUrl = (process.env.AUTH_PERMISSION_DRIFT_WEBHOOK_URL ?? '').trim()
 
 const shouldLogAuthInstrumentation =
   process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+
+const onboardingStatusCache = new Map<
+  string,
+  {
+    expiresAt: number
+    promise: ReturnType<typeof getSignUpDetailsStatus>
+  }
+>()
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -80,6 +89,43 @@ const emitPermissionDriftAlert = async ({
       error: error instanceof Error ? error.message : String(error),
     })
   }
+}
+
+const getCachedSignUpDetailsStatus = (
+  supabase: ReturnType<typeof createClient>['supabase'],
+  userId: string,
+  role: string
+) => {
+  if (ONBOARDING_STATUS_CACHE_TTL_MS <= 0) {
+    return withTimeout(
+      getSignUpDetailsStatus(supabase, userId, role),
+      onboardingGuardTimeoutMs,
+      'onboarding_guard'
+    )
+  }
+
+  const key = `${userId}:${role}`
+  const now = Date.now()
+  const cached = onboardingStatusCache.get(key)
+  if (cached && cached.expiresAt > now) {
+    return cached.promise
+  }
+
+  const promise = withTimeout(
+    getSignUpDetailsStatus(supabase, userId, role),
+    onboardingGuardTimeoutMs,
+    'onboarding_guard'
+  ).catch(error => {
+    onboardingStatusCache.delete(key)
+    throw error
+  })
+
+  onboardingStatusCache.set(key, {
+    expiresAt: now + ONBOARDING_STATUS_CACHE_TTL_MS,
+    promise,
+  })
+
+  return promise
 }
 
 export async function requireAuth(request: Request) {
@@ -172,11 +218,7 @@ export async function enforceOnboardingGuard(request: Request, opts?: { allowMyF
   const { supabase } = createClient(request);
   let signUpStatus
   try {
-    signUpStatus = await withTimeout(
-      getSignUpDetailsStatus(supabase, auth.user.id, auth.claims.role),
-      onboardingGuardTimeoutMs,
-      'onboarding_guard'
-    )
+    signUpStatus = await getCachedSignUpDetailsStatus(supabase, auth.user.id, auth.claims.role)
   } catch (error) {
     console.error('[auth] onboarding guard lookup failed', {
       emailHint: getMaskedEmailHint(auth.user.email),
