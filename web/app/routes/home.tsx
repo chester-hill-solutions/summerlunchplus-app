@@ -10,7 +10,7 @@ import { isGiftCardReleasedNow } from '@/lib/gift-cards/release.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
-import { normalizeEmail } from '@/lib/email-domain'
+import { getEmailDomainHint, normalizeEmail } from '@/lib/email-domain'
 import {
   Table,
   TableBody,
@@ -228,7 +228,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (shouldLogHomeInstrumentation) {
     console.info('[home-instrumentation]', {
       event: 'home_loader_base',
-      userId: auth.user.id,
+      emailDomainHint: getEmailDomainHint(auth.user.email),
       role: auth.claims.role,
       familyProfiles: family.familyProfileIds.length,
       enrollmentCount: enrollments.length,

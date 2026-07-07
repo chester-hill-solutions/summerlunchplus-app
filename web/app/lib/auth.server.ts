@@ -1,6 +1,7 @@
 import { redirect } from "react-router";
 
 import { adminClient } from "@/lib/supabase/adminClient";
+import { getEmailDomainHint } from "@/lib/email-domain";
 import { getSignUpDetailsStatus } from "@/lib/onboarding.server";
 import { isRoleAtLeast, rolesUpTo } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
@@ -37,19 +38,19 @@ function getOnboardingMode() {
 const sortedPermissions = (permissions: string[]) => [...permissions].sort()
 
 const emitPermissionDriftAlert = async ({
-  userId,
+  emailDomainHint,
   role,
   jwtPermissions,
   rolePermissions,
 }: {
-  userId: string
+  emailDomainHint: string | null
   role: string
   jwtPermissions: string[]
   rolePermissions: string[]
 }) => {
   const payload = {
     event: 'auth_permission_drift',
-    userId,
+    emailDomainHint,
     role,
     jwtPermissions,
     rolePermissions,
@@ -74,7 +75,7 @@ const emitPermissionDriftAlert = async ({
     )
   } catch (error) {
     console.error('[auth] permission drift alert webhook failed', {
-      userId,
+      emailDomainHint,
       role,
       error: error instanceof Error ? error.message : String(error),
     })
@@ -86,6 +87,7 @@ export async function requireAuth(request: Request) {
   const { supabase, headers } = createClient(request);
   const { data: userData, error: userError } = await supabase.auth.getUser();
   const user = userData?.user;
+  const emailDomainHint = getEmailDomainHint(user?.email)
 
   if (userError || !user) {
     throw redirect("/login", { headers });
@@ -124,7 +126,7 @@ export async function requireAuth(request: Request) {
 
     if (driftDetected) {
       void emitPermissionDriftAlert({
-        userId: user.id,
+        emailDomainHint,
         role,
         jwtPermissions: sortedJwtPermissions,
         rolePermissions: sortedRolePermissions,
@@ -137,7 +139,7 @@ export async function requireAuth(request: Request) {
   if (shouldLogAuthInstrumentation) {
     console.info('[auth-instrumentation]', {
       event: 'require_auth',
-      userId: user.id,
+      emailDomainHint,
       role,
       durationMs: Date.now() - startedAt,
       claimsPermissionCount: claimPermissions.length,
@@ -159,7 +161,7 @@ export async function enforceOnboardingGuard(request: Request, opts?: { allowMyF
     if (shouldLogAuthInstrumentation) {
       console.info('[auth-instrumentation]', {
         event: 'onboarding_guard_bypass_staff',
-        userId: auth.user.id,
+        emailDomainHint: getEmailDomainHint(auth.user.email),
         role: auth.claims.role,
         durationMs: Date.now() - startedAt,
       })
@@ -177,7 +179,7 @@ export async function enforceOnboardingGuard(request: Request, opts?: { allowMyF
     )
   } catch (error) {
     console.error('[auth] onboarding guard lookup failed', {
-      userId: auth.user.id,
+      emailDomainHint: getEmailDomainHint(auth.user.email),
       role: auth.claims.role,
       error: error instanceof Error ? error.message : String(error),
     })
@@ -228,7 +230,7 @@ export async function enforceOnboardingGuard(request: Request, opts?: { allowMyF
   if (shouldLogAuthInstrumentation) {
     console.info('[auth-instrumentation]', {
       event: 'onboarding_guard_complete',
-      userId: auth.user.id,
+      emailDomainHint: getEmailDomainHint(auth.user.email),
       role: auth.claims.role,
       durationMs: Date.now() - startedAt,
       shouldRedirectToForms,
