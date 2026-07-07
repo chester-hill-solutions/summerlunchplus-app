@@ -28,6 +28,44 @@ const resolvePublicAppOrigin = (fallbackOrigin: string) => {
   return ensureOrigin(explicitOrigin || fallbackOrigin)
 }
 
+const tryAcquireZoomRunnerLock = async () => {
+  const { data, error } = await adminClient.rpc('zoom_try_advisory_lock', {
+    p_lock_name: 'zoom:runner',
+  })
+  if (error) throw new Error(`Failed to acquire Zoom runner lock: ${error.message}`)
+  return data === true
+}
+
+const releaseZoomRunnerLock = async () => {
+  const { data, error } = await adminClient.rpc('zoom_advisory_unlock', {
+    p_lock_name: 'zoom:runner',
+  })
+  if (error) {
+    console.error('[zoom-jobs][lock] runner unlock failed', { error: error.message })
+    return false
+  }
+  return data === true
+}
+
+const tryAcquireZoomRegistrantReminderLock = async (registrantId: string) => {
+  const { data, error } = await adminClient.rpc('zoom_try_advisory_lock', {
+    p_lock_name: `zoom:registrant-reminder:${registrantId}`,
+  })
+  if (error) throw new Error(`Failed to acquire Zoom registrant reminder lock: ${error.message}`)
+  return data === true
+}
+
+const releaseZoomRegistrantReminderLock = async (registrantId: string) => {
+  const { data, error } = await adminClient.rpc('zoom_advisory_unlock', {
+    p_lock_name: `zoom:registrant-reminder:${registrantId}`,
+  })
+  if (error) {
+    console.error('[zoom-jobs][lock] registrant reminder unlock failed', { registrantId, error: error.message })
+    return false
+  }
+  return data === true
+}
+
 const REPROVISION_HORIZON_MINUTES = 36 * 60
 const REMINDER_WINDOW_MINUTES = 2 * 60
 const POST_CLASS_FOLLOWUP_DELAY_HOURS = 24
@@ -439,6 +477,13 @@ const sendReminderCoverage = async ({ now, appOrigin, onlyClassId }: { now: Date
     }
 
     for (const registrant of registrants ?? []) {
+      const reminderLockAcquired = await tryAcquireZoomRegistrantReminderLock(registrant.id)
+      if (!reminderLockAcquired) {
+        skipped += 1
+        continue
+      }
+
+      try {
       if (registrant.last_sent_at) {
         skipped += 1
         continue
@@ -492,6 +537,9 @@ const sendReminderCoverage = async ({ now, appOrigin, onlyClassId }: { now: Date
         }
       } else {
         failed += 1
+      }
+      } finally {
+        await releaseZoomRegistrantReminderLock(registrant.id)
       }
     }
   }
@@ -940,6 +988,18 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
 }
 
 export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?: Date; appOrigin: string; runId?: string }) => {
+  const lockAcquired = await tryAcquireZoomRunnerLock()
+  if (!lockAcquired) {
+    return {
+      ok: true,
+      runId: runId ?? null,
+      ranAt: now.toISOString(),
+      skipped: true,
+      reason: 'zoom runner lock not acquired',
+    }
+  }
+
+  try {
   console.info('[zoom-jobs] run started', {
     runId: runId ?? null,
     now: now.toISOString(),
@@ -977,6 +1037,9 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     postClassCameraOrPhotoFollowup,
     attendanceRowBackfill,
     attendanceSync,
+  }
+  } finally {
+    await releaseZoomRunnerLock()
   }
 }
 
