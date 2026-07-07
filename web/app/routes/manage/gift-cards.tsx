@@ -28,6 +28,8 @@ type ProfileRow = {
   email: string | null
 }
 
+const GIFT_CARD_STATUS_ORDER: GiftCardAssetRow['status'][] = ['available', 'allocated', 'sent', 'opened', 'used', 'invalid']
+
 const TORONTO_TIME_ZONE = 'America/Toronto'
 
 const parseHourMinuteEnv = (name: string, fallback: number) => {
@@ -129,6 +131,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     created_at: asset.created_at,
   }))
 
+  const assignedProfileCount = rows.filter(row => row.profile_id).length
+  const totalAssetCount = rows.length
+  const statusTotals = GIFT_CARD_STATUS_ORDER.map(status => ({
+    status,
+    count: rows.filter(row => row.status === status).length,
+  }))
+
   return {
     label: 'Gift card assets',
     tableName: 'gift-cards',
@@ -137,6 +146,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       release: `Mon/Fri ${formatTorontoClock(RELEASE_HOUR_TORONTO, RELEASE_MINUTE_TORONTO)}`,
       reminder: `Mon/Fri ${formatTorontoClock(REMINDER_HOUR_TORONTO, REMINDER_MINUTE_TORONTO)}`,
     },
+    statusTotals,
+    totalAssetCount,
     columns: ['provider', 'account_number', 'pin', 'value', 'status', 'asset_url', 'profile_display', 'upload_id', 'created_at'],
     rows,
     columnMeta: {
@@ -146,7 +157,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       value: { label: 'Value' },
       status: { label: 'Status' },
       asset_url: { label: 'Link' },
-      profile_display: { label: 'Assigned profile' },
+      profile_display: { label: `${assignedProfileCount}/${totalAssetCount} Assigned profile` },
       upload_id: { label: 'Upload ID' },
       created_at: { label: 'Created' },
     },
@@ -160,6 +171,15 @@ export default function GiftCardsPage() {
     <TableDisplay
       headerActions={
         <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Totals</span>
+            <span className="rounded border bg-background px-2 py-1 text-foreground">all: {data.totalAssetCount}</span>
+            {data.statusTotals.map(item => (
+              <span key={item.status} className="rounded border bg-background px-2 py-1 text-foreground">
+                {item.status}: {item.count}
+              </span>
+            ))}
+          </div>
           <div className="rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
             <span className="font-medium text-foreground">System timing</span>{' '}
             (timezone: {data.systemTiming.timezone}) - Available: {data.systemTiming.release} - Reminder: {data.systemTiming.reminder}
