@@ -57,6 +57,44 @@ const resolvePublicHubOrigin = (fallbackOrigin: string) => {
   return ensureOrigin(fallbackOrigin)
 }
 
+const tryAcquireGiftCardRunnerLock = async () => {
+  const { data, error } = await adminClient.rpc('zoom_try_advisory_lock', {
+    p_lock_name: 'gift-card:runner',
+  })
+  if (error) throw new Error(`Failed to acquire gift-card runner lock: ${error.message}`)
+  return data === true
+}
+
+const releaseGiftCardRunnerLock = async () => {
+  const { data, error } = await adminClient.rpc('zoom_advisory_unlock', {
+    p_lock_name: 'gift-card:runner',
+  })
+  if (error) {
+    console.error('[gift-cards][lock] unlock failed', { error: error.message })
+    return false
+  }
+  return data === true
+}
+
+const tryAcquireGiftCardAllocationLock = async (allocationId: string) => {
+  const { data, error } = await adminClient.rpc('zoom_try_advisory_lock', {
+    p_lock_name: `gift-card:allocation:${allocationId}`,
+  })
+  if (error) throw new Error(`Failed to acquire gift-card allocation lock: ${error.message}`)
+  return data === true
+}
+
+const releaseGiftCardAllocationLock = async (allocationId: string) => {
+  const { data, error } = await adminClient.rpc('zoom_advisory_unlock', {
+    p_lock_name: `gift-card:allocation:${allocationId}`,
+  })
+  if (error) {
+    console.error('[gift-cards][lock] allocation unlock failed', { allocationId, error: error.message })
+    return false
+  }
+  return data === true
+}
+
 const REMINDER_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_HOUR_TORONTO', isProductionRuntime ? 12 : 11)
 const REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_MINUTE_TORONTO', isProductionRuntime ? 0 : 15)
 
@@ -367,6 +405,13 @@ const sendDueReminders = async (appOrigin: string) => {
   }>
 
   for (const row of rows) {
+    const allocationLockAcquired = await tryAcquireGiftCardAllocationLock(row.id)
+    if (!allocationLockAcquired) {
+      remindersSkipped += 1
+      continue
+    }
+
+    try {
     if (row.blocked) {
       remindersSkipped += 1
       continue
@@ -471,6 +516,9 @@ const sendDueReminders = async (appOrigin: string) => {
     } else {
       remindersSkipped += 1
     }
+    } finally {
+      await releaseGiftCardAllocationLock(row.id)
+    }
   }
 
   return {
@@ -482,6 +530,19 @@ const sendDueReminders = async (appOrigin: string) => {
 }
 
 export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string; runId: string }): Promise<GiftCardJobResult> => {
+  const lockAcquired = await tryAcquireGiftCardRunnerLock()
+  if (!lockAcquired) {
+    return {
+      runId,
+      allocated: 0,
+      remindersSent: 0,
+      remindersSkipped: 0,
+      reminderFailures: 0,
+      errors: ['gift-card runner lock not acquired'],
+    }
+  }
+
+  try {
   const errors: string[] = []
 
   let allocated = 0
@@ -511,5 +572,8 @@ export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string;
     remindersSkipped,
     reminderFailures,
     errors,
+  }
+  } finally {
+    await releaseGiftCardRunnerLock()
   }
 }

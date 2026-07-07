@@ -111,6 +111,19 @@ export const sendTransactionalEmail = async ({
 }: SendTransactionalEmailArgs): Promise<SendTransactionalEmailResult> => {
   const normalizedEmail = toEmail.trim().toLowerCase()
 
+  if (eventKey) {
+    const { data: existing, error: existingError } = await adminClient
+      .from('email_message')
+      .select('id')
+      .eq('event_key', eventKey)
+      .eq('to_email', normalizedEmail)
+      .maybeSingle()
+
+    if (!existingError && existing?.id) {
+      return { status: 'skipped', id: existing.id, error: null }
+    }
+  }
+
   const { data: queuedRow, error: queueError } = await adminClient
     .from('email_message')
     .insert({
