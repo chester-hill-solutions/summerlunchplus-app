@@ -2117,6 +2117,18 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     statusFetcher.submit(formData, { method: 'post' })
   }
 
+  const updateWorkshopEnrollmentStatus = (row: Record<string, unknown>, value: string) => {
+    if (!isWorkshopEnrollment || !canEditStatus || !value) return
+    const enrollmentId = typeof row.id === 'string' ? row.id : ''
+    if (!enrollmentId) return
+
+    const formData = new FormData()
+    formData.set('intent', 'update-status')
+    formData.set('enrollment_id', enrollmentId)
+    formData.set('status', value)
+    statusFetcher.submit(formData, { method: 'post' })
+  }
+
   const fieldKeys = editorConfig ? Object.keys(editorConfig.fields) : []
   const isNumericColumn = (column: string) =>
     editorConfig?.fields[column]?.type === 'number' || columnMeta[column]?.numeric === true
@@ -2789,6 +2801,25 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                               <option value="">(none)</option>
                               <option value="true">true</option>
                               <option value="false">false</option>
+                            </select>
+                          </td>
+                        )
+                      }
+
+                      if (isWorkshopEnrollment && column === 'status' && canEditStatus) {
+                        const statusValue = typeof row.status === 'string' ? row.status : ''
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="overflow-hidden px-4 py-2 font-mono" title={statusValue || '(empty)'}>
+                            <select
+                              value={statusValue}
+                              onChange={event => updateWorkshopEnrollmentStatus(row, event.target.value)}
+                              className={TABLE_SELECT_CLASS_NAME}
+                            >
+                              {Constants.public.Enums.workshop_enrollment_status.map((status: Database['public']['Enums']['workshop_enrollment_status']) => (
+                                <option key={status} value={status}>
+                                  {status}
+                                </option>
+                              ))}
                             </select>
                           </td>
                         )
