@@ -17,6 +17,7 @@ import {
   Link,
   redirect,
   useFetcher,
+  useNavigation,
 } from 'react-router'
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -67,9 +68,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Login() {
   const fetcher = useFetcher<typeof action>()
+  const navigation = useNavigation()
 
   const error = fetcher.data?.error
-  const loading = fetcher.state === 'submitting'
+  const loading = fetcher.state === 'submitting' || navigation.state !== 'idle'
 
   return (
     <AuthStickerBackground dense>
@@ -107,7 +109,7 @@ export default function Login() {
                   </div>
                   {error && <p className="text-sm text-red-500">{error}</p>}
                   <Button type="submit" className="w-full" disabled={loading}>
-                    {loading ? 'Logging in...' : 'Login'}
+                    {loading ? 'Please wait...' : 'Login'}
                   </Button>
                 </div>
                 <div className="mt-4 text-center text-sm">

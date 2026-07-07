@@ -193,6 +193,8 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
     details =
       error.status === 404
         ? "The requested page could not be found."
+        : error.status === 503
+          ? "We are having trouble loading your account right now. Please wait a minute and try again."
         : error.statusText || details;
   } else if (import.meta.env.DEV && error && error instanceof Error) {
     details = error.message;

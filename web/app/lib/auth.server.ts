@@ -5,6 +5,25 @@ import { getSignUpDetailsStatus } from "@/lib/onboarding.server";
 import { isRoleAtLeast, rolesUpTo } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 
+const ONBOARDING_GUARD_TIMEOUT_MS = Number.parseInt(process.env.ONBOARDING_GUARD_TIMEOUT_MS ?? '15000', 10)
+const onboardingGuardTimeoutMs = Number.isFinite(ONBOARDING_GUARD_TIMEOUT_MS) ? ONBOARDING_GUARD_TIMEOUT_MS : 15000
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label}: timed out after ${timeoutMs}ms`))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 function getOnboardingMode() {
   const mode = process.env.ONBOARDING_MODE;
   return mode === "permission" ? "permission" : "role";
@@ -56,7 +75,24 @@ export async function enforceOnboardingGuard(request: Request, opts?: { allowMyF
   }
 
   const { supabase } = createClient(request);
-  const signUpStatus = await getSignUpDetailsStatus(supabase, auth.user.id, auth.claims.role);
+  let signUpStatus
+  try {
+    signUpStatus = await withTimeout(
+      getSignUpDetailsStatus(supabase, auth.user.id, auth.claims.role),
+      onboardingGuardTimeoutMs,
+      'onboarding_guard'
+    )
+  } catch (error) {
+    console.error('[auth] onboarding guard lookup failed', {
+      userId: auth.user.id,
+      role: auth.claims.role,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw new Response('Account loading is taking longer than expected. Please try again in a minute.', {
+      status: 503,
+      headers: auth.headers,
+    })
+  }
   if (!signUpStatus.isComplete) {
     if (!signUpStatus.profileId) {
       throw redirect("/sign-up", { headers: auth.headers });
