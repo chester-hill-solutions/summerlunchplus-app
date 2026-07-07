@@ -43,6 +43,7 @@ export default function ManagePersonOverviewPage() {
   const [giftcardValue, setGiftcardValue] = useState(familyFormAnswers.giftcard_display === 'N/A' ? '' : familyFormAnswers.giftcard_display)
   const [nextEmail, setNextEmail] = useState(profile.email ?? '')
   const [emailChangeReason, setEmailChangeReason] = useState('')
+  const [isProfileEditOpen, setIsProfileEditOpen] = useState(false)
 
   useEffect(() => {
     setSelectedRiding(profile.federal_electoral_district_name ?? '')
@@ -86,6 +87,7 @@ export default function ManagePersonOverviewPage() {
 
   useEffect(() => {
     setNextEmail(profile.email ?? '')
+    setIsProfileEditOpen(false)
   }, [profile.email, profile.id])
 
   useEffect(() => {
@@ -109,55 +111,62 @@ export default function ManagePersonOverviewPage() {
               <p><span className="font-medium">Phone:</span> {profile.phone ?? '-'}</p>
               <p><span className="font-medium">DOB:</span> {formatDate(profile.date_of_birth)}</p>
               <p><span className="font-medium">Address:</span> {profileAddress || '-'}</p>
-              {viewerRole === 'admin' ? <div className="rounded border border-slate-200 bg-white/80 p-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Admin email change</p>
-                <emailChangeFetcher.Form
-                  method="post"
-                  action={`/manage/person${location.search}`}
-                  className="mt-2 grid gap-2"
-                >
-                  <input type="hidden" name="intent" value="change-email-by-admin" />
-                  <input type="hidden" name="profile_id" value={profile.id} />
-                  <input type="hidden" name="trigger_zoom_sync" value="1" />
-                  <input
-                    type="email"
-                    name="new_email"
-                    value={nextEmail}
-                    onChange={event => setNextEmail(event.target.value)}
-                    className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                    placeholder="name@gmail.com"
-                    required
-                    disabled={isChangingEmail}
-                  />
-                  <textarea
-                    name="reason"
-                    value={emailChangeReason}
-                    onChange={event => setEmailChangeReason(event.target.value)}
-                    rows={2}
-                    className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    placeholder="Reason for changing this email"
-                    required
-                    disabled={isChangingEmail}
-                  />
-                  <Button type="submit" size="sm" variant="outline" disabled={isChangingEmail}>
-                    {isChangingEmail ? 'Applying email change...' : 'Change email and re-sync Zoom'}
-                  </Button>
-                </emailChangeFetcher.Form>
-                {emailChangeFetcher.data?.error ? (
-                  <p className="mt-2 text-xs text-destructive">{emailChangeFetcher.data.error}</p>
-                ) : null}
-                {emailChangeFetcher.data?.success && emailChangeFetcher.data.result ? (
-                  <p className="mt-2 text-xs text-emerald-700">
-                    Updated {emailChangeFetcher.data.result.oldEmail} to {emailChangeFetcher.data.result.newEmail}. status=
-                    {emailChangeFetcher.data.result.status}; invites={emailChangeFetcher.data.result.inviteRowsUpdated}; classSync=
-                    {emailChangeFetcher.data.result.classSync.results.filter(entry => entry.ok).length}/
-                    {emailChangeFetcher.data.result.classSync.results.length}; log=
-                    {emailChangeFetcher.data.result.logId ?? 'n/a'}
-                  </p>
-                ) : null}
-              </div> : null}
               <div>
-                <selectedRidingFetcher.Form method="post" action={`/manage/person${location.search}`} className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setIsProfileEditOpen(open => !open)}>
+                  {isProfileEditOpen ? 'Close profile edit' : 'Open profile edit'}
+                </Button>
+              </div>
+              {isProfileEditOpen ? (
+                <div className="rounded border border-slate-200 bg-white/80 p-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Profile edit</p>
+                  {viewerRole === 'admin' ? <div className="mt-2 rounded border border-slate-200 bg-white p-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Admin email change</p>
+                    <emailChangeFetcher.Form
+                      method="post"
+                      action={`/manage/person${location.search}`}
+                      className="mt-2 grid gap-2"
+                    >
+                      <input type="hidden" name="intent" value="change-email-by-admin" />
+                      <input type="hidden" name="profile_id" value={profile.id} />
+                      <input type="hidden" name="trigger_zoom_sync" value="1" />
+                      <input
+                        type="email"
+                        name="new_email"
+                        value={nextEmail}
+                        onChange={event => setNextEmail(event.target.value)}
+                        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                        placeholder="name@gmail.com"
+                        required
+                        disabled={isChangingEmail}
+                      />
+                      <textarea
+                        name="reason"
+                        value={emailChangeReason}
+                        onChange={event => setEmailChangeReason(event.target.value)}
+                        rows={2}
+                        className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        placeholder="Reason for changing this email"
+                        required
+                        disabled={isChangingEmail}
+                      />
+                      <Button type="submit" size="sm" variant="outline" disabled={isChangingEmail}>
+                        {isChangingEmail ? 'Applying email change...' : 'Change email and re-sync Zoom'}
+                      </Button>
+                    </emailChangeFetcher.Form>
+                    {emailChangeFetcher.data?.error ? (
+                      <p className="mt-2 text-xs text-destructive">{emailChangeFetcher.data.error}</p>
+                    ) : null}
+                    {emailChangeFetcher.data?.success && emailChangeFetcher.data.result ? (
+                      <p className="mt-2 text-xs text-emerald-700">
+                        Updated {emailChangeFetcher.data.result.oldEmail} to {emailChangeFetcher.data.result.newEmail}. status=
+                        {emailChangeFetcher.data.result.status}; invites={emailChangeFetcher.data.result.inviteRowsUpdated}; classSync=
+                        {emailChangeFetcher.data.result.classSync.results.filter(entry => entry.ok).length}/
+                        {emailChangeFetcher.data.result.classSync.results.length}; log=
+                        {emailChangeFetcher.data.result.logId ?? 'n/a'}
+                      </p>
+                    ) : null}
+                  </div> : null}
+                  <selectedRidingFetcher.Form method="post" action={`/manage/person${location.search}`} className="mt-2 flex flex-wrap items-center gap-2">
                 <input type="hidden" name="intent" value="update-riding" />
                 <input type="hidden" name="profile_id" value={profile.id} />
                 <input type="hidden" name="riding_name" value={selectedRiding} />
@@ -175,7 +184,8 @@ export default function ManagePersonOverviewPage() {
                 {selectedRidingFetcher.data?.error ? <p className="basis-full text-xs text-destructive">{selectedRidingFetcher.data.error}</p> : null}
                 {selectedRidingFetcher.data?.success ? <p className="basis-full text-xs text-emerald-600">Riding updated.</p> : null}
               </selectedRidingFetcher.Form>
-            </div>
+                </div>
+              ) : null}
           </div>
         </div>
 
