@@ -30,22 +30,6 @@ type ProfileRow = {
 
 const GIFT_CARD_STATUS_ORDER: GiftCardAssetRow['status'][] = ['available', 'allocated', 'sent', 'opened', 'used', 'invalid']
 
-const TORONTO_TIME_ZONE = 'America/Toronto'
-
-const parseHourMinuteEnv = (name: string, fallback: number) => {
-  if (typeof process === 'undefined') return fallback
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const parsed = Number.parseInt(raw, 10)
-  return Number.isFinite(parsed) ? parsed : fallback
-}
-
-const isProductionRuntime = typeof process !== 'undefined' && process.env.NODE_ENV === 'production'
-const RELEASE_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_RELEASE_HOUR_TORONTO', 11)
-const RELEASE_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_RELEASE_MINUTE_TORONTO', isProductionRuntime ? 45 : 0)
-const REMINDER_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_HOUR_TORONTO', isProductionRuntime ? 12 : 11)
-const REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_MINUTE_TORONTO', isProductionRuntime ? 0 : 15)
-
 const formatMoney = (value: number) =>
   new Intl.NumberFormat('en-CA', {
     style: 'currency',
@@ -66,16 +50,6 @@ const profileDisplay = (profile: ProfileRow | null, fallbackId: string) => {
   if (full) return full
   if (profile?.email?.trim()) return profile.email.trim()
   return fallbackId ? `Profile ${fallbackId.slice(0, 8)}` : '—'
-}
-
-const formatTorontoClock = (hour: number, minute: number) => {
-  const probe = new Date(Date.UTC(2026, 0, 2, hour + 5, minute, 0, 0))
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: TORONTO_TIME_ZONE,
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  }).format(probe)
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -141,11 +115,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     label: 'Gift card assets',
     tableName: 'gift-cards',
-    systemTiming: {
-      timezone: TORONTO_TIME_ZONE,
-      release: `Mon/Fri ${formatTorontoClock(RELEASE_HOUR_TORONTO, RELEASE_MINUTE_TORONTO)}`,
-      reminder: `Mon/Fri ${formatTorontoClock(REMINDER_HOUR_TORONTO, REMINDER_MINUTE_TORONTO)}`,
-    },
     statusTotals,
     totalAssetCount,
     columns: ['provider', 'account_number', 'pin', 'value', 'status', 'asset_url', 'profile_display', 'upload_id', 'created_at'],
@@ -181,8 +150,8 @@ export default function GiftCardsPage() {
             ))}
           </div>
           <div className="rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">System timing</span>{' '}
-            (timezone: {data.systemTiming.timezone}) - Available: {data.systemTiming.release} - Reminder: {data.systemTiming.reminder}
+            <span className="font-medium text-foreground">Availability rule</span> Available and reminder eligible after 6
+            hours qualified and past class-week Friday noon (Toronto).
           </div>
           <Button asChild>
             <Link to="/manage/gift-cards/upload">Upload gift cards</Link>
