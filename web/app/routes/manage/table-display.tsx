@@ -140,6 +140,7 @@ export type LoaderData = {
   editorConfig?: EditorConfig
   foreignKeyOptions?: Record<string, ForeignKeyOption[]>
   giftCardOptions?: string[]
+  federalDistrictOptions?: Array<{ value: string; label: string }>
 }
 
 type RegisterStudentActionResult = {
@@ -790,6 +791,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [attendanceModalPhotoStatus, setAttendanceModalPhotoStatus] = useState('')
   const [attendanceModalInitialPhotoStatus, setAttendanceModalInitialPhotoStatus] = useState('')
   const [attendanceModalSavingStatus, setAttendanceModalSavingStatus] = useState(false)
+  const [workshopEditModalRow, setWorkshopEditModalRow] = useState<Record<string, unknown> | null>(null)
+  const [workshopEditGiftcardValue, setWorkshopEditGiftcardValue] = useState('')
+  const [workshopEditStatusValue, setWorkshopEditStatusValue] = useState('')
+  const [workshopEditRidingValue, setWorkshopEditRidingValue] = useState('')
   const isClassAttendance = tableName === 'class-attendance'
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const supportsFamilyContextHover = isWorkshopEnrollmentTable || isClassAttendance
@@ -797,6 +802,11 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const serverSideQuery = Boolean(source?.serverSideQuery)
   const giftCardOptions = Array.isArray(source?.giftCardOptions)
     ? source.giftCardOptions.filter(option => typeof option === 'string' && option.trim())
+    : []
+  const federalDistrictOptions = Array.isArray(source?.federalDistrictOptions)
+    ? source.federalDistrictOptions.filter(
+        option => option && typeof option.value === 'string' && typeof option.label === 'string'
+      )
     : []
   const debugPerf = searchParams.get('debugPerf') === '1'
   const timezoneOptions = useMemo(() => {
@@ -898,6 +908,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     setCreateValues({})
     setEditingRowKey(null)
     setEditValues({})
+    setWorkshopEditModalRow(null)
+    setWorkshopEditGiftcardValue('')
+    setWorkshopEditStatusValue('')
+    setWorkshopEditRidingValue('')
   }, [editorFetcher.data])
 
   useEffect(() => {
@@ -2103,46 +2117,6 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     statusFetcher.submit(formData, { method: 'post' })
   }
 
-  const updateWorkshopEnrollmentStatus = (row: Record<string, unknown>, value: string) => {
-    if (!isWorkshopEnrollment || !canEditStatus || !value) return
-    const enrollmentId = typeof row.id === 'string' ? row.id : ''
-    if (!enrollmentId) return
-
-    const formData = new FormData()
-    formData.set('intent', 'update-status')
-    formData.set('enrollment_id', enrollmentId)
-    formData.set('status', value)
-    statusFetcher.submit(formData, { method: 'post' })
-  }
-
-  const updateWorkshopEnrollmentGiftcard = (row: Record<string, unknown>) => {
-    if (!isWorkshopEnrollment || !canEditStatus) return
-    if (giftCardOptions.length === 0) {
-      window.alert('No configured gift card options are available for editing.')
-      return
-    }
-    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
-    if (!profileId) return
-
-    const current = typeof row.giftcard_display === 'string' ? row.giftcard_display : ''
-    const suggested = current === 'N/A' ? '' : current
-    const next = window.prompt(`Gift card preference (${giftCardOptions.join(', ')})`, suggested)
-    if (next == null) return
-    const value = next.trim()
-    if (!value) return
-    if (!giftCardOptions.includes(value)) {
-      window.alert('Gift card value must match configured form options exactly.')
-      return
-    }
-
-    const formData = new FormData()
-    formData.set('intent', 'update-family-form-answer')
-    formData.set('profile_id', profileId)
-    formData.set('question_code', 'gift_card_store_preference')
-    formData.set('value', value)
-    statusFetcher.submit(formData, { method: 'post' })
-  }
-
   const fieldKeys = editorConfig ? Object.keys(editorConfig.fields) : []
   const isNumericColumn = (column: string) =>
     editorConfig?.fields[column]?.type === 'number' || columnMeta[column]?.numeric === true
@@ -2174,6 +2148,27 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     setEditingRowKey(rowKeyFor(row, editorConfig))
   }
 
+  const beginWorkshopEditModal = (row: Record<string, unknown>) => {
+    beginEdit(row)
+    const currentGiftcard = typeof row.giftcard_display === 'string' ? row.giftcard_display : ''
+    const currentStatus = typeof row.status === 'string' ? row.status : ''
+    const currentRiding = typeof row.riding_display === 'string' ? row.riding_display : ''
+    setWorkshopEditGiftcardValue(currentGiftcard === 'N/A' ? '' : currentGiftcard)
+    setWorkshopEditStatusValue(currentStatus)
+    setWorkshopEditRidingValue(currentRiding === 'N/A' || currentRiding === '...' ? '' : currentRiding)
+    setWorkshopEditModalRow(row)
+  }
+
+  const closeWorkshopEditModal = () => {
+    if (editorFetcher.state === 'submitting') return
+    setWorkshopEditModalRow(null)
+    setEditingRowKey(null)
+    setEditValues({})
+    setWorkshopEditGiftcardValue('')
+    setWorkshopEditStatusValue('')
+    setWorkshopEditRidingValue('')
+  }
+
   const submitCreate = () => {
     if (!editorConfig) return
     const formData = new FormData()
@@ -2202,6 +2197,32 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     for (const keyColumn of editorConfig.primaryKey) {
       formData.set(`pk_${keyColumn}`, String(row[keyColumn] ?? ''))
     }
+    editorFetcher.submit(formData, { method: 'post' })
+  }
+
+  const submitWorkshopEnrollmentModalUpdate = (row: Record<string, unknown>) => {
+    if (!editorConfig || !isWorkshopEnrollment) return
+    const formData = new FormData()
+    formData.set('intent', 'update-workshop-enrollment-modal')
+    for (const fieldName of fieldKeys) {
+      if (fieldName === 'profile_id') continue
+      const value = editValues[fieldName] ?? ''
+      formData.set(`field_${fieldName}`, value)
+      if (editorConfig.fields[fieldName]?.type === 'datetime') {
+        formData.set(`field_${fieldName}__tz_offset`, value ? getOffsetMinutesForLocalDateTime(value) : '')
+      }
+    }
+    for (const keyColumn of editorConfig.primaryKey) {
+      formData.set(`pk_${keyColumn}`, String(row[keyColumn] ?? ''))
+    }
+
+    const currentProfileId =
+      (typeof editValues.profile_id === 'string' && editValues.profile_id) ||
+      (typeof row.profile_id === 'string' ? row.profile_id : '')
+    formData.set('profile_id_for_giftcard', currentProfileId)
+    formData.set('giftcard_value', workshopEditGiftcardValue.trim())
+    formData.set('status_value', workshopEditStatusValue)
+    formData.set('riding_name', workshopEditRidingValue)
     editorFetcher.submit(formData, { method: 'post' })
   }
 
@@ -2773,47 +2794,6 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                         )
                       }
 
-                      if (isWorkshopEnrollment && column === 'status' && canEditStatus) {
-                        const statusValue = typeof row.status === 'string' ? row.status : ''
-                        return (
-                          <td key={`cell-${absoluteRowIndex}-${column}`} className="overflow-hidden px-4 py-2 font-mono" title={statusValue || '(empty)'}>
-                            <select
-                              value={statusValue}
-                              onChange={event => updateWorkshopEnrollmentStatus(row, event.target.value)}
-                              className={TABLE_SELECT_CLASS_NAME}
-                            >
-                              {Constants.public.Enums.workshop_enrollment_status.map((status: Database['public']['Enums']['workshop_enrollment_status']) => (
-                                <option key={status} value={status}>
-                                  {status}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                        )
-                      }
-
-                      if (isWorkshopEnrollment && column === 'giftcard_display' && canEditStatus) {
-                        const giftcardValue = typeof row.giftcard_display === 'string' ? row.giftcard_display : ''
-                        return (
-                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title={giftcardValue || '(empty)'}>
-                            <div className="flex items-center gap-2">
-                              <span className="max-w-44 truncate">{giftcardValue || 'N/A'}</span>
-                              <button
-                                type="button"
-                                onClick={event => {
-                                  event.stopPropagation()
-                                  updateWorkshopEnrollmentGiftcard(row)
-                                }}
-                                disabled={giftCardOptions.length === 0}
-                                className="rounded border border-input px-2 py-1 text-xs hover:bg-muted"
-                              >
-                                Edit
-                              </button>
-                            </div>
-                          </td>
-                        )
-                      }
-
                       if (isClassAttendance && column === 'delete_row' && canEditStatus) {
                         const classId = typeof row.class_id === 'string' ? row.class_id : ''
                         const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
@@ -3089,14 +3069,22 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                       )
                     })}
                     {canInlineUpdate ? (
-                      <td className="px-4 py-2" title={isEditing ? 'Cancel editing row' : 'Edit row'}>
+                      <td className="px-4 py-2" title={isEditing ? (isWorkshopEnrollment ? 'Close edit modal' : 'Cancel editing row') : 'Edit row'}>
                         <button
                           type="button"
                           className="rounded border border-input px-2 py-1 text-xs"
                           onClick={() => {
                             if (isEditing) {
-                              setEditingRowKey(null)
-                              setEditValues({})
+                              if (isWorkshopEnrollment) {
+                                closeWorkshopEditModal()
+                              } else {
+                                setEditingRowKey(null)
+                                setEditValues({})
+                              }
+                              return
+                            }
+                            if (isWorkshopEnrollment) {
+                              beginWorkshopEditModal(row)
                               return
                             }
                             beginEdit(row)
@@ -3108,7 +3096,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                     ) : null}
                   </tr>
 
-                  {isEditing && editorConfig ? (
+                  {isEditing && editorConfig && !isWorkshopEnrollment ? (
                     <tr key={`edit-${rowKey}`} className="border-t bg-muted/10">
                       <td colSpan={columns.length + (canInlineUpdate ? 1 : 0)} className="px-4 py-3">
                         <div className="space-y-3">
@@ -3145,6 +3133,139 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           </tbody>
         </table>
       </div>
+
+      {workshopEditModalRow && editorConfig && isWorkshopEnrollment
+        ? (() => {
+            const editableFieldKeys = new Set([...fieldKeys.filter(fieldName => fieldName !== 'profile_id'), 'status', 'riding_display', 'giftcard_display'])
+            const editableFormFieldKeys = fieldKeys.filter(fieldName => fieldName !== 'profile_id')
+            const readableColumns = columns.filter(column => !editableFieldKeys.has(column))
+            const profileIdForGiftcard =
+              (typeof editValues.profile_id === 'string' && editValues.profile_id) ||
+              (typeof workshopEditModalRow.profile_id === 'string' ? workshopEditModalRow.profile_id : '')
+            const profileDisplayValue =
+              typeof workshopEditModalRow.profile_display === 'string' && workshopEditModalRow.profile_display
+                ? workshopEditModalRow.profile_display
+                : profileIdForGiftcard || 'N/A'
+
+            return createPortal(
+              <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+                <div className="w-full max-w-6xl rounded-md border bg-card p-4 shadow-2xl">
+                  <div className="mb-3 flex items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-lg font-semibold">Edit workshop enrollment</h2>
+                      <p className="text-xs text-muted-foreground">Editable fields plus read-only context from this row.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeWorkshopEditModal}
+                      className="rounded border border-input px-2 py-1 text-xs hover:bg-muted"
+                      disabled={editorFetcher.state === 'submitting'}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <section className="rounded border bg-muted/10 p-3">
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Editable</h3>
+                      <div className="mb-3 grid gap-1 text-xs">
+                        <span className="text-muted-foreground">Profile</span>
+                        <div className="rounded border bg-background px-2 py-2 font-mono">{profileDisplayValue}</div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {editableFormFieldKeys.map(fieldName => renderField(fieldName, editorConfig.fields[fieldName], editValues, setEditValues))}
+                      </div>
+
+                      <div className="mt-3 grid gap-1 text-xs">
+                        <span className="text-muted-foreground">Status</span>
+                        <select
+                          value={workshopEditStatusValue}
+                          onChange={event => setWorkshopEditStatusValue(event.target.value)}
+                          className={FORM_SELECT_CLASS_NAME}
+                          disabled={editorFetcher.state === 'submitting'}
+                        >
+                          {Constants.public.Enums.workshop_enrollment_status.map(
+                            (status: Database['public']['Enums']['workshop_enrollment_status']) => (
+                              <option key={status} value={status}>
+                                {status}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </div>
+
+                      <div className="mt-3 grid gap-1 text-xs">
+                        <span className="text-muted-foreground">Riding</span>
+                        <Combobox
+                          value={workshopEditRidingValue}
+                          onChange={setWorkshopEditRidingValue}
+                          options={[{ value: '', label: 'Unassigned' }, ...federalDistrictOptions]}
+                          placeholder="Select riding"
+                          disabled={editorFetcher.state === 'submitting'}
+                        />
+                      </div>
+
+                      <div className="mt-3 grid gap-1 text-xs">
+                        <span className="text-muted-foreground">Gift card preference</span>
+                        <Combobox
+                          value={workshopEditGiftcardValue}
+                          onChange={setWorkshopEditGiftcardValue}
+                          options={giftCardOptions.map(option => ({ value: option, label: option }))}
+                          placeholder="Select gift card"
+                          disabled={giftCardOptions.length === 0 || editorFetcher.state === 'submitting'}
+                        />
+                        {giftCardOptions.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No configured options found for gift card preference.</p>
+                        ) : null}
+                        {!profileIdForGiftcard ? (
+                          <p className="text-xs text-muted-foreground">Gift card updates require a profile id on this row.</p>
+                        ) : null}
+                      </div>
+                    </section>
+
+                    <section className="rounded border bg-muted/10 p-3">
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Read only</h3>
+                      <div className="grid max-h-[50vh] gap-2 overflow-auto pr-1 text-xs">
+                        {readableColumns.map(column => {
+                          const labelText = (columnMeta[column]?.label ?? column).replace(/_/g, ' ')
+                          const valueText = getCellValue(column, workshopEditModalRow, tableName) || 'N/A'
+                          return (
+                            <div key={`readonly-${column}`} className="rounded border bg-background/80 px-2 py-1">
+                              <span className="font-medium text-muted-foreground">{labelText}: </span>
+                              <span className="font-mono">{valueText}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </section>
+                  </div>
+
+                  <div className="mt-4 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => submitWorkshopEnrollmentModalUpdate(workshopEditModalRow)}
+                      disabled={editorFetcher.state === 'submitting'}
+                      className="rounded bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
+                    >
+                      {editorFetcher.state === 'submitting' ? 'Saving...' : 'Save changes'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeWorkshopEditModal}
+                      disabled={editorFetcher.state === 'submitting'}
+                      className="rounded border border-input px-3 py-2 text-xs"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  {editorFetcher.data?.error ? <p className="mt-2 text-xs text-destructive">{editorFetcher.data.error}</p> : null}
+                </div>
+              </div>,
+              document.body
+            )
+          })()
+        : null}
 
       {attendancePhotoModalRow
         ? (() => {

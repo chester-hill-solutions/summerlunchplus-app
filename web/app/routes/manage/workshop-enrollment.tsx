@@ -52,15 +52,34 @@ const parseEnrollmentField = (
 export async function loader(args: Route.LoaderArgs) {
   const base = await loadWorkshopEnrollmentData(args.request)
   let giftCardOptions: string[] = []
+  let federalDistrictOptions: Array<{ value: string; label: string }> = []
   try {
     giftCardOptions = await loadEditableQuestionOptions(GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
   } catch (error) {
     console.error('[workshop enrollment] unable to load gift card question options', error)
   }
 
+  try {
+    const { data, error } = await adminClient
+      .from('federal_electoral_district')
+      .select('name')
+      .order('name', { ascending: true })
+    if (error) {
+      console.error('[workshop enrollment] unable to load federal district options', error)
+    } else {
+      federalDistrictOptions = (data ?? [])
+        .map(row => (typeof row.name === 'string' ? row.name.trim() : ''))
+        .filter(Boolean)
+        .map(name => ({ value: name, label: name }))
+    }
+  } catch (error) {
+    console.error('[workshop enrollment] unable to load federal district options', error)
+  }
+
   return {
     ...base,
     giftCardOptions,
+    federalDistrictOptions,
   }
 }
 
@@ -187,6 +206,107 @@ export async function action({ request }: Route.ActionArgs) {
       value: result.value,
       gift_card_question_code: GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
     }
+  }
+
+  if (intent === 'update-workshop-enrollment-modal') {
+    if (!isRoleAtLeast(auth.claims.role, 'admin')) {
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    const definition = TABLE_DEFINITIONS['class-enrollment']
+    if (!definition?.editor) {
+      return { error: 'Editing is not enabled for workshop enrollments.' }
+    }
+
+    const payload: Record<string, unknown> = {}
+    for (const [fieldName, fieldConfig] of Object.entries(definition.editor.fields)) {
+      if (fieldName === 'profile_id') continue
+      const parsed = parseEnrollmentField(formData, fieldName, fieldConfig.type, fieldConfig.nullable)
+      if (!parsed.valid) {
+        return { error: `Invalid value for ${fieldConfig.label ?? fieldName}.` }
+      }
+      if (
+        fieldConfig.required &&
+        (parsed.value === '' || parsed.value === null || parsed.value === undefined)
+      ) {
+        return { error: `${fieldConfig.label ?? fieldName} is required.` }
+      }
+      payload[fieldName] = parsed.value === '' ? null : parsed.value
+    }
+
+    const statusValueRaw = String(formData.get('status_value') ?? '').trim()
+    if (!statusValueRaw) {
+      return { error: 'Status is required.' }
+    }
+    if (
+      !Constants.public.Enums.workshop_enrollment_status.includes(
+        statusValueRaw as Database['public']['Enums']['workshop_enrollment_status']
+      )
+    ) {
+      return { error: 'Invalid status.' }
+    }
+    payload.status = statusValueRaw
+
+    const enrollmentId = String(formData.get('pk_id') ?? '')
+    if (!enrollmentId) {
+      return { error: 'Missing key field id.' }
+    }
+
+    const { supabase } = createClient(request)
+    const { error: updateError } = await supabase
+      .from('workshop_enrollment')
+      .update(payload)
+      .eq('id', enrollmentId)
+
+    if (updateError) {
+      return { error: updateError.message }
+    }
+
+    const giftcardValue = String(formData.get('giftcard_value') ?? '').trim()
+    const giftcardProfileId = String(formData.get('profile_id_for_giftcard') ?? '').trim()
+    const ridingNameRaw = String(formData.get('riding_name') ?? '').trim()
+    const ridingName = ridingNameRaw || null
+
+    if (giftcardProfileId) {
+      if (ridingName) {
+        const { data: districtRow, error: districtError } = await adminClient
+          .from('federal_electoral_district')
+          .select('name')
+          .eq('name', ridingName)
+          .maybeSingle()
+
+        if (districtError) {
+          return { error: districtError.message }
+        }
+        if (!districtRow?.name) {
+          return { error: 'Selected riding does not exist.' }
+        }
+      }
+
+      const { error: ridingUpdateError } = await adminClient
+        .from('profile')
+        .update({ federal_electoral_district_name: ridingName })
+        .eq('id', giftcardProfileId)
+
+      if (ridingUpdateError) {
+        return { error: ridingUpdateError.message }
+      }
+    }
+
+    if (giftcardValue && giftcardProfileId) {
+      const giftcardResult = await upsertAdminFamilyFormAnswer({
+        seedProfileId: giftcardProfileId,
+        questionCode: GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
+        value: giftcardValue,
+        actorUserId: auth.user.id,
+      })
+
+      if (!giftcardResult.ok) {
+        return { error: giftcardResult.error }
+      }
+    }
+
+    return { success: true }
   }
 
   if (intent !== 'insert-row' && intent !== 'update-row') {
