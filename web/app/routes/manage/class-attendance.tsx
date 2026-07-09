@@ -153,6 +153,7 @@ type FormAnswerPreferenceRow = {
 
 const IN_CLAUSE_BATCH_SIZE = 150
 const CLASS_ATTENDANCE_FETCH_BATCH_SIZE = 1000
+const RELATED_FETCH_BATCH_SIZE = 1000
 
 const isSchemaMismatchError = (error: { code?: string | null; message?: string | null } | null) => {
   if (!error) return false
@@ -331,12 +332,19 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('class_zoom_registrant')
-      .select('class_id, profile_id, zoom_registrant_id, zoom_join_url, last_sent_at')
-      .in('class_id', chunk)
-    if (error) throw new Response(error.message, { status: 500 })
-    registrantRows.push(...((data ?? []) as RegistrantRow[]))
+    for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
+      const { data, error } = await adminClient
+        .from('class_zoom_registrant')
+        .select('class_id, profile_id, zoom_registrant_id, zoom_join_url, last_sent_at')
+        .in('class_id', chunk)
+        .order('class_id', { ascending: true })
+        .order('profile_id', { ascending: true })
+        .range(offset, offset + RELATED_FETCH_BATCH_SIZE - 1)
+      if (error) throw new Response(error.message, { status: 500 })
+      const rows = (data ?? []) as RegistrantRow[]
+      registrantRows.push(...rows)
+      if (rows.length < RELATED_FETCH_BATCH_SIZE) break
+    }
   }
 
   for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
