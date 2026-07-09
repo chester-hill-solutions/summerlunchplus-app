@@ -557,11 +557,19 @@ const ensureRegistrantsForClass = async ({
       }
     }
 
-    const registrant = await zoomApiClient.registerParticipant(meetingId, {
-      first_name: identity.firstName,
-      last_name: identity.lastName,
-      email: identity.email,
-    })
+    let registrant: Awaited<ReturnType<typeof zoomApiClient.registerParticipant>>
+    try {
+      registrant = await zoomApiClient.registerParticipant(meetingId, {
+        first_name: identity.firstName,
+        last_name: identity.lastName,
+        email: identity.email,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown registrant creation error'
+      throw new Error(
+        `${message} | attempted_profile_id=${identity.profileId} | attempted_email=${identity.email}`
+      )
+    }
 
     const tokenHash = hashZlrToken(newZlrToken())
     const { error: upsertError } = await adminClient.from('class_zoom_registrant').upsert(
