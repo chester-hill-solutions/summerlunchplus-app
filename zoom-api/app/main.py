@@ -176,6 +176,23 @@ def healthz() -> dict[str, str]:
 
 def _as_http_exception(exc: httpx.HTTPStatusError) -> HTTPException:
     status = exc.response.status_code
+    payload = None
+    try:
+        payload = exc.response.json()
+    except ValueError:
+        payload = exc.response.text
+
+    upstream_detail = None
+    if isinstance(payload, dict):
+        message = payload.get("message")
+        code = payload.get("code")
+        if isinstance(message, str) and message.strip():
+            upstream_detail = f"{message.strip()}"
+            if code is not None:
+                upstream_detail = f"{upstream_detail} (zoom_code={code})"
+    elif isinstance(payload, str) and payload.strip():
+        upstream_detail = payload.strip()
+
     if status == 404:
         detail = "Zoom resource not found. Check meeting/user identifiers."
     elif status == 403:
@@ -184,6 +201,19 @@ def _as_http_exception(exc: httpx.HTTPStatusError) -> HTTPException:
         detail = "Zoom rate limit exceeded. Retry shortly."
     else:
         detail = f"Zoom API request failed with status {status}."
+
+    if upstream_detail:
+        detail = f"{detail} {upstream_detail}"
+
+    print(
+        "[zoom-api] upstream request failed",
+        {
+            "status": status,
+            "method": exc.request.method if exc.request else None,
+            "url": str(exc.request.url) if exc.request else None,
+            "payload": payload,
+        },
+    )
     return HTTPException(status_code=status, detail=detail)
 
 @app.post("/zoom/connect", dependencies=[Depends(get_api_key)])
