@@ -8,7 +8,7 @@ import { isGiftCardReleasedNow } from '@/lib/gift-cards/release.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
-import { runZoomJobsForClass } from '@/lib/zoom-jobs/runner.server'
+import { runZoomRegistrantForStudent } from '@/lib/zoom-jobs/runner.server'
 import { Download } from 'lucide-react'
 import { Form, useLocation } from 'react-router'
 import type { Route } from './+types/class-attendance'
@@ -1248,9 +1248,16 @@ export async function action({ request }: Route.ActionArgs) {
       const hasGuardianFallbackEmail = guardianEmailCount > 0
       const identitySource = hasProfileEmail ? 'profile' : hasGuardianFallbackEmail ? 'guardian_fallback' : 'none'
 
-      const appOrigin = new URL(request.url).origin
-      const runResult = await runZoomJobsForClass({ classId, appOrigin, runId: `manual-row-${Date.now().toString(36)}` })
+      const runResult = await runZoomRegistrantForStudent({
+        classId,
+        profileId,
+        runId: `manual-row-${Date.now().toString(36)}`,
+      })
       const provision = runResult.provision
+      const firstRegistrantFailure =
+        provision && typeof provision === 'object' && 'registrantFailures' in provision && Array.isArray(provision.registrantFailures)
+          ? provision.registrantFailures.find(failure => failure.profileId === profileId) ?? provision.registrantFailures[0] ?? null
+          : null
       const candidateCountFromProvision =
         provision && typeof provision === 'object'
           ? Number('registrantsCreated' in provision ? provision.registrantsCreated : 0) +
@@ -1264,10 +1271,16 @@ export async function action({ request }: Route.ActionArgs) {
         provision && typeof provision === 'object'
           ? [
               `provision_error=${'error' in provision ? String(provision.error ?? 'none') : 'none'}`,
+              `provision_registrant_failure=${firstRegistrantFailure?.error ?? 'none'}`,
               `meeting_recreated=${'meetingRecreated' in provision ? String(provision.meetingRecreated) : 'n/a'}`,
               `registrants_created=${'registrantsCreated' in provision ? String(provision.registrantsCreated) : 'n/a'}`,
               `registrants_updated=${'registrantsUpdated' in provision ? String(provision.registrantsUpdated) : 'n/a'}`,
               `registrants_skipped=${'registrantsSkipped' in provision ? String(provision.registrantsSkipped) : 'n/a'}`,
+              `registrant_failures=${
+                'registrantFailures' in provision && Array.isArray(provision.registrantFailures)
+                  ? String(provision.registrantFailures.length)
+                  : 'n/a'
+              }`,
               `provision_skipped=${String(provisionSkipped)}`,
               `provision_skip_reason=${provisionSkipReason}`,
             ].join(' | ')
@@ -1317,7 +1330,7 @@ export async function action({ request }: Route.ActionArgs) {
           error: [
             'Register run completed but this student still has no join link.',
             `root_cause=${rootCause}`,
-            `candidate_scope=class_wide_approved_profiles`,
+            `candidate_scope=single_profile`,
             `candidate_count=${candidateCountFromProvision}`,
             `profile_approved_for_class_workshop=${String(profileApproved)}`,
             `identity_source=${identitySource}`,
