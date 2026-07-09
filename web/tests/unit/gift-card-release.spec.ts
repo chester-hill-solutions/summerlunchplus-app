@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test'
 import {
   classWeekFridayNoonTorontoIso,
   isReleaseReadyNow,
+  resolveGiftCardRelease,
   releaseReadyAtIso,
 } from '../../app/lib/gift-cards/release.server'
 
@@ -49,4 +50,34 @@ test('readiness check compares release_ready_at with now', async () => {
       now: Date.parse('2026-07-10T16:00:00.000Z'),
     })
   ).toBeTruthy()
+})
+
+test('release resolver uses explicit release_ready_at when present', async () => {
+  const release = resolveGiftCardRelease({
+    metadata: {
+      release_ready_at: '2026-07-10T16:00:00.000Z',
+      qualification_since_at: null,
+      release_at: '2026-07-14T16:00:00.000Z',
+    },
+    classAt: '2026-07-08T12:00:00.000Z',
+    classEndsAt: '2026-07-08T13:00:00.000Z',
+    now: Date.parse('2026-07-10T16:00:00.000Z'),
+  })
+
+  expect(release.source).toBe('release_ready_at')
+  expect(release.isReleased).toBeTruthy()
+})
+
+test('release resolver falls back to legacy release when qualification metadata is missing', async () => {
+  const release = resolveGiftCardRelease({
+    metadata: {
+      release_at: '2026-07-14T16:00:00.000Z',
+    },
+    classAt: '2026-07-08T12:00:00.000Z',
+    classEndsAt: '2026-07-08T13:00:00.000Z',
+    now: Date.parse('2026-07-11T16:00:00.000Z'),
+  })
+
+  expect(release.source).toBe('legacy_release')
+  expect(release.isReleased).toBeFalsy()
 })

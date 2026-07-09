@@ -3,7 +3,7 @@ import { redirect, type LoaderFunctionArgs } from 'react-router'
 import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 
-import { isEligibilityTimingEnabled, isGiftCardReleasedNow, isReleaseReadyNow, releaseReadyAtIso } from '@/lib/gift-cards/release.server'
+import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
 import { hashGlrToken } from '@/lib/gift-cards/token.server'
 
 const homeMessageRedirect = ({ request, message }: { request: Request; message: string }) => {
@@ -53,19 +53,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const classAt = (Array.isArray(classRelation) ? classRelation[0] : classRelation)?.starts_at ??
     (Array.isArray(classRelation) ? classRelation[0] : classRelation)?.ends_at ??
     null
-  const released = isEligibilityTimingEnabled()
-    ? isReleaseReadyNow({
-        releaseReadyAt:
-          allocation?.metadata?.release_ready_at ??
-          releaseReadyAtIso({
-            classAtIso: classAt,
-            qualificationSinceAtIso: allocation?.metadata?.qualification_since_at ?? null,
-          }),
-      })
-    : isGiftCardReleasedNow({
-        releaseAt: allocation?.metadata?.release_at,
-        classEndsAt: (Array.isArray(classRelation) ? classRelation[0] : classRelation)?.ends_at ?? null,
-      })
+  const released = resolveGiftCardRelease({
+    metadata: allocation?.metadata ?? null,
+    classAt,
+    classEndsAt: (Array.isArray(classRelation) ? classRelation[0] : classRelation)?.ends_at ?? null,
+  }).isReleased
 
   if (!allocation || allocation.blocked || (allocation.status === 'allocated' && !released)) {
     return invalidLink({ request })

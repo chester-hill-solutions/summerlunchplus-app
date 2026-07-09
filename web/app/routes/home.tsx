@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
 import { getMaskedEmailHint, normalizeEmail } from '@/lib/email-domain'
-import { isEligibilityTimingEnabled, isGiftCardReleasedNow, isReleaseReadyNow, releaseReadyAtIso } from '@/lib/gift-cards/release.server'
+import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
@@ -410,21 +410,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     } | null
   }>).reduce<Record<string, string>>((acc, row) => {
     if (row.blocked) return acc
-    const released = isEligibilityTimingEnabled()
-      ? isReleaseReadyNow({
-          releaseReadyAt:
-            row.metadata?.release_ready_at ??
-            releaseReadyAtIso({
-              classAtIso: classAtById[row.class_id] ?? null,
-              qualificationSinceAtIso: row.metadata?.qualification_since_at ?? null,
-            }),
-          now,
-        })
-      : isGiftCardReleasedNow({
-          releaseAt: row.metadata?.release_at,
-          classEndsAt: classEndsAtById[row.class_id] ?? null,
-          now,
-        })
+    const released = resolveGiftCardRelease({
+      metadata: row.metadata,
+      classAt: classAtById[row.class_id] ?? null,
+      classEndsAt: classEndsAtById[row.class_id] ?? null,
+      now,
+    }).isReleased
     const availableByReminder = Boolean(row.reminder_sent_at && (row.status === 'sent' || row.status === 'opened'))
     if (!released && !availableByReminder) return acc
     const selectedProfileId = selectedProfileIdByClass[row.class_id]

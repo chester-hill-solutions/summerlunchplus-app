@@ -2,9 +2,9 @@ import { sendTemplateEmail } from '@/lib/email/send-email.server'
 import {
   eligibleAfterIso,
   isEligibilityTimingEnabled,
-  isReleaseReadyNow,
   nextReleaseAtIso,
   releaseReadyAtIso,
+  resolveGiftCardRelease,
 } from '@/lib/gift-cards/release.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
@@ -411,23 +411,20 @@ const allocateGiftCards = async () => {
 const sendDueReminders = async (appOrigin: string) => {
   const now = new Date()
   const nowIso = now.toISOString()
-  const eligibilityTimingEnabled = isEligibilityTimingEnabled()
   const publicHubOrigin = resolvePublicHubOrigin(appOrigin)
   const hubUrl = `${publicHubOrigin}/home`
   const reminderSlotIso = currentTorontoReminderSlotIso(now)
-  if (!eligibilityTimingEnabled && !reminderSlotIso) {
-    return {
-      remindersSent: 0,
-      remindersSkipped: 0,
-      reminderFailures: 0,
-      errors: [],
-    }
-  }
 
   let remindersSent = 0
   let remindersSkipped = 0
   let reminderFailures = 0
   const errors: string[] = []
+  const releaseSourceCount = {
+    release_ready_at: 0,
+    computed_with_qualification: 0,
+    legacy_release: 0,
+    unresolved: 0,
+  }
 
   let lastAllocationId = ''
   let pagesRead = 0
@@ -492,25 +489,25 @@ const sendDueReminders = async (appOrigin: string) => {
 
     const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
     const classAt = classRelation?.starts_at ?? classRelation?.ends_at ?? null
-    if (eligibilityTimingEnabled) {
-      const releaseReadyAt =
-        row.metadata?.release_ready_at ??
-        releaseReadyAtIso({
-          classAtIso: classAt,
-          qualificationSinceAtIso: row.metadata?.qualification_since_at ?? null,
-        })
-      if (!isReleaseReadyNow({ releaseReadyAt, now: now.getTime() })) {
-        continue
-      }
-    } else {
-      const expectedReleaseAt = nextReleaseAtIso(classRelation?.ends_at ?? null)
-      const releaseAt = (row.metadata?.release_at ?? '').trim() || expectedReleaseAt || ''
-      if (!releaseAt) {
+    const release = resolveGiftCardRelease({
+      metadata: row.metadata,
+      classAt,
+      classEndsAt: classRelation?.ends_at ?? null,
+      now: now.getTime(),
+    })
+    releaseSourceCount[release.source] += 1
+
+    if (!release.isReleased) {
+      continue
+    }
+
+    if (release.source === 'legacy_release') {
+      if (!reminderSlotIso || !release.effectiveReleaseAt) {
         continue
       }
 
-      const releaseDate = new Date(releaseAt)
-      if (!Number.isFinite(releaseDate.getTime()) || releaseDate.getTime() > now.getTime()) {
+      const releaseDate = new Date(release.effectiveReleaseAt)
+      if (!Number.isFinite(releaseDate.getTime())) {
         continue
       }
 
@@ -612,12 +609,13 @@ const sendDueReminders = async (appOrigin: string) => {
   }
 
   console.info('[gift-cards][reminders]', {
-    eligibilityTimingEnabled,
+    eligibilityTimingEnabled: isEligibilityTimingEnabled(),
     pagesRead,
     rowsScanned,
     remindersSent,
     remindersSkipped,
     reminderFailures,
+    releaseSourceCount,
   })
 
   return {

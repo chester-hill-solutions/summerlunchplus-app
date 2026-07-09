@@ -162,6 +162,93 @@ export const isReleaseReadyNow = ({
 
 export const isEligibilityTimingEnabled = () => ELIGIBILITY_TIMING_ENABLED
 
+type ReleaseResolutionSource =
+  | 'release_ready_at'
+  | 'computed_with_qualification'
+  | 'legacy_release'
+  | 'unresolved'
+
+type GiftCardReleaseMetadata = {
+  release_at?: string | null
+  release_ready_at?: string | null
+  qualification_since_at?: string | null
+} | null
+
+const validIsoOrNull = (value: string | null | undefined) => {
+  const trimmed = (value ?? '').trim()
+  return Number.isFinite(Date.parse(trimmed)) ? trimmed : null
+}
+
+const legacyEffectiveReleaseAtIso = ({
+  releaseAt,
+  classEndsAt,
+}: {
+  releaseAt: string | null | undefined
+  classEndsAt: string | null
+}) => validIsoOrNull(releaseAt) ?? validIsoOrNull(nextReleaseAtIso(classEndsAt))
+
+export const resolveGiftCardRelease = ({
+  metadata,
+  classAt,
+  classEndsAt,
+  now = Date.now(),
+  eligibilityTimingEnabled = isEligibilityTimingEnabled(),
+}: {
+  metadata: GiftCardReleaseMetadata
+  classAt: string | null
+  classEndsAt: string | null
+  now?: number
+  eligibilityTimingEnabled?: boolean
+}) => {
+  const releasedAtOrNull = (value: string | null) => {
+    if (!value) return false
+    return Date.parse(value) <= now
+  }
+
+  if (!eligibilityTimingEnabled) {
+    const effectiveReleaseAt = legacyEffectiveReleaseAtIso({ releaseAt: metadata?.release_at, classEndsAt })
+    return {
+      source: (effectiveReleaseAt ? 'legacy_release' : 'unresolved') as ReleaseResolutionSource,
+      effectiveReleaseAt,
+      isReleased: releasedAtOrNull(effectiveReleaseAt),
+    }
+  }
+
+  const explicitReadyAt = validIsoOrNull(metadata?.release_ready_at)
+  if (explicitReadyAt) {
+    return {
+      source: 'release_ready_at' as ReleaseResolutionSource,
+      effectiveReleaseAt: explicitReadyAt,
+      isReleased: releasedAtOrNull(explicitReadyAt),
+    }
+  }
+
+  const qualificationSinceAt = validIsoOrNull(metadata?.qualification_since_at)
+  if (qualificationSinceAt) {
+    const computedReadyAt = validIsoOrNull(
+      releaseReadyAtIso({
+        classAtIso: classAt,
+        qualificationSinceAtIso: qualificationSinceAt,
+      })
+    )
+
+    if (computedReadyAt) {
+      return {
+        source: 'computed_with_qualification' as ReleaseResolutionSource,
+        effectiveReleaseAt: computedReadyAt,
+        isReleased: releasedAtOrNull(computedReadyAt),
+      }
+    }
+  }
+
+  const legacyReleaseAt = legacyEffectiveReleaseAtIso({ releaseAt: metadata?.release_at, classEndsAt })
+  return {
+    source: (legacyReleaseAt ? 'legacy_release' : 'unresolved') as ReleaseResolutionSource,
+    effectiveReleaseAt: legacyReleaseAt,
+    isReleased: releasedAtOrNull(legacyReleaseAt),
+  }
+}
+
 export const isGiftCardReleasedNow = ({
   releaseAt,
   classEndsAt,
