@@ -4,7 +4,7 @@ import { Constants, type Database } from '@/lib/database.types'
 import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { EXPORT_TYPE_CLASS_ATTENDANCE_CSV } from '@/lib/exports/types'
 import { resolveIpGeolocation } from '@/lib/geoip.server'
-import { isGiftCardReleasedNow } from '@/lib/gift-cards/release.server'
+import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
@@ -101,7 +101,12 @@ type GiftCardAllocationRow = {
   first_opened_at: string | null
   last_opened_at: string | null
   open_count: number
-  metadata: { release_at?: string | null } | null
+  metadata: {
+    release_at?: string | null
+    release_ready_at?: string | null
+    qualification_since_at?: string | null
+    eligible_after_at?: string | null
+  } | null
 }
 
 type GiftCardAssetRow = {
@@ -849,15 +854,22 @@ export async function loader({ request }: Route.LoaderArgs) {
       Boolean(giftCardAllocation?.last_opened_at) ||
       Number(giftCardAllocation?.open_count ?? 0) > 0 ||
       giftCardAllocation?.status === 'opened'
+    const giftCardRelease = resolveGiftCardRelease({
+      metadata: giftCardAllocation?.metadata ?? null,
+      classAt: classRow?.starts_at ?? classRow?.ends_at ?? null,
+      classEndsAt: classRow?.ends_at ?? null,
+    })
     const giftCardAvailable =
       giftCardAllocated &&
       !row.gift_card_blocked &&
-      Boolean(
-        isGiftCardReleasedNow({
-          releaseAt: giftCardAllocation?.metadata?.release_at,
-          classEndsAt: classRow?.ends_at ?? null,
-        })
-      )
+      giftCardRelease.isReleased
+    const giftCardAvailabilityReason = !giftCardAllocated
+      ? 'missing_allocation'
+      : row.gift_card_blocked
+        ? 'blocked'
+        : giftCardRelease.isReleased
+          ? 'released'
+          : `waiting_${giftCardRelease.source}`
     const latestProfileNetwork = latestNetworkByProfileId.get(row.profile_id)
     const registrantReady = Boolean(studentRegistrant?.zoom_registrant_id && studentRegistrant.zoom_join_url)
     const reminderSent = Boolean(studentRegistrant?.last_sent_at)
@@ -950,6 +962,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       latest_geo: latestGeo || 'N/A',
       gift_card_allocated: giftCardAllocated,
       gift_card_available: giftCardAvailable,
+      gift_card_availability_reason: giftCardAvailabilityReason,
+      gift_card_release_source: giftCardRelease.source,
+      gift_card_effective_release_at: giftCardRelease.effectiveReleaseAt,
+      gift_card_release_ready_at: giftCardAllocation?.metadata?.release_ready_at ?? null,
+      gift_card_qualification_since_at: giftCardAllocation?.metadata?.qualification_since_at ?? null,
+      gift_card_eligible_after_at: giftCardAllocation?.metadata?.eligible_after_at ?? null,
       gift_card_reminder_sent: giftCardReminderSent,
       gift_card_link_opened: giftCardLinkOpened,
       gift_card_provider: giftCardAsset?.provider ?? null,
@@ -1005,6 +1023,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       'giftcard_display',
       'gift_card_allocated',
       'gift_card_available',
+      'gift_card_availability_reason',
+      'gift_card_release_source',
+      'gift_card_effective_release_at',
+      'gift_card_release_ready_at',
+      'gift_card_qualification_since_at',
+      'gift_card_eligible_after_at',
       'gift_card_reminder_sent',
       'gift_card_link_opened',
       'gift_card_provider',
@@ -1082,6 +1106,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       giftcard_display: { label: 'Provider', filterable: true, truncate: true },
       gift_card_allocated: { label: 'Gift allocated', filterable: true },
       gift_card_available: { label: 'Gift available', filterable: true },
+      gift_card_availability_reason: { label: 'Gift availability reason', filterable: true, truncate: true },
+      gift_card_release_source: { label: 'Gift release source', filterable: true },
+      gift_card_effective_release_at: { label: 'Gift effective release at', filterable: true },
+      gift_card_release_ready_at: { label: 'Gift release_ready_at', filterable: true },
+      gift_card_qualification_since_at: { label: 'Gift qualification since', filterable: true },
+      gift_card_eligible_after_at: { label: 'Gift eligible after', filterable: true },
       gift_card_reminder_sent: { label: 'Gift reminder sent', filterable: true },
       gift_card_link_opened: { label: 'Gift link opened', filterable: true },
       gift_card_provider: { label: 'Gift card provider', filterable: true },
