@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
 import { getMaskedEmailHint, normalizeEmail } from '@/lib/email-domain'
-import { isGiftCardReleasedNow } from '@/lib/gift-cards/release.server'
+import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
@@ -288,6 +288,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     acc[classRow.workshop_id].push(classRow)
     return acc
   }, {})
+  const classAtById = Object.fromEntries(
+    classes.map(classRow => [classRow.id, classRow.starts_at || classRow.ends_at])
+  ) as Record<string, string>
   const classEndsAtById = Object.fromEntries(classes.map(classRow => [classRow.id, classRow.ends_at])) as Record<string, string>
 
   const classIds = classes.map(classRow => classRow.id)
@@ -400,14 +403,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     status: 'allocated' | 'sent' | 'opened'
     blocked: boolean
     reminder_sent_at: string | null
-    metadata: { release_at?: string | null } | null
+    metadata: {
+      release_at?: string | null
+      release_ready_at?: string | null
+      qualification_since_at?: string | null
+    } | null
   }>).reduce<Record<string, string>>((acc, row) => {
     if (row.blocked) return acc
-    const released = isGiftCardReleasedNow({
-      releaseAt: row.metadata?.release_at,
+    const released = resolveGiftCardRelease({
+      metadata: row.metadata,
+      classAt: classAtById[row.class_id] ?? null,
       classEndsAt: classEndsAtById[row.class_id] ?? null,
       now,
-    })
+    }).isReleased
     const availableByReminder = Boolean(row.reminder_sent_at && (row.status === 'sent' || row.status === 'opened'))
     if (!released && !availableByReminder) return acc
     const selectedProfileId = selectedProfileIdByClass[row.class_id]

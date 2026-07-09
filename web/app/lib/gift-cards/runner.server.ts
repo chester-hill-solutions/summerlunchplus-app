@@ -1,5 +1,11 @@
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
-import { nextReleaseAtIso } from '@/lib/gift-cards/release.server'
+import {
+  eligibleAfterIso,
+  isEligibilityTimingEnabled,
+  nextReleaseAtIso,
+  releaseReadyAtIso,
+  resolveGiftCardRelease,
+} from '@/lib/gift-cards/release.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
 
@@ -15,6 +21,7 @@ type GiftCardJobResult = {
 }
 
 const allocationKey = (classId: string, profileId: string) => `${classId}::${profileId}`
+const PAGE_SIZE = 500
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
 
@@ -209,60 +216,8 @@ const requestedProviderFromDisplay = (value: string | null | undefined) => {
 
 const allocateGiftCards = async () => {
   const nowIso = new Date().toISOString()
-  const { data: attendanceRows, error: attendanceError } = await adminClient
-    .from('class_attendance')
-    .select('id, class_id, profile_id, camera_on, photo_status, gift_card_blocked, class:class_id(ends_at), profile:profile_id(email)')
-    .or('camera_on.eq.true,photo_status.eq.accepted,photo_status.eq.uploaded')
-
-  if (attendanceError) {
-    throw new Error(`Failed to load attendance rows: ${attendanceError.message}`)
-  }
-
-  const typedRows = (attendanceRows ?? []) as Array<{
-    id: string
-    class_id: string
-    profile_id: string
-    camera_on: boolean | null
-    photo_status: 'uploaded' | 'accepted' | 'rejected' | null
-    gift_card_blocked: boolean | null
-    class: { ends_at: string | null } | Array<{ ends_at: string | null }> | null
-    profile: { email: string | null } | Array<{ email: string | null }> | null
-  }>
-
-  const classIds = Array.from(new Set(typedRows.map(row => row.class_id)))
-  const profileIds = Array.from(new Set(typedRows.map(row => row.profile_id)))
-
-  let requestedProviderByProfileId = new Map<string, 'PC' | 'Sobeys' | 'meal_kit' | null>()
-  if (profileIds.length) {
-    try {
-      const enrichment = await loadWorkshopEnrollmentEnrichment(profileIds)
-      for (const profileId of profileIds) {
-        const display = enrichment[profileId]?.giftcard_display
-        requestedProviderByProfileId.set(profileId, requestedProviderFromDisplay(display))
-      }
-    } catch (error) {
-      console.warn('[gift-cards] provider preference enrichment failed', {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-
-  const { data: allocationRows, error: allocationError } = classIds.length
-    ? await adminClient
-        .from('gift_card_allocation')
-        .select('id, class_id, profile_id')
-        .in('class_id', classIds)
-        .in('profile_id', profileIds)
-    : { data: [], error: null }
-
-  if (allocationError) {
-    throw new Error(`Failed to load allocations: ${allocationError.message}`)
-  }
-
-  const allocationByPair = new Map<string, string>()
-  for (const row of allocationRows ?? []) {
-    allocationByPair.set(allocationKey(row.class_id, row.profile_id), row.id)
-  }
+  const eligibilityTimingEnabled = isEligibilityTimingEnabled()
+  const requestedProviderByProfileId = new Map<string, 'PC' | 'Sobeys' | 'meal_kit' | null>()
 
   const { data: assets, error: assetsError } = await adminClient
     .from('gift_card_asset')
@@ -287,70 +242,168 @@ const allocateGiftCards = async () => {
   }
   let allocated = 0
 
-  for (const row of typedRows) {
-    const hasAttendanceEvidence = row.camera_on === true || row.photo_status === 'accepted' || row.photo_status === 'uploaded'
-    if (!hasAttendanceEvidence) continue
-    if (row.gift_card_blocked) continue
-    if (allocationByPair.has(allocationKey(row.class_id, row.profile_id))) continue
+  let lastAttendanceId = ''
+  let pagesRead = 0
+  let rowsScanned = 0
 
-    const requestedProvider = requestedProviderByProfileId.get(row.profile_id) ?? null
-    if (requestedProvider === 'meal_kit') continue
-    const providerForAllocation = requestedProvider === 'Sobeys' ? 'Sobeys' : 'PC'
+  while (true) {
+    const attendanceQuery = adminClient
+      .from('class_attendance')
+      .select('id, class_id, profile_id, camera_on, photo_status, gift_card_blocked, class:class_id(starts_at, ends_at), profile:profile_id(email)')
+      .or('camera_on.eq.true,photo_status.eq.accepted,photo_status.eq.uploaded')
+      .order('id', { ascending: true })
+      .limit(PAGE_SIZE)
 
-    const providerBucket = availableByProvider[providerForAllocation]
-    if (!providerBucket.length) continue
+    const { data: attendanceRows, error: attendanceError } = lastAttendanceId
+      ? await attendanceQuery.gt('id', lastAttendanceId)
+      : await attendanceQuery
 
-    const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
-    const releaseAt = nextReleaseAtIso(classRelation?.ends_at ?? null)
-    if (!releaseAt) continue
-
-    const assetId = providerBucket.shift() as string
-    const { data: updatedAsset, error: claimError } = await adminClient
-      .from('gift_card_asset')
-      .update({
-        status: 'allocated',
-        assigned_profile_id: row.profile_id,
-        allocated_at: nowIso,
-      })
-      .eq('id', assetId)
-      .eq('status', 'available')
-      .select('id')
-      .maybeSingle()
-
-    if (claimError || !updatedAsset?.id) {
-      continue
+    if (attendanceError) {
+      throw new Error(`Failed to load attendance rows: ${attendanceError.message}`)
     }
 
-    const { data: inserted, error: insertError } = await adminClient
-      .from('gift_card_allocation')
-      .insert({
-        class_id: row.class_id,
-        profile_id: row.profile_id,
-        class_attendance_id: row.id,
-        gift_card_asset_id: assetId,
-        status: 'allocated',
-        metadata: {
-          release_at: releaseAt,
-        },
-      })
-      .select('id')
-      .maybeSingle()
+    const typedRows = (attendanceRows ?? []) as Array<{
+      id: string
+      class_id: string
+      profile_id: string
+      camera_on: boolean | null
+      photo_status: 'uploaded' | 'accepted' | 'rejected' | null
+      gift_card_blocked: boolean | null
+      class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
+      profile: { email: string | null } | Array<{ email: string | null }> | null
+    }>
 
-    if (insertError || !inserted?.id) {
-      await adminClient
+    if (!typedRows.length) break
+
+    pagesRead += 1
+    rowsScanned += typedRows.length
+
+    const classIds = Array.from(new Set(typedRows.map(row => row.class_id)))
+    const profileIds = Array.from(new Set(typedRows.map(row => row.profile_id)))
+
+    const uncachedProfileIds = profileIds.filter(profileId => !requestedProviderByProfileId.has(profileId))
+    if (uncachedProfileIds.length) {
+      try {
+        const enrichment = await loadWorkshopEnrollmentEnrichment(uncachedProfileIds)
+        for (const profileId of uncachedProfileIds) {
+          const display = enrichment[profileId]?.giftcard_display
+          requestedProviderByProfileId.set(profileId, requestedProviderFromDisplay(display))
+        }
+      } catch (error) {
+        console.warn('[gift-cards] provider preference enrichment failed', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    const { data: allocationRows, error: allocationError } = classIds.length
+      ? await adminClient
+          .from('gift_card_allocation')
+          .select('id, class_id, profile_id')
+          .in('class_id', classIds)
+          .in('profile_id', profileIds)
+      : { data: [], error: null }
+
+    if (allocationError) {
+      throw new Error(`Failed to load allocations: ${allocationError.message}`)
+    }
+
+    const allocationByPair = new Map<string, string>()
+    for (const row of allocationRows ?? []) {
+      allocationByPair.set(allocationKey(row.class_id, row.profile_id), row.id)
+    }
+
+    for (const row of typedRows) {
+      const hasAttendanceEvidence = row.camera_on === true || row.photo_status === 'accepted' || row.photo_status === 'uploaded'
+      if (!hasAttendanceEvidence) continue
+      if (row.gift_card_blocked) continue
+      if (allocationByPair.has(allocationKey(row.class_id, row.profile_id))) continue
+
+      const requestedProvider = requestedProviderByProfileId.get(row.profile_id) ?? null
+      if (requestedProvider === 'meal_kit') continue
+      const providerForAllocation = requestedProvider === 'Sobeys' ? 'Sobeys' : 'PC'
+
+      const providerBucket = availableByProvider[providerForAllocation]
+      if (!providerBucket.length) continue
+
+      const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
+      const classAt = classRelation?.starts_at ?? classRelation?.ends_at ?? null
+      const releaseAt = nextReleaseAtIso(classRelation?.ends_at ?? null)
+      if (!releaseAt) continue
+
+      const qualificationSinceAt = eligibilityTimingEnabled ? nowIso : null
+      const releaseReadyAt = eligibilityTimingEnabled
+        ? releaseReadyAtIso({ classAtIso: classAt, qualificationSinceAtIso: qualificationSinceAt })
+        : null
+      if (eligibilityTimingEnabled && !releaseReadyAt) continue
+
+      const assetId = providerBucket.shift() as string
+      const { data: updatedAsset, error: claimError } = await adminClient
         .from('gift_card_asset')
         .update({
-          status: 'available',
-          assigned_profile_id: null,
-          allocated_at: null,
+          status: 'allocated',
+          assigned_profile_id: row.profile_id,
+          allocated_at: nowIso,
         })
         .eq('id', assetId)
-      continue
+        .eq('status', 'available')
+        .select('id')
+        .maybeSingle()
+
+      if (claimError || !updatedAsset?.id) {
+        continue
+      }
+
+      const metadata = eligibilityTimingEnabled
+        ? {
+            release_at: releaseAt,
+            qualification_since_at: qualificationSinceAt,
+            eligible_after_at: eligibleAfterIso(qualificationSinceAt),
+            release_ready_at: releaseReadyAt,
+          }
+        : {
+            release_at: releaseAt,
+          }
+
+      const { data: inserted, error: insertError } = await adminClient
+        .from('gift_card_allocation')
+        .insert({
+          class_id: row.class_id,
+          profile_id: row.profile_id,
+          class_attendance_id: row.id,
+          gift_card_asset_id: assetId,
+          status: 'allocated',
+          metadata,
+        })
+        .select('id')
+        .maybeSingle()
+
+      if (insertError || !inserted?.id) {
+        await adminClient
+          .from('gift_card_asset')
+          .update({
+            status: 'available',
+            assigned_profile_id: null,
+            allocated_at: null,
+          })
+          .eq('id', assetId)
+        continue
+      }
+
+      allocationByPair.set(allocationKey(row.class_id, row.profile_id), inserted.id)
+      allocated += 1
     }
 
-    allocationByPair.set(allocationKey(row.class_id, row.profile_id), inserted.id)
-    allocated += 1
+    lastAttendanceId = typedRows[typedRows.length - 1]?.id ?? lastAttendanceId
+    if (typedRows.length < PAGE_SIZE) break
   }
+
+  console.info('[gift-cards][allocate]', {
+    eligibilityTimingEnabled,
+    pagesRead,
+    rowsScanned,
+    allocated,
+  })
 
   return allocated
 }
@@ -361,50 +414,67 @@ const sendDueReminders = async (appOrigin: string) => {
   const publicHubOrigin = resolvePublicHubOrigin(appOrigin)
   const hubUrl = `${publicHubOrigin}/home`
   const reminderSlotIso = currentTorontoReminderSlotIso(now)
-  if (!reminderSlotIso) {
-    return {
-      remindersSent: 0,
-      remindersSkipped: 0,
-      reminderFailures: 0,
-      errors: [],
-    }
-  }
-
-  const { data: allocations, error: allocationError } = await adminClient
-    .from('gift_card_allocation')
-    .select(
-      'id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, class:class_id(ends_at), profile:profile_id(email), asset:gift_card_asset_id(provider, value, status, assigned_profile_id)'
-    )
-    .eq('status', 'allocated')
-    .is('reminder_sent_at', null)
-
-  if (allocationError) {
-    throw new Error(`Failed to load due reminders: ${allocationError.message}`)
-  }
 
   let remindersSent = 0
   let remindersSkipped = 0
   let reminderFailures = 0
   const errors: string[] = []
+  const releaseSourceCount = {
+    release_ready_at: 0,
+    computed_with_qualification: 0,
+    legacy_release: 0,
+    unresolved: 0,
+  }
 
-  const rows = (allocations ?? []) as Array<{
-    id: string
-    class_id: string
-    profile_id: string
-    gift_card_asset_id: string
-    status: 'allocated' | 'sent' | 'opened'
-    blocked: boolean
-    reminder_sent_at: string | null
-    metadata: { release_at?: string | null } | null
-    class: { ends_at: string | null } | Array<{ ends_at: string | null }> | null
-    profile: { email: string | null } | Array<{ email: string | null }> | null
-    asset:
-      | { provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }
-      | Array<{ provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }>
-      | null
-  }>
+  let lastAllocationId = ''
+  let pagesRead = 0
+  let rowsScanned = 0
 
-  for (const row of rows) {
+  while (true) {
+    const allocationQuery = adminClient
+      .from('gift_card_allocation')
+      .select(
+        'id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, class:class_id(starts_at, ends_at), profile:profile_id(email), asset:gift_card_asset_id(provider, value, status, assigned_profile_id)'
+      )
+      .eq('status', 'allocated')
+      .is('reminder_sent_at', null)
+      .order('id', { ascending: true })
+      .limit(PAGE_SIZE)
+
+    const { data: allocations, error: allocationError } = lastAllocationId
+      ? await allocationQuery.gt('id', lastAllocationId)
+      : await allocationQuery
+
+    if (allocationError) {
+      throw new Error(`Failed to load due reminders: ${allocationError.message}`)
+    }
+
+    const rows = (allocations ?? []) as Array<{
+      id: string
+      class_id: string
+      profile_id: string
+      gift_card_asset_id: string
+      status: 'allocated' | 'sent' | 'opened'
+      blocked: boolean
+      reminder_sent_at: string | null
+      metadata: {
+        release_at?: string | null
+        release_ready_at?: string | null
+        qualification_since_at?: string | null
+      } | null
+      class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
+      profile: { email: string | null } | Array<{ email: string | null }> | null
+      asset:
+        | { provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }
+        | Array<{ provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }>
+        | null
+    }>
+
+    if (!rows.length) break
+    pagesRead += 1
+    rowsScanned += rows.length
+
+    for (const row of rows) {
     const allocationLockAcquired = await tryAcquireGiftCardAllocationLock(row.id)
     if (!allocationLockAcquired) {
       remindersSkipped += 1
@@ -418,25 +488,38 @@ const sendDueReminders = async (appOrigin: string) => {
     }
 
     const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
-    const expectedReleaseAt = nextReleaseAtIso(classRelation?.ends_at ?? null)
-    const releaseAt = (row.metadata?.release_at ?? '').trim() || expectedReleaseAt || ''
-    if (!releaseAt) {
+    const classAt = classRelation?.starts_at ?? classRelation?.ends_at ?? null
+    const release = resolveGiftCardRelease({
+      metadata: row.metadata,
+      classAt,
+      classEndsAt: classRelation?.ends_at ?? null,
+      now: now.getTime(),
+    })
+    releaseSourceCount[release.source] += 1
+
+    if (!release.isReleased) {
       continue
     }
 
-    const releaseDate = new Date(releaseAt)
-    if (!Number.isFinite(releaseDate.getTime()) || releaseDate.getTime() > now.getTime()) {
-      continue
-    }
+    if (release.source === 'legacy_release') {
+      if (!reminderSlotIso || !release.effectiveReleaseAt) {
+        continue
+      }
 
-    const releaseToronto = torontoPartsForDate(releaseDate)
-    const reminderSlotForReleaseDate = reminderSlotIsoForTorontoDate(
-      releaseToronto.year,
-      releaseToronto.month,
-      releaseToronto.day
-    )
-    if (!reminderSlotForReleaseDate || reminderSlotForReleaseDate !== reminderSlotIso) {
-      continue
+      const releaseDate = new Date(release.effectiveReleaseAt)
+      if (!Number.isFinite(releaseDate.getTime())) {
+        continue
+      }
+
+      const releaseToronto = torontoPartsForDate(releaseDate)
+      const reminderSlotForReleaseDate = reminderSlotIsoForTorontoDate(
+        releaseToronto.year,
+        releaseToronto.month,
+        releaseToronto.day
+      )
+      if (!reminderSlotForReleaseDate || reminderSlotForReleaseDate !== reminderSlotIso) {
+        continue
+      }
     }
 
     const profileRelation = Array.isArray(row.profile) ? row.profile[0] : row.profile
@@ -520,6 +603,20 @@ const sendDueReminders = async (appOrigin: string) => {
       await releaseGiftCardAllocationLock(row.id)
     }
   }
+
+    lastAllocationId = rows[rows.length - 1]?.id ?? lastAllocationId
+    if (rows.length < PAGE_SIZE) break
+  }
+
+  console.info('[gift-cards][reminders]', {
+    eligibilityTimingEnabled: isEligibilityTimingEnabled(),
+    pagesRead,
+    rowsScanned,
+    remindersSent,
+    remindersSkipped,
+    reminderFailures,
+    releaseSourceCount,
+  })
 
   return {
     remindersSent,
