@@ -17,6 +17,9 @@ type GiftCardJobResult = {
   remindersSent: number
   remindersSkipped: number
   reminderFailures: number
+  mealKitRemindersSent: number
+  mealKitRemindersSkipped: number
+  mealKitReminderFailures: number
   errors: string[]
 }
 
@@ -104,6 +107,8 @@ const releaseGiftCardAllocationLock = async (allocationId: string) => {
 
 const REMINDER_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_HOUR_TORONTO', isProductionRuntime ? 12 : 11)
 const REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_MINUTE_TORONTO', isProductionRuntime ? 0 : 15)
+const MEAL_KIT_REMINDER_HOUR_TORONTO = parseHourMinuteEnv('MEAL_KIT_REMINDER_HOUR_TORONTO', 9)
+const MEAL_KIT_REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('MEAL_KIT_REMINDER_MINUTE_TORONTO', 0)
 
 const torontoPartsForDate = (date: Date) => {
   const parts = torontoDateTimeFormatter.formatToParts(date)
@@ -160,6 +165,245 @@ const currentTorontoReminderSlotIso = (now: Date) => {
 const reminderSlotIsoForTorontoDate = (year: number, month: number, day: number) => {
   const slot = torontoTimeUtcForDate(year, month, day, REMINDER_HOUR_TORONTO, REMINDER_MINUTE_TORONTO)
   return slot ? slot.toISOString() : null
+}
+
+const currentTorontoMealKitReminderSlotIso = (now: Date) => {
+  const toronto = torontoPartsForDate(now)
+  if (
+    toronto.weekday !== 'Tue' ||
+    toronto.hour !== MEAL_KIT_REMINDER_HOUR_TORONTO ||
+    toronto.minute < MEAL_KIT_REMINDER_MINUTE_TORONTO ||
+    toronto.minute >= MEAL_KIT_REMINDER_MINUTE_TORONTO + 5
+  ) {
+    return null
+  }
+
+  const slot = torontoTimeUtcForDate(
+    toronto.year,
+    toronto.month,
+    toronto.day,
+    MEAL_KIT_REMINDER_HOUR_TORONTO,
+    MEAL_KIT_REMINDER_MINUTE_TORONTO
+  )
+  return slot ? slot.toISOString() : null
+}
+
+const CHUNK_SIZE = 250
+
+const chunkArray = <T,>(items: T[], size: number) => {
+  if (size <= 0 || !items.length) return [] as T[][]
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
+const resolveRecipientEmailsByProfileIds = async (profileIds: string[]) => {
+  const uniqueProfileIds = Array.from(new Set(profileIds.filter(Boolean)))
+  const emailsByProfileId = new Map<string, string>()
+  if (!uniqueProfileIds.length) return emailsByProfileId
+
+  const directEmailByProfileId = new Map<string, string>()
+  for (const chunk of chunkArray(uniqueProfileIds, CHUNK_SIZE)) {
+    const { data, error } = await adminClient.from('profile').select('id, email').in('id', chunk)
+    if (error) {
+      throw new Error(`Failed to load profile emails: ${error.message}`)
+    }
+    for (const row of data ?? []) {
+      const email = (row.email ?? '').trim().toLowerCase()
+      if (email) {
+        directEmailByProfileId.set(row.id, email)
+      }
+    }
+  }
+
+  const guardianIdsByChild = new Map<string, string[]>()
+  const guardianIds = new Set<string>()
+  for (const chunk of chunkArray(uniqueProfileIds, CHUNK_SIZE)) {
+    const { data, error } = await adminClient
+      .from('person_guardian_child')
+      .select('child_profile_id, guardian_profile_id')
+      .in('child_profile_id', chunk)
+
+    if (error) {
+      throw new Error(`Failed to load guardian relationships: ${error.message}`)
+    }
+
+    for (const row of data ?? []) {
+      if (!row.child_profile_id || !row.guardian_profile_id) continue
+      const bucket = guardianIdsByChild.get(row.child_profile_id) ?? []
+      if (!bucket.includes(row.guardian_profile_id)) {
+        bucket.push(row.guardian_profile_id)
+      }
+      guardianIdsByChild.set(row.child_profile_id, bucket)
+      guardianIds.add(row.guardian_profile_id)
+    }
+  }
+
+  const guardianEmailByProfileId = new Map<string, string>()
+  const guardianIdList = Array.from(guardianIds)
+  for (const chunk of chunkArray(guardianIdList, CHUNK_SIZE)) {
+    const { data, error } = await adminClient.from('profile').select('id, email').in('id', chunk)
+    if (error) {
+      throw new Error(`Failed to load guardian emails: ${error.message}`)
+    }
+    for (const row of data ?? []) {
+      const email = (row.email ?? '').trim().toLowerCase()
+      if (email) {
+        guardianEmailByProfileId.set(row.id, email)
+      }
+    }
+  }
+
+  for (const profileId of uniqueProfileIds) {
+    const direct = directEmailByProfileId.get(profileId)
+    if (direct) {
+      emailsByProfileId.set(profileId, direct)
+      continue
+    }
+
+    const guardianCandidates = guardianIdsByChild.get(profileId) ?? []
+    for (const guardianId of guardianCandidates) {
+      const guardianEmail = guardianEmailByProfileId.get(guardianId)
+      if (guardianEmail) {
+        emailsByProfileId.set(profileId, guardianEmail)
+        break
+      }
+    }
+  }
+
+  return emailsByProfileId
+}
+
+const sendMealKitPickupReminders = async () => {
+  const now = new Date()
+  const nowIso = now.toISOString()
+  const reminderSlotIso = currentTorontoMealKitReminderSlotIso(now)
+  if (!reminderSlotIso) {
+    return {
+      remindersSent: 0,
+      remindersSkipped: 0,
+      reminderFailures: 0,
+      errors: [] as string[],
+    }
+  }
+
+  const { data: activeSemesters, error: activeSemestersError } = await adminClient
+    .from('semester')
+    .select('id')
+    .lte('starts_at', nowIso)
+    .gte('ends_at', nowIso)
+
+  if (activeSemestersError) {
+    throw new Error(`Failed to load active semesters: ${activeSemestersError.message}`)
+  }
+
+  const activeSemesterIds = (activeSemesters ?? []).map(row => row.id)
+  if (!activeSemesterIds.length) {
+    return {
+      remindersSent: 0,
+      remindersSkipped: 0,
+      reminderFailures: 0,
+      errors: [] as string[],
+    }
+  }
+
+  const approvedProfileIds = new Set<string>()
+  for (const semesterIdChunk of chunkArray(activeSemesterIds, CHUNK_SIZE)) {
+    const { data: enrollments, error: enrollmentError } = await adminClient
+      .from('workshop_enrollment')
+      .select('profile_id')
+      .in('semester_id', semesterIdChunk)
+      .eq('status', 'approved')
+      .not('profile_id', 'is', null)
+
+    if (enrollmentError) {
+      throw new Error(`Failed to load approved enrollments: ${enrollmentError.message}`)
+    }
+
+    for (const enrollment of enrollments ?? []) {
+      if (enrollment.profile_id) {
+        approvedProfileIds.add(enrollment.profile_id)
+      }
+    }
+  }
+
+  const profileIds = Array.from(approvedProfileIds)
+  if (!profileIds.length) {
+    return {
+      remindersSent: 0,
+      remindersSkipped: 0,
+      reminderFailures: 0,
+      errors: [] as string[],
+    }
+  }
+
+  const enrichment = await loadWorkshopEnrollmentEnrichment(profileIds)
+  const mealKitProfileIds = profileIds.filter(profileId => {
+    const value = (enrichment[profileId]?.giftcard_display ?? '').trim().toLowerCase()
+    return value === 'meal kit'
+  })
+
+  if (!mealKitProfileIds.length) {
+    return {
+      remindersSent: 0,
+      remindersSkipped: 0,
+      reminderFailures: 0,
+      errors: [] as string[],
+    }
+  }
+
+  const emailsByProfileId = await resolveRecipientEmailsByProfileIds(mealKitProfileIds)
+  const uniqueRecipients = new Map<string, string>()
+  for (const profileId of mealKitProfileIds) {
+    const email = (emailsByProfileId.get(profileId) ?? '').trim().toLowerCase()
+    if (email && !uniqueRecipients.has(email)) {
+      uniqueRecipients.set(email, profileId)
+    }
+  }
+
+  let remindersSent = 0
+  let remindersSkipped = 0
+  let reminderFailures = 0
+  const errors: string[] = []
+
+  for (const [toEmail, profileId] of uniqueRecipients.entries()) {
+    const eventKey = `meal-kit-pickup-reminder:${reminderSlotIso}:${toEmail}`
+    const emailResult = await sendTemplateEmail({
+      toEmail,
+      templateKey: 'meal_kit_pickup_reminder_v1',
+      templateData: {},
+      profileId,
+      eventKey,
+    })
+
+    if (emailResult.status === 'failed') {
+      reminderFailures += 1
+      errors.push(`meal-kit ${toEmail}: ${emailResult.error ?? 'send failed'}`)
+      continue
+    }
+
+    if (emailResult.status === 'sent') {
+      remindersSent += 1
+    } else {
+      remindersSkipped += 1
+    }
+  }
+
+  console.info('[gift-cards][meal-kit-reminders]', {
+    remindersSent,
+    remindersSkipped,
+    reminderFailures,
+    recipientsScanned: uniqueRecipients.size,
+  })
+
+  return {
+    remindersSent,
+    remindersSkipped,
+    reminderFailures,
+    errors,
+  }
 }
 
 const resolveRecipientEmail = async (profileId: string, fallbackEmail: string | null) => {
@@ -635,6 +879,9 @@ export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string;
       remindersSent: 0,
       remindersSkipped: 0,
       reminderFailures: 0,
+      mealKitRemindersSent: 0,
+      mealKitRemindersSkipped: 0,
+      mealKitReminderFailures: 0,
       errors: ['gift-card runner lock not acquired'],
     }
   }
@@ -662,12 +909,28 @@ export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string;
     errors.push(error instanceof Error ? error.message : 'reminder step failed')
   }
 
+  let mealKitRemindersSent = 0
+  let mealKitRemindersSkipped = 0
+  let mealKitReminderFailures = 0
+  try {
+    const mealKitReminderResult = await sendMealKitPickupReminders()
+    mealKitRemindersSent = mealKitReminderResult.remindersSent
+    mealKitRemindersSkipped = mealKitReminderResult.remindersSkipped
+    mealKitReminderFailures = mealKitReminderResult.reminderFailures
+    errors.push(...mealKitReminderResult.errors)
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'meal-kit reminder step failed')
+  }
+
   return {
     runId,
     allocated,
     remindersSent,
     remindersSkipped,
     reminderFailures,
+    mealKitRemindersSent,
+    mealKitRemindersSkipped,
+    mealKitReminderFailures,
     errors,
   }
   } finally {
