@@ -32,7 +32,27 @@ export class ZoomApiError extends Error {
   payload: unknown
 
   constructor({ status, path, payload }: { status: number; path: string; payload: unknown }) {
-    super(`zoom-api ${path} failed (${status})`)
+    const payloadSummary = (() => {
+      if (!payload) return ''
+      if (typeof payload === 'string') {
+        const trimmed = payload.trim()
+        return trimmed ? `: ${trimmed}` : ''
+      }
+      if (typeof payload === 'object') {
+        const detail =
+          'detail' in (payload as Record<string, unknown>)
+            ? (payload as Record<string, unknown>).detail
+            : null
+        if (typeof detail === 'string' && detail.trim()) {
+          return `: ${detail.trim()}`
+        }
+        const serialized = JSON.stringify(payload)
+        return serialized && serialized !== '{}' ? `: ${serialized}` : ''
+      }
+      return ''
+    })()
+
+    super(`zoom-api ${path} failed (${status})${payloadSummary}`)
     this.name = 'ZoomApiError'
     this.status = status
     this.path = path
