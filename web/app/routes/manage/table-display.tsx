@@ -2117,6 +2117,20 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     statusFetcher.submit(formData, { method: 'post' })
   }
 
+  const updateAttendanceGiftCardAvailabilityOverride = (row: Record<string, unknown>, value: string) => {
+    if (!isClassAttendance || !canEditStatus) return
+    const classId = typeof row.class_id === 'string' ? row.class_id : ''
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    if (!classId || !profileId) return
+
+    const formData = new FormData()
+    formData.set('intent', 'update-gift-availability-state')
+    formData.set('class_id', classId)
+    formData.set('profile_id', profileId)
+    formData.set('gift_card_available_state', value)
+    statusFetcher.submit(formData, { method: 'post' })
+  }
+
   const updateWorkshopEnrollmentStatus = (row: Record<string, unknown>, value: string) => {
     if (!isWorkshopEnrollment || !canEditStatus || !value) return
     const enrollmentId = typeof row.id === 'string' ? row.id : ''
@@ -2879,6 +2893,38 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                             >
                               {isSubmitting ? 'Saving...' : blocked ? 'Unblock' : 'Block'}
                             </button>
+                          </td>
+                        )
+                      }
+
+                      if (isClassAttendance && column === 'gift_card_available' && canEditStatus) {
+                        const classId = typeof row.class_id === 'string' ? row.class_id : ''
+                        const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+                        const hasAllocation = row.gift_card_allocated === true || row.gift_card_allocated === 'true'
+                        const isSubmitting =
+                          statusFetcher.state === 'submitting' &&
+                          statusFetcher.formData?.get('intent') === 'update-gift-availability-state' &&
+                          statusFetcher.formData?.get('class_id') === classId &&
+                          statusFetcher.formData?.get('profile_id') === profileId
+
+                        const overrideRaw = typeof row.gift_card_available_state === 'string' ? row.gift_card_available_state : 'false'
+                        const overrideValue = overrideRaw === 'true' || overrideRaw === 'false' ? overrideRaw : 'false'
+                        const released = row.gift_card_available === true || row.gift_card_available === 'true'
+
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="overflow-hidden px-4 py-2 font-mono" title={released ? 'currently available' : 'currently unavailable'}>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={overrideValue}
+                                disabled={!hasAllocation || !classId || !profileId || isSubmitting}
+                                onChange={event => updateAttendanceGiftCardAvailabilityOverride(row, event.target.value)}
+                                className={TABLE_SELECT_CLASS_NAME}
+                              >
+                                <option value="true">true</option>
+                                <option value="false">false</option>
+                              </select>
+                              <span className="text-[10px] text-muted-foreground">{released ? 'now: true' : 'now: false'}</span>
+                            </div>
                           </td>
                         )
                       }

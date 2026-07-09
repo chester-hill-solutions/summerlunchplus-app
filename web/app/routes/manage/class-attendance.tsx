@@ -106,6 +106,7 @@ type GiftCardAllocationRow = {
     release_ready_at?: string | null
     qualification_since_at?: string | null
     eligible_after_at?: string | null
+    availability_state?: string | null
   } | null
 }
 
@@ -245,6 +246,13 @@ const normalizeGiftCardPreference = (value: string | null | undefined) => {
   if (normalized.includes('sobeys')) return 'Sobeys'
   if (normalized.includes('pc') || normalized.includes('president')) return 'PC'
   return value?.trim() || 'N/A'
+}
+
+const normalizeGiftCardAvailabilityState = (value: string | null | undefined) => {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized === 'available' || normalized === 'true') return 'true'
+  if (normalized === 'unavailable' || normalized === 'false') return 'false'
+  return 'false'
 }
 
 const fallbackProfileHoverContext = {
@@ -962,6 +970,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       latest_geo: latestGeo || 'N/A',
       gift_card_allocated: giftCardAllocated,
       gift_card_available: giftCardAvailable,
+      gift_card_available_state: normalizeGiftCardAvailabilityState(giftCardAllocation?.metadata?.availability_state),
       gift_card_availability_reason: giftCardAvailabilityReason,
       gift_card_release_source: giftCardRelease.source,
       gift_card_effective_release_at: giftCardRelease.effectiveReleaseAt,
@@ -1023,16 +1032,16 @@ export async function loader({ request }: Route.LoaderArgs) {
       'giftcard_display',
       'gift_card_allocated',
       'gift_card_available',
+      'gift_card_reminder_sent',
+      'gift_card_link_opened',
+      'gift_card_provider',
+      'gift_card_block_action',
       'gift_card_availability_reason',
       'gift_card_release_source',
       'gift_card_effective_release_at',
       'gift_card_release_ready_at',
       'gift_card_qualification_since_at',
       'gift_card_eligible_after_at',
-      'gift_card_reminder_sent',
-      'gift_card_link_opened',
-      'gift_card_provider',
-      'gift_card_block_action',
       'gift_card_join_url',
       'gift_card_value',
       'gift_card_reminder_sent_at',
@@ -1498,7 +1507,65 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
-  if (intent !== 'update-status' && intent !== 'update-photo-status' && intent !== 'update-camera-on') {
+  if (intent === 'update-gift-availability-state') {
+    const classId = formData.get('class_id') as string
+    const profileId = formData.get('profile_id') as string
+    const availabilityState = String(formData.get('gift_card_available_state') ?? '').trim().toLowerCase()
+
+    if (!classId || !profileId) {
+      return new Response('Missing identifiers', { status: 400, headers: auth.headers })
+    }
+
+    if (availabilityState !== 'true' && availabilityState !== 'false') {
+      return new Response('Invalid availability state value', { status: 400, headers: auth.headers })
+    }
+
+    const { supabase } = createClient(request)
+    const { data: allocation, error: allocationError } = await supabase
+      .from('gift_card_allocation')
+      .select('id, metadata')
+      .eq('class_id', classId)
+      .eq('profile_id', profileId)
+      .maybeSingle()
+
+    if (allocationError) {
+      return new Response(allocationError.message, { status: 500, headers: auth.headers })
+    }
+
+    if (!allocation?.id) {
+      return new Response('Gift card allocation not found for class/profile', { status: 409, headers: auth.headers })
+    }
+
+    const metadata =
+      allocation.metadata && typeof allocation.metadata === 'object' && !Array.isArray(allocation.metadata)
+        ? ({ ...allocation.metadata } as Record<string, unknown>)
+        : {}
+
+    metadata.availability_state = availabilityState === 'true' ? 'available' : 'unavailable'
+
+    const { error: updateError } = await supabase
+      .from('gift_card_allocation')
+      .update({ metadata })
+      .eq('id', allocation.id)
+
+    if (updateError) {
+      return new Response(updateError.message, { status: 500, headers: auth.headers })
+    }
+
+    return {
+      ok: true,
+      intent: 'update-gift-availability-state',
+      class_id: classId,
+      profile_id: profileId,
+      gift_card_available_state: availabilityState,
+    }
+  }
+
+  if (
+    intent !== 'update-status' &&
+    intent !== 'update-photo-status' &&
+    intent !== 'update-camera-on'
+  ) {
     return new Response('Unsupported action', { status: 400, headers: auth.headers })
   }
 

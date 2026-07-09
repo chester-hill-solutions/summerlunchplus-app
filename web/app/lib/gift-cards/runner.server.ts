@@ -5,6 +5,7 @@ import {
   nextReleaseAtIso,
   releaseReadyAtIso,
   resolveGiftCardRelease,
+  resolveGiftCardReleaseFromTiming,
 } from '@/lib/gift-cards/release.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
@@ -14,6 +15,7 @@ import { hashGlrToken, newGlrToken } from './token.server'
 type GiftCardJobResult = {
   runId: string
   allocated: number
+  availabilityBackfilled: number
   remindersSent: number
   remindersSkipped: number
   reminderFailures: number
@@ -604,9 +606,14 @@ const allocateGiftCards = async () => {
             qualification_since_at: qualificationSinceAt,
             eligible_after_at: eligibleAfterIso(qualificationSinceAt),
             release_ready_at: releaseReadyAt,
+            availability_state:
+              releaseReadyAt && Date.parse(releaseReadyAt) <= Date.parse(nowIso)
+                ? 'available'
+                : 'unavailable',
           }
         : {
             release_at: releaseAt,
+            availability_state: Date.parse(releaseAt) <= Date.parse(nowIso) ? 'available' : 'unavailable',
           }
 
       const { data: inserted, error: insertError } = await adminClient
@@ -664,6 +671,8 @@ const sendDueReminders = async (appOrigin: string) => {
   let reminderFailures = 0
   const errors: string[] = []
   const releaseSourceCount = {
+    availability_state: 0,
+    missing_availability_state: 0,
     release_ready_at: 0,
     computed_with_qualification: 0,
     legacy_release: 0,
@@ -705,6 +714,7 @@ const sendDueReminders = async (appOrigin: string) => {
         release_at?: string | null
         release_ready_at?: string | null
         qualification_since_at?: string | null
+        availability_state?: string | null
       } | null
       class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
       profile: { email: string | null } | Array<{ email: string | null }> | null
@@ -733,6 +743,34 @@ const sendDueReminders = async (appOrigin: string) => {
 
     const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
     const classAt = classRelation?.starts_at ?? classRelation?.ends_at ?? null
+    const timingRelease = resolveGiftCardReleaseFromTiming({
+      metadata: row.metadata,
+      classAt,
+      classEndsAt: classRelation?.ends_at ?? null,
+      now: now.getTime(),
+    })
+
+    const currentAvailabilityState = (row.metadata?.availability_state ?? '').trim().toLowerCase()
+    const expectedAvailabilityState = timingRelease.isReleased ? 'available' : 'unavailable'
+    if (currentAvailabilityState !== expectedAvailabilityState) {
+      const nextMetadata = {
+        ...(row.metadata ?? {}),
+        availability_state: expectedAvailabilityState,
+      }
+      const { error: availabilityStateUpdateError } = await adminClient
+        .from('gift_card_allocation')
+        .update({ metadata: nextMetadata })
+        .eq('id', row.id)
+
+      if (availabilityStateUpdateError) {
+        reminderFailures += 1
+        errors.push(`allocation ${row.id}: failed to update availability state: ${availabilityStateUpdateError.message}`)
+        continue
+      }
+
+      row.metadata = nextMetadata
+    }
+
     const release = resolveGiftCardRelease({
       metadata: row.metadata,
       classAt,
@@ -745,12 +783,12 @@ const sendDueReminders = async (appOrigin: string) => {
       continue
     }
 
-    if (release.source === 'legacy_release') {
-      if (!reminderSlotIso || !release.effectiveReleaseAt) {
+    if (timingRelease.source === 'legacy_release') {
+      if (!reminderSlotIso || !timingRelease.effectiveReleaseAt) {
         continue
       }
 
-      const releaseDate = new Date(release.effectiveReleaseAt)
+      const releaseDate = new Date(timingRelease.effectiveReleaseAt)
       if (!Number.isFinite(releaseDate.getTime())) {
         continue
       }
@@ -870,12 +908,118 @@ const sendDueReminders = async (appOrigin: string) => {
   }
 }
 
+const backfillQualifiedAvailabilityStates = async () => {
+  const now = new Date()
+  const nowIso = now.toISOString()
+
+  let updated = 0
+  let skipped = 0
+  let failures = 0
+  let lastAllocationId = ''
+  let pagesRead = 0
+  let rowsScanned = 0
+
+  while (true) {
+    const allocationQuery = adminClient
+      .from('gift_card_allocation')
+      .select('id, metadata, class:class_id(starts_at, ends_at)')
+      .order('id', { ascending: true })
+      .limit(PAGE_SIZE)
+
+    const { data: allocations, error: allocationError } = lastAllocationId
+      ? await allocationQuery.gt('id', lastAllocationId)
+      : await allocationQuery
+
+    if (allocationError) {
+      throw new Error(`Failed to load allocations for availability backfill: ${allocationError.message}`)
+    }
+
+    const rows = (allocations ?? []) as Array<{
+      id: string
+      metadata: {
+        release_at?: string | null
+        release_ready_at?: string | null
+        qualification_since_at?: string | null
+        availability_state?: string | null
+      } | null
+      class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
+    }>
+
+    if (!rows.length) break
+    pagesRead += 1
+    rowsScanned += rows.length
+
+    for (const row of rows) {
+      const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
+      const classAt = classRelation?.starts_at ?? classRelation?.ends_at ?? null
+      const timingRelease = resolveGiftCardReleaseFromTiming({
+        metadata: row.metadata,
+        classAt,
+        classEndsAt: classRelation?.ends_at ?? null,
+        now: now.getTime(),
+      })
+
+      if (!timingRelease.isReleased) {
+        skipped += 1
+        continue
+      }
+
+      const currentAvailabilityState = (row.metadata?.availability_state ?? '').trim().toLowerCase()
+      if (currentAvailabilityState === 'available' || currentAvailabilityState === 'true') {
+        skipped += 1
+        continue
+      }
+
+      const metadata =
+        row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+          ? ({ ...row.metadata } as Record<string, unknown>)
+          : {}
+
+      metadata.availability_state = 'available'
+      metadata.availability_backfilled_at = nowIso
+
+      const { error: updateError } = await adminClient
+        .from('gift_card_allocation')
+        .update({ metadata })
+        .eq('id', row.id)
+
+      if (updateError) {
+        failures += 1
+        console.error('[gift-cards][availability-backfill] update failed', {
+          allocationId: row.id,
+          error: updateError.message,
+        })
+        continue
+      }
+
+      updated += 1
+    }
+
+    lastAllocationId = rows[rows.length - 1]?.id ?? lastAllocationId
+    if (rows.length < PAGE_SIZE) break
+  }
+
+  console.info('[gift-cards][availability-backfill]', {
+    pagesRead,
+    rowsScanned,
+    updated,
+    skipped,
+    failures,
+  })
+
+  return {
+    updated,
+    failures,
+  }
+}
+
 export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string; runId: string }): Promise<GiftCardJobResult> => {
   const lockAcquired = await tryAcquireGiftCardRunnerLock()
   if (!lockAcquired) {
     return {
       runId,
       allocated: 0,
+      availabilityBackfilled: 0,
       remindersSent: 0,
       remindersSkipped: 0,
       reminderFailures: 0,
@@ -894,6 +1038,17 @@ export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string;
     allocated = await allocateGiftCards()
   } catch (error) {
     errors.push(error instanceof Error ? error.message : 'allocate step failed')
+  }
+
+  let availabilityBackfilled = 0
+  try {
+    const availabilityBackfillResult = await backfillQualifiedAvailabilityStates()
+    availabilityBackfilled = availabilityBackfillResult.updated
+    if (availabilityBackfillResult.failures > 0) {
+      errors.push(`availability backfill failed for ${availabilityBackfillResult.failures} allocations`)
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'availability backfill step failed')
   }
 
   let remindersSent = 0
@@ -925,6 +1080,7 @@ export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string;
   return {
     runId,
     allocated,
+    availabilityBackfilled,
     remindersSent,
     remindersSkipped,
     reminderFailures,
