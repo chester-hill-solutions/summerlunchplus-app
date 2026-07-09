@@ -57,6 +57,9 @@ type ProvisionClassResult = {
   registrantsUpdated: number
   registrantsRemoved: number
   registrantsSkipped: number
+  registrantFailures: Array<{ profileId: string; email: string; error: string }>
+  scope: 'class' | 'profile'
+  targetProfileId: string | null
   skipped?: boolean
   skipReason?: string
   error?: string
@@ -65,6 +68,7 @@ type ProvisionClassResult = {
 type ProvisionOptions = {
   forceMeetingRecreate?: boolean
   excludedHostIds?: string[]
+  targetProfileId?: string
 }
 
 type ClassScheduleRelation = { starts_at: string; ends_at: string }
@@ -479,6 +483,7 @@ const ensureRegistrantsForClass = async ({
   identities,
   approvedProfileIds,
   forceReregister,
+  targetProfileId,
 }: {
   classRow: ClassRow
   classZoomMeetingId: string
@@ -486,6 +491,7 @@ const ensureRegistrantsForClass = async ({
   identities: Map<string, ProfileIdentity>
   approvedProfileIds: Set<string>
   forceReregister: boolean
+  targetProfileId?: string | null
 }) => {
   const { data: existingRows, error: existingError } = await adminClient
     .from('class_zoom_registrant')
@@ -508,30 +514,35 @@ const ensureRegistrantsForClass = async ({
   let updated = 0
   let removed = 0
   let skipped = 0
+  const failures: Array<{ profileId: string; email: string; error: string }> = []
 
-  for (const row of existingRows ?? []) {
-    const profileId = row.profile_id
-    if (!profileId || approvedProfileIds.has(profileId)) continue
+  if (!targetProfileId) {
+    for (const row of existingRows ?? []) {
+      const profileId = row.profile_id
+      if (!profileId || approvedProfileIds.has(profileId)) continue
 
-    const existingMeeting = relationRow<{ zoom_meeting_id: string | null }>(row.class_zoom_meeting)
-    if (row.zoom_registrant_id && existingMeeting?.zoom_meeting_id) {
-      try {
-        await zoomApiClient.removeRegistrant(existingMeeting.zoom_meeting_id, row.zoom_registrant_id)
-      } catch (error) {
-        console.error('[zoom-jobs][registrant] failed to remove stale registrant from zoom', {
-          classId: classRow.id,
-          profileId,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        })
+      const existingMeeting = relationRow<{ zoom_meeting_id: string | null }>(row.class_zoom_meeting)
+      if (row.zoom_registrant_id && existingMeeting?.zoom_meeting_id) {
+        try {
+          await zoomApiClient.removeRegistrant(existingMeeting.zoom_meeting_id, row.zoom_registrant_id)
+        } catch (error) {
+          console.error('[zoom-jobs][registrant] failed to remove stale registrant from zoom', {
+            classId: classRow.id,
+            profileId,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          })
+        }
       }
-    }
 
-    await adminClient.from('class_zoom_registrant').delete().eq('id', row.id)
-    await adminClient.from('class_attendance').delete().eq('class_id', classRow.id).eq('profile_id', profileId)
-    removed += 1
+      await adminClient.from('class_zoom_registrant').delete().eq('id', row.id)
+      await adminClient.from('class_attendance').delete().eq('class_id', classRow.id).eq('profile_id', profileId)
+      removed += 1
+    }
   }
 
   for (const identity of identities.values()) {
+    if (targetProfileId && identity.profileId !== targetProfileId) continue
+
     const existing = existingByProfileId.get(identity.profileId)
     const mustReregister =
       forceReregister ||
@@ -545,59 +556,67 @@ const ensureRegistrantsForClass = async ({
       continue
     }
 
-    if (existing?.zoom_registrant_id && existing.zoom_meeting_id) {
-      try {
-        await zoomApiClient.removeRegistrant(existing.zoom_meeting_id, existing.zoom_registrant_id)
-      } catch (error) {
-        console.error('[zoom-jobs][registrant] failed to remove previous registrant before refresh', {
-          classId: classRow.id,
-          profileId: identity.profileId,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        })
-      }
-    }
-
-    let registrant: Awaited<ReturnType<typeof zoomApiClient.registerParticipant>>
     try {
-      registrant = await zoomApiClient.registerParticipant(meetingId, {
+      if (existing?.zoom_registrant_id && existing.zoom_meeting_id) {
+        try {
+          await zoomApiClient.removeRegistrant(existing.zoom_meeting_id, existing.zoom_registrant_id)
+        } catch (error) {
+          console.error('[zoom-jobs][registrant] failed to remove previous registrant before refresh', {
+            classId: classRow.id,
+            profileId: identity.profileId,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          })
+        }
+      }
+
+      const registrant = await zoomApiClient.registerParticipant(meetingId, {
         first_name: identity.firstName,
         last_name: identity.lastName,
         email: identity.email,
       })
+
+      const tokenHash = hashZlrToken(newZlrToken())
+      const { error: upsertError } = await adminClient.from('class_zoom_registrant').upsert(
+        {
+          class_id: classRow.id,
+          profile_id: identity.profileId,
+          class_zoom_meeting_id: classZoomMeetingId,
+          zoom_registrant_id: registrant?.registrant_id ?? null,
+          zoom_join_url: registrant?.join_url ?? null,
+          zlr_token_hash: tokenHash,
+          zlr_expires_at: classRow.ends_at,
+        },
+        { onConflict: 'class_id,profile_id' }
+      )
+
+      if (upsertError) throw new Error(upsertError.message)
+
+      if (existing) {
+        updated += 1
+      } else {
+        created += 1
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown registrant creation error'
-      throw new Error(
-        `${message} | attempted_profile_id=${identity.profileId} | attempted_email=${identity.email}`
-      )
-    }
-
-    const tokenHash = hashZlrToken(newZlrToken())
-    const { error: upsertError } = await adminClient.from('class_zoom_registrant').upsert(
-      {
-        class_id: classRow.id,
-        profile_id: identity.profileId,
-        class_zoom_meeting_id: classZoomMeetingId,
-        zoom_registrant_id: registrant?.registrant_id ?? null,
-        zoom_join_url: registrant?.join_url ?? null,
-        zlr_token_hash: tokenHash,
-        zlr_expires_at: classRow.ends_at,
-      },
-      { onConflict: 'class_id,profile_id' }
-    )
-
-    if (upsertError) throw new Error(upsertError.message)
-
-    if (existing) {
-      updated += 1
-    } else {
-      created += 1
+      failures.push({
+        profileId: identity.profileId,
+        email: identity.email,
+        error: `${message} | attempted_profile_id=${identity.profileId} | attempted_email=${identity.email}`,
+      })
+      continue
     }
   }
 
-  return { created, updated, removed, skipped }
+  return { created, updated, removed, skipped, failures }
 }
 
 export const provisionClassById = async (classId: string, options: ProvisionOptions = {}): Promise<ProvisionClassResult> => {
+  const targetProfileId =
+    typeof options.targetProfileId === 'string' && options.targetProfileId.trim()
+      ? options.targetProfileId.trim()
+      : null
+  const scope: 'class' | 'profile' = targetProfileId ? 'profile' : 'class'
+
   const lockAcquired = await tryAcquireZoomClassLock(classId)
   if (!lockAcquired) {
     return {
@@ -609,6 +628,9 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       registrantsUpdated: 0,
       registrantsRemoved: 0,
       registrantsSkipped: 0,
+      registrantFailures: [],
+      scope,
+      targetProfileId,
       skipped: true,
       skipReason: 'lock_not_acquired',
     }
@@ -629,6 +651,9 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       registrantsUpdated: 0,
       registrantsRemoved: 0,
       registrantsSkipped: 0,
+      registrantFailures: [],
+      scope,
+      targetProfileId,
       error: classError?.message ?? 'Class not found',
     }
   }
@@ -637,8 +662,28 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
 
   try {
     const profiles = await getApprovedProfilesForClass(classRow)
-    const approvedProfileIds = Array.from(new Set(profiles.map(profile => profile.id).filter(Boolean)))
-    const identities = await buildIdentities(profiles)
+    const profilesInScope = targetProfileId ? profiles.filter(profile => profile.id === targetProfileId) : profiles
+    const approvedProfileIds = Array.from(new Set(profilesInScope.map(profile => profile.id).filter(Boolean)))
+
+    if (targetProfileId && !approvedProfileIds.length) {
+      return {
+        classId,
+        attendanceRowsEnsured: 0,
+        meetingCreated: false,
+        meetingRecreated: false,
+        registrantsCreated: 0,
+        registrantsUpdated: 0,
+        registrantsRemoved: 0,
+        registrantsSkipped: 0,
+        registrantFailures: [],
+        scope,
+        targetProfileId,
+        skipped: true,
+        skipReason: 'target_profile_not_approved',
+      }
+    }
+
+    const identities = await buildIdentities(profilesInScope)
     const attendanceRowsEnsured = await ensureAttendanceRowsForClass(classId, approvedProfileIds)
 
     const meeting = await ensureMeetingForClass({
@@ -654,6 +699,7 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       identities,
       approvedProfileIds: new Set(approvedProfileIds),
       forceReregister: meeting.recreated,
+      targetProfileId,
     })
 
     return {
@@ -665,6 +711,9 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       registrantsUpdated: registrants.updated,
       registrantsRemoved: registrants.removed,
       registrantsSkipped: registrants.skipped,
+      registrantFailures: registrants.failures,
+      scope,
+      targetProfileId,
     }
   } catch (error) {
     return {
@@ -676,6 +725,9 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       registrantsUpdated: 0,
       registrantsRemoved: 0,
       registrantsSkipped: 0,
+      registrantFailures: [],
+      scope,
+      targetProfileId,
       error: error instanceof Error ? error.message : 'Unknown provisioning error',
     }
   } finally {

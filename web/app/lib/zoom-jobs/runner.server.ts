@@ -1074,3 +1074,26 @@ export const runZoomJobsForClass = async ({
     attendanceSync,
   }
 }
+
+export const runZoomRegistrantForStudent = async ({
+  classId,
+  profileId,
+  now = new Date(),
+  runId,
+}: {
+  classId: string
+  profileId: string
+  now?: Date
+  runId?: string
+}) => {
+  const provision = await provisionClassById(classId, { targetProfileId: profileId })
+
+  return {
+    ok: true,
+    runId: runId ?? null,
+    ranAt: now.toISOString(),
+    classId,
+    profileId,
+    provision,
+  }
+}
