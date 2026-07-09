@@ -60,6 +60,13 @@ type ProvisionClassResult = {
   registrantFailures: Array<{ profileId: string; email: string; error: string }>
   scope: 'class' | 'profile'
   targetProfileId: string | null
+  lockOwnerRunId: string
+  lockBlockedByOwnerRunId: string | null
+  lockBlockedByOwnerKind: string | null
+  lockBlockedByOwnerInstance: string | null
+  lockBlockedExpiresAt: string | null
+  lockTtlRemainingMs: number | null
+  lockWaitMs: number
   skipped?: boolean
   skipReason?: string
   error?: string
@@ -69,6 +76,9 @@ type ProvisionOptions = {
   forceMeetingRecreate?: boolean
   excludedHostIds?: string[]
   targetProfileId?: string
+  lockOwnerRunId?: string
+  lockOwnerKind?: string
+  lockRetryMs?: number
 }
 
 type ClassScheduleRelation = { starts_at: string; ends_at: string }
@@ -94,13 +104,22 @@ const toDisplayName = (profile: Pick<ProfileRow, 'firstname' | 'surname'>) => {
 }
 
 const normalizeEmail = (value: string | null) => (value ?? '').trim().toLowerCase()
+
+const wait = async (ms: number) => {
+  if (ms <= 0) return
+  await new Promise(resolve => setTimeout(resolve, ms))
+}
+
+const zoomMeetingPrefix = (process.env.ZOOM_MEETING_PREFIX ?? '').trim()
+
 const buildTopic = (classRow: ClassRow) => {
   const workshopName = classRow.workshop?.description?.trim() || 'SummerLunch+ Class'
   const starts = new Date(classRow.starts_at)
   const dateLabel = Number.isNaN(starts.getTime())
     ? classRow.starts_at
     : new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(starts)
-  return `${workshopName} - ${dateLabel}`
+  const baseTopic = `${workshopName} - ${dateLabel}`
+  return zoomMeetingPrefix ? `${zoomMeetingPrefix} ${baseTopic}` : baseTopic
 }
 
 const toZoomUtcStartTime = (value: string) => {
@@ -616,9 +635,53 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       ? options.targetProfileId.trim()
       : null
   const scope: 'class' | 'profile' = targetProfileId ? 'profile' : 'class'
+  const lockOwnerRunId =
+    typeof options.lockOwnerRunId === 'string' && options.lockOwnerRunId.trim()
+      ? options.lockOwnerRunId.trim()
+      : `zoom-lock-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const lockOwnerKind =
+    typeof options.lockOwnerKind === 'string' && options.lockOwnerKind.trim()
+      ? options.lockOwnerKind.trim()
+      : scope === 'profile'
+        ? 'row_register'
+        : 'class_sync'
+  const rawLockRetryMs = typeof options.lockRetryMs === 'number' ? options.lockRetryMs : 0
+  const lockRetryMs = Number.isFinite(rawLockRetryMs) ? Math.max(0, rawLockRetryMs) : 0
+  const lockTtlSeconds = Number.parseInt(process.env.ZOOM_CLASS_LOCK_TTL_SECONDS ?? '120', 10)
+  const ttlSeconds = Number.isFinite(lockTtlSeconds) ? Math.max(30, lockTtlSeconds) : 120
 
-  const lockAcquired = await tryAcquireZoomClassLock(classId)
-  if (!lockAcquired) {
+  const lockStartMs = Date.now()
+  let lockResult = await tryAcquireZoomClassLock({
+    classId,
+    ownerRunId: lockOwnerRunId,
+    ownerKind: lockOwnerKind,
+    ttlSeconds,
+    metadata: {
+      classId,
+      scope,
+      targetProfileId,
+    },
+  })
+
+  while (!lockResult.acquired && Date.now() - lockStartMs < lockRetryMs) {
+    const backoffMs = Math.min(2000, 250 + Math.floor(Math.random() * 300))
+    await wait(backoffMs)
+    lockResult = await tryAcquireZoomClassLock({
+      classId,
+      ownerRunId: lockOwnerRunId,
+      ownerKind: lockOwnerKind,
+      ttlSeconds,
+      metadata: {
+        classId,
+        scope,
+        targetProfileId,
+      },
+    })
+  }
+
+  const lockWaitMs = Date.now() - lockStartMs
+
+  if (!lockResult.acquired) {
     return {
       classId,
       attendanceRowsEnsured: 0,
@@ -631,6 +694,13 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       registrantFailures: [],
       scope,
       targetProfileId,
+      lockOwnerRunId,
+      lockBlockedByOwnerRunId: lockResult.blockedByOwnerRunId,
+      lockBlockedByOwnerKind: lockResult.blockedByOwnerKind,
+      lockBlockedByOwnerInstance: lockResult.blockedByOwnerInstance,
+      lockBlockedExpiresAt: lockResult.blockedExpiresAt,
+      lockTtlRemainingMs: lockResult.ttlRemainingMs,
+      lockWaitMs,
       skipped: true,
       skipReason: 'lock_not_acquired',
     }
@@ -654,6 +724,13 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       registrantFailures: [],
       scope,
       targetProfileId,
+      lockOwnerRunId,
+      lockBlockedByOwnerRunId: null,
+      lockBlockedByOwnerKind: null,
+      lockBlockedByOwnerInstance: null,
+      lockBlockedExpiresAt: null,
+      lockTtlRemainingMs: null,
+      lockWaitMs,
       error: classError?.message ?? 'Class not found',
     }
   }
@@ -678,6 +755,13 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
         registrantFailures: [],
         scope,
         targetProfileId,
+        lockOwnerRunId,
+        lockBlockedByOwnerRunId: null,
+        lockBlockedByOwnerKind: null,
+        lockBlockedByOwnerInstance: null,
+        lockBlockedExpiresAt: null,
+        lockTtlRemainingMs: null,
+        lockWaitMs,
         skipped: true,
         skipReason: 'target_profile_not_approved',
       }
@@ -714,6 +798,13 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       registrantFailures: registrants.failures,
       scope,
       targetProfileId,
+      lockOwnerRunId,
+      lockBlockedByOwnerRunId: null,
+      lockBlockedByOwnerKind: null,
+      lockBlockedByOwnerInstance: null,
+      lockBlockedExpiresAt: null,
+      lockTtlRemainingMs: null,
+      lockWaitMs,
     }
   } catch (error) {
     return {
@@ -728,10 +819,17 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       registrantFailures: [],
       scope,
       targetProfileId,
+      lockOwnerRunId,
+      lockBlockedByOwnerRunId: null,
+      lockBlockedByOwnerKind: null,
+      lockBlockedByOwnerInstance: null,
+      lockBlockedExpiresAt: null,
+      lockTtlRemainingMs: null,
+      lockWaitMs,
       error: error instanceof Error ? error.message : 'Unknown provisioning error',
     }
   } finally {
-    await releaseZoomClassLock(classId)
+    await releaseZoomClassLock({ classId, ownerRunId: lockOwnerRunId })
   }
 }
 
