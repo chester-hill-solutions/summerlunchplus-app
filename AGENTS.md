@@ -15,6 +15,7 @@
 - `~/` and `@/` both map to `web/app/*` (`web/tsconfig.json`).
 - For heavy manage tables, use the existing deferred pattern: lightweight page loader + client `fetcher.load()` request (see `web/app/routes/manage/deferred-table-display.tsx`).
 - For full-dataset filtering tables (for example `email-message`), use the full-scan loader pattern: set `_deferTable=1`, clear `page`/`pageSize`, and force `sort=__full_scan__`.
+- In deferred/manage loaders, always paginate large related-table fetches (`.range(...)` loops with stable `order(...)`) instead of single `.in(...)` reads. PostgREST row caps can silently truncate related rows (for example `class_zoom_registrant`) and produce false UI states.
 
 ## Local setup and verification
 - Initial local setup (repo root): `cp web/.env.template web/.env.local` -> `supabase start --debug` -> copy values from `supabase status -o json` into `web/.env.local`.

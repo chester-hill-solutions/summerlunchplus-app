@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test'
 import {
   classWeekFridayNoonTorontoIso,
   isReleaseReadyNow,
+  resolveGiftCardReleaseFromTiming,
   resolveGiftCardRelease,
   releaseReadyAtIso,
 } from '../../app/lib/gift-cards/release.server'
@@ -52,7 +53,7 @@ test('readiness check compares release_ready_at with now', async () => {
   ).toBeTruthy()
 })
 
-test('release resolver uses explicit release_ready_at when present', async () => {
+test('release resolver does not release when availability state is missing even if release_ready_at is present', async () => {
   const release = resolveGiftCardRelease({
     metadata: {
       release_ready_at: '2026-07-10T16:00:00.000Z',
@@ -64,11 +65,11 @@ test('release resolver uses explicit release_ready_at when present', async () =>
     now: Date.parse('2026-07-10T16:00:00.000Z'),
   })
 
-  expect(release.source).toBe('release_ready_at')
-  expect(release.isReleased).toBeTruthy()
+  expect(release.source).toBe('missing_availability_state')
+  expect(release.isReleased).toBeFalsy()
 })
 
-test('release resolver falls back to legacy release when qualification metadata is missing', async () => {
+test('release resolver requires persisted availability state when metadata state is missing', async () => {
   const release = resolveGiftCardRelease({
     metadata: {
       release_at: '2026-07-14T16:00:00.000Z',
@@ -78,6 +79,49 @@ test('release resolver falls back to legacy release when qualification metadata 
     now: Date.parse('2026-07-11T16:00:00.000Z'),
   })
 
-  expect(release.source).toBe('legacy_release')
+  expect(release.source).toBe('missing_availability_state')
   expect(release.isReleased).toBeFalsy()
+})
+
+test('release resolver force-available override always releases', async () => {
+  const release = resolveGiftCardRelease({
+    metadata: {
+      availability_state: 'available',
+      release_at: '2099-07-14T16:00:00.000Z',
+    },
+    classAt: '2026-07-08T12:00:00.000Z',
+    classEndsAt: '2026-07-08T13:00:00.000Z',
+    now: Date.parse('2026-07-11T16:00:00.000Z'),
+  })
+
+  expect(release.source).toBe('availability_state')
+  expect(release.isReleased).toBeTruthy()
+})
+
+test('release resolver force-unavailable override blocks release', async () => {
+  const release = resolveGiftCardRelease({
+    metadata: {
+      availability_state: 'unavailable',
+      release_ready_at: '2026-07-10T16:00:00.000Z',
+    },
+    classAt: '2026-07-08T12:00:00.000Z',
+    classEndsAt: '2026-07-08T13:00:00.000Z',
+    now: Date.parse('2026-07-11T16:00:00.000Z'),
+  })
+
+  expect(release.source).toBe('availability_state')
+  expect(release.isReleased).toBeFalsy()
+})
+
+test('timing resolver still computes release readiness without persisted availability state', async () => {
+  const release = resolveGiftCardReleaseFromTiming({
+    metadata: {
+      release_at: '2026-07-10T16:00:00.000Z',
+    },
+    classAt: '2026-07-08T12:00:00.000Z',
+    classEndsAt: '2026-07-08T13:00:00.000Z',
+    now: Date.parse('2026-07-10T16:00:00.000Z'),
+  })
+
+  expect(release.isReleased).toBeTruthy()
 })

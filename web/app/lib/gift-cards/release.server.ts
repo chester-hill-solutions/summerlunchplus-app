@@ -163,6 +163,8 @@ export const isReleaseReadyNow = ({
 export const isEligibilityTimingEnabled = () => ELIGIBILITY_TIMING_ENABLED
 
 type ReleaseResolutionSource =
+  | 'availability_state'
+  | 'missing_availability_state'
   | 'release_ready_at'
   | 'computed_with_qualification'
   | 'legacy_release'
@@ -172,6 +174,7 @@ type GiftCardReleaseMetadata = {
   release_at?: string | null
   release_ready_at?: string | null
   qualification_since_at?: string | null
+  availability_state?: string | null
 } | null
 
 const validIsoOrNull = (value: string | null | undefined) => {
@@ -187,7 +190,14 @@ const legacyEffectiveReleaseAtIso = ({
   classEndsAt: string | null
 }) => validIsoOrNull(releaseAt) ?? validIsoOrNull(nextReleaseAtIso(classEndsAt))
 
-export const resolveGiftCardRelease = ({
+const normalizeAvailabilityState = (value: string | null | undefined) => {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized === 'available' || normalized === 'true') return 'available'
+  if (normalized === 'unavailable' || normalized === 'false') return 'unavailable'
+  return null
+}
+
+export const resolveGiftCardReleaseFromTiming = ({
   metadata,
   classAt,
   classEndsAt,
@@ -246,6 +256,43 @@ export const resolveGiftCardRelease = ({
     source: (legacyReleaseAt ? 'legacy_release' : 'unresolved') as ReleaseResolutionSource,
     effectiveReleaseAt: legacyReleaseAt,
     isReleased: releasedAtOrNull(legacyReleaseAt),
+  }
+}
+
+export const resolveGiftCardRelease = ({
+  metadata,
+  classAt,
+  classEndsAt,
+  now = Date.now(),
+  eligibilityTimingEnabled = isEligibilityTimingEnabled(),
+}: {
+  metadata: GiftCardReleaseMetadata
+  classAt: string | null
+  classEndsAt: string | null
+  now?: number
+  eligibilityTimingEnabled?: boolean
+}) => {
+  const availabilityState = normalizeAvailabilityState(metadata?.availability_state)
+  if (availabilityState === 'available') {
+    return {
+      source: 'availability_state' as ReleaseResolutionSource,
+      effectiveReleaseAt: null,
+      isReleased: true,
+    }
+  }
+
+  if (availabilityState === 'unavailable') {
+    return {
+      source: 'availability_state' as ReleaseResolutionSource,
+      effectiveReleaseAt: null,
+      isReleased: false,
+    }
+  }
+
+  return {
+    source: 'missing_availability_state' as ReleaseResolutionSource,
+    effectiveReleaseAt: null,
+    isReleased: false,
   }
 }
 

@@ -4,7 +4,14 @@ import { Constants, type Database } from '@/lib/database.types'
 import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { EXPORT_TYPE_CLASS_ATTENDANCE_CSV } from '@/lib/exports/types'
 import { resolveIpGeolocation } from '@/lib/geoip.server'
-import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
+import {
+  eligibleAfterIso,
+  isEligibilityTimingEnabled,
+  nextReleaseAtIso,
+  releaseReadyAtIso,
+  resolveGiftCardRelease,
+  resolveGiftCardReleaseFromTiming,
+} from '@/lib/gift-cards/release.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
@@ -106,6 +113,7 @@ type GiftCardAllocationRow = {
     release_ready_at?: string | null
     qualification_since_at?: string | null
     eligible_after_at?: string | null
+    availability_state?: string | null
   } | null
 }
 
@@ -245,6 +253,13 @@ const normalizeGiftCardPreference = (value: string | null | undefined) => {
   if (normalized.includes('sobeys')) return 'Sobeys'
   if (normalized.includes('pc') || normalized.includes('president')) return 'PC'
   return value?.trim() || 'N/A'
+}
+
+const normalizeGiftCardAvailabilityState = (value: string | null | undefined) => {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized === 'available' || normalized === 'true') return 'true'
+  if (normalized === 'unavailable' || normalized === 'false') return 'false'
+  return 'false'
 }
 
 const fallbackProfileHoverContext = {
@@ -962,6 +977,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       latest_geo: latestGeo || 'N/A',
       gift_card_allocated: giftCardAllocated,
       gift_card_available: giftCardAvailable,
+      gift_card_available_state: normalizeGiftCardAvailabilityState(giftCardAllocation?.metadata?.availability_state),
       gift_card_availability_reason: giftCardAvailabilityReason,
       gift_card_release_source: giftCardRelease.source,
       gift_card_effective_release_at: giftCardRelease.effectiveReleaseAt,
@@ -1023,16 +1039,16 @@ export async function loader({ request }: Route.LoaderArgs) {
       'giftcard_display',
       'gift_card_allocated',
       'gift_card_available',
+      'gift_card_reminder_sent',
+      'gift_card_link_opened',
+      'gift_card_provider',
+      'gift_card_block_action',
       'gift_card_availability_reason',
       'gift_card_release_source',
       'gift_card_effective_release_at',
       'gift_card_release_ready_at',
       'gift_card_qualification_since_at',
       'gift_card_eligible_after_at',
-      'gift_card_reminder_sent',
-      'gift_card_link_opened',
-      'gift_card_provider',
-      'gift_card_block_action',
       'gift_card_join_url',
       'gift_card_value',
       'gift_card_reminder_sent_at',
@@ -1438,6 +1454,184 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
+  if (intent === 'allocate-gift-card') {
+    const classId = formData.get('class_id') as string
+    const profileId = formData.get('profile_id') as string
+    const preferredProviderRaw = String(formData.get('gift_card_preferred_provider') ?? '')
+      .trim()
+      .toLowerCase()
+    const preferredProvider =
+      preferredProviderRaw === 'sobeys' ? 'Sobeys' : preferredProviderRaw === 'pc' ? 'PC' : null
+
+    if (!classId || !profileId) {
+      return new Response('Missing identifiers', { status: 400, headers: auth.headers })
+    }
+
+    const { supabase } = createClient(request)
+    const [attendanceResult, allocationResult, classResult] = await Promise.all([
+      supabase
+        .from('class_attendance')
+        .select('id, status, photo_status, camera_on, gift_card_blocked')
+        .eq('class_id', classId)
+        .eq('profile_id', profileId)
+        .maybeSingle<{
+          id: string
+          status: 'unknown' | 'present' | 'absent' | null
+          photo_status: 'uploaded' | 'accepted' | 'rejected' | null
+          camera_on: boolean | null
+          gift_card_blocked: boolean
+        }>(),
+      supabase.from('gift_card_allocation').select('id').eq('class_id', classId).eq('profile_id', profileId).maybeSingle<{ id: string }>(),
+      supabase.from('class').select('starts_at, ends_at').eq('id', classId).maybeSingle<{ starts_at: string | null; ends_at: string | null }>(),
+    ])
+
+    if (attendanceResult.error) {
+      return new Response(attendanceResult.error.message, { status: 500, headers: auth.headers })
+    }
+    if (allocationResult.error) {
+      return new Response(allocationResult.error.message, { status: 500, headers: auth.headers })
+    }
+    if (classResult.error) {
+      return new Response(classResult.error.message, { status: 500, headers: auth.headers })
+    }
+
+    const attendance = attendanceResult.data
+    if (!attendance?.id) {
+      return new Response('Class attendance row not found for class/profile', { status: 409, headers: auth.headers })
+    }
+    if (attendance.gift_card_blocked) {
+      return new Response('Gift card is blocked for this attendance row', { status: 409, headers: auth.headers })
+    }
+
+    if (allocationResult.data?.id) {
+      return {
+        ok: true,
+        intent: 'allocate-gift-card',
+        class_id: classId,
+        profile_id: profileId,
+        already_allocated: true,
+      }
+    }
+
+    const pickAvailableAsset = async (provider: 'PC' | 'Sobeys' | null) => {
+      let query = supabase
+        .from('gift_card_asset')
+        .select('id, provider')
+        .eq('status', 'available')
+        .order('created_at', { ascending: true })
+        .limit(1)
+
+      if (provider) {
+        query = query.eq('provider', provider)
+      }
+
+      return await query.maybeSingle<{ id: string; provider: 'PC' | 'Sobeys' }>()
+    }
+
+    const providerFallbackOrder: Array<'PC' | 'Sobeys'> = preferredProvider
+      ? [preferredProvider, preferredProvider === 'PC' ? 'Sobeys' : 'PC']
+      : ['PC', 'Sobeys']
+
+    let selectedAsset: { id: string; provider: 'PC' | 'Sobeys' } | null = null
+    for (const provider of providerFallbackOrder) {
+      const { data, error } = await pickAvailableAsset(provider)
+      if (error) {
+        return new Response(error.message, { status: 500, headers: auth.headers })
+      }
+      if (data?.id) {
+        selectedAsset = data
+        break
+      }
+    }
+
+    if (!selectedAsset) {
+      return new Response('No available gift card asset found for allocation', { status: 409, headers: auth.headers })
+    }
+
+    const nowIso = new Date().toISOString()
+    const { data: claimedAsset, error: claimError } = await supabase
+      .from('gift_card_asset')
+      .update({
+        status: 'allocated',
+        assigned_profile_id: profileId,
+        allocated_at: nowIso,
+      })
+      .eq('id', selectedAsset.id)
+      .eq('status', 'available')
+      .select('id, provider')
+      .maybeSingle<{ id: string; provider: 'PC' | 'Sobeys' }>()
+
+    if (claimError || !claimedAsset?.id) {
+      return new Response(claimError?.message ?? 'Gift card asset claim failed', { status: 409, headers: auth.headers })
+    }
+
+    const classAt = classResult.data?.starts_at ?? classResult.data?.ends_at ?? null
+    const classEndsAt = classResult.data?.ends_at ?? null
+    const releaseAt = nextReleaseAtIso(classEndsAt)
+    const eligibilityTimingEnabled = isEligibilityTimingEnabled()
+    const hasAttendanceEvidence =
+      attendance.status === 'present' || attendance.camera_on === true || attendance.photo_status === 'accepted' || attendance.photo_status === 'uploaded'
+    const qualificationSinceAt = eligibilityTimingEnabled && hasAttendanceEvidence ? nowIso : null
+    const releaseReadyAt = eligibilityTimingEnabled
+      ? releaseReadyAtIso({ classAtIso: classAt, qualificationSinceAtIso: qualificationSinceAt })
+      : null
+    const timingResolution = resolveGiftCardReleaseFromTiming({
+      metadata: {
+        release_at: releaseAt,
+        release_ready_at: releaseReadyAt,
+        qualification_since_at: qualificationSinceAt,
+      },
+      classAt,
+      classEndsAt,
+      now: Date.parse(nowIso),
+      eligibilityTimingEnabled,
+    })
+
+    const metadata = eligibilityTimingEnabled
+      ? {
+          release_at: releaseAt,
+          qualification_since_at: qualificationSinceAt,
+          eligible_after_at: eligibleAfterIso(qualificationSinceAt),
+          release_ready_at: releaseReadyAt,
+          availability_state: timingResolution.isReleased ? 'available' : 'unavailable',
+        }
+      : {
+          release_at: releaseAt,
+          availability_state: releaseAt && Date.parse(releaseAt) <= Date.parse(nowIso) ? 'available' : 'unavailable',
+        }
+
+    const { error: insertError } = await supabase.from('gift_card_allocation').insert({
+      class_id: classId,
+      profile_id: profileId,
+      class_attendance_id: attendance.id,
+      gift_card_asset_id: claimedAsset.id,
+      status: 'allocated',
+      metadata,
+    })
+
+    if (insertError) {
+      await supabase
+        .from('gift_card_asset')
+        .update({
+          status: 'available',
+          assigned_profile_id: null,
+          allocated_at: null,
+        })
+        .eq('id', claimedAsset.id)
+
+      return new Response(insertError.message, { status: 500, headers: auth.headers })
+    }
+
+    return {
+      ok: true,
+      intent: 'allocate-gift-card',
+      class_id: classId,
+      profile_id: profileId,
+      gift_card_allocated: true,
+      gift_card_provider: claimedAsset.provider,
+    }
+  }
+
   if (intent === 'toggle-gift-card-block') {
     const classId = formData.get('class_id') as string
     const profileId = formData.get('profile_id') as string
@@ -1498,7 +1692,65 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
-  if (intent !== 'update-status' && intent !== 'update-photo-status' && intent !== 'update-camera-on') {
+  if (intent === 'update-gift-availability-state') {
+    const classId = formData.get('class_id') as string
+    const profileId = formData.get('profile_id') as string
+    const availabilityState = String(formData.get('gift_card_available_state') ?? '').trim().toLowerCase()
+
+    if (!classId || !profileId) {
+      return new Response('Missing identifiers', { status: 400, headers: auth.headers })
+    }
+
+    if (availabilityState !== 'true' && availabilityState !== 'false') {
+      return new Response('Invalid availability state value', { status: 400, headers: auth.headers })
+    }
+
+    const { supabase } = createClient(request)
+    const { data: allocation, error: allocationError } = await supabase
+      .from('gift_card_allocation')
+      .select('id, metadata')
+      .eq('class_id', classId)
+      .eq('profile_id', profileId)
+      .maybeSingle()
+
+    if (allocationError) {
+      return new Response(allocationError.message, { status: 500, headers: auth.headers })
+    }
+
+    if (!allocation?.id) {
+      return new Response('Gift card allocation not found for class/profile', { status: 409, headers: auth.headers })
+    }
+
+    const metadata =
+      allocation.metadata && typeof allocation.metadata === 'object' && !Array.isArray(allocation.metadata)
+        ? ({ ...allocation.metadata } as Record<string, unknown>)
+        : {}
+
+    metadata.availability_state = availabilityState === 'true' ? 'available' : 'unavailable'
+
+    const { error: updateError } = await supabase
+      .from('gift_card_allocation')
+      .update({ metadata })
+      .eq('id', allocation.id)
+
+    if (updateError) {
+      return new Response(updateError.message, { status: 500, headers: auth.headers })
+    }
+
+    return {
+      ok: true,
+      intent: 'update-gift-availability-state',
+      class_id: classId,
+      profile_id: profileId,
+      gift_card_available_state: availabilityState,
+    }
+  }
+
+  if (
+    intent !== 'update-status' &&
+    intent !== 'update-photo-status' &&
+    intent !== 'update-camera-on'
+  ) {
     return new Response('Unsupported action', { status: 400, headers: auth.headers })
   }
 
