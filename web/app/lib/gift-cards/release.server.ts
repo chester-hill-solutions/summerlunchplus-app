@@ -1,4 +1,6 @@
 const TORONTO_TIME_ZONE = 'America/Toronto'
+const ELIGIBILITY_TIMING_ENABLED =
+  (process.env.GIFT_CARD_ELIGIBILITY_TIMING_ENABLED ?? 'true').trim().toLowerCase() !== 'false'
 
 const torontoDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: TORONTO_TIME_ZONE,
@@ -26,6 +28,7 @@ const torontoPartsForDate = (date: Date) => {
   const parts = torontoDateTimeFormatter.formatToParts(date)
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? ''
   return {
+    weekday: get('weekday'),
     year: Number.parseInt(get('year'), 10),
     month: Number.parseInt(get('month'), 10),
     day: Number.parseInt(get('day'), 10),
@@ -90,6 +93,74 @@ export const nextReleaseAtIso = (classEndsAt: string | null) => {
 
   return null
 }
+
+const weekdayIndexByLabel: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+}
+
+export const classWeekFridayNoonTorontoIso = (classAtIso: string | null) => {
+  if (!classAtIso) return null
+  const classAt = new Date(classAtIso)
+  if (!Number.isFinite(classAt.getTime())) return null
+
+  const local = torontoPartsForDate(classAt)
+  const weekday = weekdayIndexByLabel[local.weekday]
+
+  if (!Number.isFinite(weekday)) return null
+
+  const daysSinceMonday = (weekday + 6) % 7
+  const monday = addDaysToDateParts(local.year, local.month, local.day, -daysSinceMonday)
+  const friday = addDaysToDateParts(monday.year, monday.month, monday.day, 4)
+  const fridayNoon = torontoTimeUtcForDate(friday.year, friday.month, friday.day, 12, 0)
+  return fridayNoon ? fridayNoon.toISOString() : null
+}
+
+export const eligibleAfterIso = (qualificationSinceAtIso: string | null) => {
+  if (!qualificationSinceAtIso) return null
+  const qualificationSinceAt = new Date(qualificationSinceAtIso)
+  if (!Number.isFinite(qualificationSinceAt.getTime())) return null
+  return new Date(qualificationSinceAt.getTime() + 6 * 60 * 60 * 1000).toISOString()
+}
+
+const maxIso = (leftIso: string | null, rightIso: string | null) => {
+  const leftMs = Date.parse((leftIso ?? '').trim())
+  const rightMs = Date.parse((rightIso ?? '').trim())
+  if (!Number.isFinite(leftMs) && !Number.isFinite(rightMs)) return null
+  if (!Number.isFinite(leftMs)) return rightIso
+  if (!Number.isFinite(rightMs)) return leftIso
+  return leftMs >= rightMs ? leftIso : rightIso
+}
+
+export const releaseReadyAtIso = ({
+  classAtIso,
+  qualificationSinceAtIso,
+}: {
+  classAtIso: string | null
+  qualificationSinceAtIso: string | null
+}) => {
+  const fridayNoon = classWeekFridayNoonTorontoIso(classAtIso)
+  const eligibleAfter = eligibleAfterIso(qualificationSinceAtIso)
+  return maxIso(fridayNoon, eligibleAfter)
+}
+
+export const isReleaseReadyNow = ({
+  releaseReadyAt,
+  now = Date.now(),
+}: {
+  releaseReadyAt: string | null | undefined
+  now?: number
+}) => {
+  const releaseReadyAtMs = Date.parse((releaseReadyAt ?? '').trim())
+  return Number.isFinite(releaseReadyAtMs) && releaseReadyAtMs <= now
+}
+
+export const isEligibilityTimingEnabled = () => ELIGIBILITY_TIMING_ENABLED
 
 export const isGiftCardReleasedNow = ({
   releaseAt,

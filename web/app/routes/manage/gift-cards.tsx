@@ -2,6 +2,7 @@ import { Link, useLoaderData } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
+import { isEligibilityTimingEnabled } from '@/lib/gift-cards/release.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
 import TableDisplay from './table-display'
@@ -146,6 +147,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       release: `Mon/Fri ${formatTorontoClock(RELEASE_HOUR_TORONTO, RELEASE_MINUTE_TORONTO)}`,
       reminder: `Mon/Fri ${formatTorontoClock(REMINDER_HOUR_TORONTO, REMINDER_MINUTE_TORONTO)}`,
     },
+    eligibilityTimingEnabled: isEligibilityTimingEnabled(),
     statusTotals,
     totalAssetCount,
     columns: ['provider', 'account_number', 'pin', 'value', 'status', 'asset_url', 'profile_display', 'upload_id', 'created_at'],
@@ -181,8 +183,17 @@ export default function GiftCardsPage() {
             ))}
           </div>
           <div className="rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">System timing</span>{' '}
-            (timezone: {data.systemTiming.timezone}) - Available: {data.systemTiming.release} - Reminder: {data.systemTiming.reminder}
+            {data.eligibilityTimingEnabled ? (
+              <>
+                <span className="font-medium text-foreground">Availability rule</span> Available and reminder eligible after 6
+                hours qualified and past class-week Friday noon (Toronto).
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-foreground">System timing</span>{' '}
+                (timezone: {data.systemTiming.timezone}) - Available: {data.systemTiming.release} - Reminder: {data.systemTiming.reminder}
+              </>
+            )}
           </div>
           <Button asChild>
             <Link to="/manage/gift-cards/upload">Upload gift cards</Link>
