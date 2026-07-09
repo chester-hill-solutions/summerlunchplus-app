@@ -1055,7 +1055,10 @@ export const runZoomJobsForClass = async ({
   runId?: string
 }) => {
   const attendanceRowBackfill = await backfillAttendanceRowsCoverage({ now })
-  const provision = await provisionClassById(classId)
+  const provision = await provisionClassById(classId, {
+    lockOwnerRunId: runId,
+    lockOwnerKind: 'class_sync',
+  })
   const hostReconciliation = await reconcileHostOverlaps({ now, onlyClassIds: new Set([classId]) })
   const reminderCoverage = await sendReminderCoverage({ now, appOrigin, onlyClassId: classId })
   const postClassCameraOrPhotoFollowup = await sendPostClassCameraOrPhotoFollowupCoverage({ now, onlyClassId: classId })
@@ -1086,7 +1089,12 @@ export const runZoomRegistrantForStudent = async ({
   now?: Date
   runId?: string
 }) => {
-  const provision = await provisionClassById(classId, { targetProfileId: profileId })
+  const provision = await provisionClassById(classId, {
+    targetProfileId: profileId,
+    lockOwnerRunId: runId,
+    lockOwnerKind: 'row_register',
+    lockRetryMs: Number.parseInt(process.env.ZOOM_ROW_REGISTER_LOCK_WAIT_MS ?? '25000', 10),
+  })
 
   return {
     ok: true,

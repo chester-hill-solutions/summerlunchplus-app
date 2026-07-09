@@ -1281,6 +1281,20 @@ export async function action({ request }: Route.ActionArgs) {
                   ? String(provision.registrantFailures.length)
                   : 'n/a'
               }`,
+              `lock_owner_run_id=${'lockOwnerRunId' in provision ? String(provision.lockOwnerRunId ?? 'none') : 'none'}`,
+              `lock_blocked_by_run_id=${
+                'lockBlockedByOwnerRunId' in provision ? String(provision.lockBlockedByOwnerRunId ?? 'none') : 'none'
+              }`,
+              `lock_blocked_by_kind=${
+                'lockBlockedByOwnerKind' in provision ? String(provision.lockBlockedByOwnerKind ?? 'none') : 'none'
+              }`,
+              `lock_blocked_expires_at=${
+                'lockBlockedExpiresAt' in provision ? String(provision.lockBlockedExpiresAt ?? 'none') : 'none'
+              }`,
+              `lock_ttl_remaining_ms=${
+                'lockTtlRemainingMs' in provision ? String(provision.lockTtlRemainingMs ?? 'none') : 'none'
+              }`,
+              `lock_wait_ms=${'lockWaitMs' in provision ? String(provision.lockWaitMs ?? 'none') : 'none'}`,
               `provision_skipped=${String(provisionSkipped)}`,
               `provision_skip_reason=${provisionSkipReason}`,
             ].join(' | ')
