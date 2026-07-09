@@ -324,12 +324,19 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const profilePriority: string[] = []
   const primaryChildId = family.profileRole === 'guardian' ? (family.primaryChildByGuardian.get(family.profileId) ?? null) : null
-  if (primaryChildId) profilePriority.push(primaryChildId)
+
+  if (family.profileRole === 'student') {
+    profilePriority.push(family.profileId)
+  } else if (primaryChildId) {
+    profilePriority.push(primaryChildId)
+  }
+
   for (const child of family.children) profilePriority.push(child.id)
   for (const guardian of family.guardians) profilePriority.push(guardian.id)
   if (family.profileId) profilePriority.push(family.profileId)
 
   const orderedFamilyProfileIds = Array.from(new Set(profilePriority))
+  const profileRankById = new Map(orderedFamilyProfileIds.map((profileId, index) => [profileId, index]))
 
   const joinUrlByClass = classes.reduce<Record<string, string>>((acc, classRow) => {
     if (!classRow.workshop_id) return acc
@@ -408,7 +415,15 @@ export async function loader({ request }: Route.LoaderArgs) {
       release_ready_at?: string | null
       qualification_since_at?: string | null
     } | null
-  }>).reduce<Record<string, string>>((acc, row) => {
+  }>).reduce<
+    Record<
+      string,
+      {
+        href: string
+        rank: number
+      }
+    >
+  >((acc, row) => {
     if (row.blocked) return acc
     const released = resolveGiftCardRelease({
       metadata: row.metadata,
@@ -418,11 +433,21 @@ export async function loader({ request }: Route.LoaderArgs) {
     }).isReleased
     const availableByReminder = Boolean(row.reminder_sent_at && (row.status === 'sent' || row.status === 'opened'))
     if (!released && !availableByReminder) return acc
-    const selectedProfileId = selectedProfileIdByClass[row.class_id]
-    if (!selectedProfileId || selectedProfileId !== row.profile_id) return acc
-    acc[row.class_id] = `/glr/${row.id}`
+
+    const rank = profileRankById.get(row.profile_id) ?? Number.MAX_SAFE_INTEGER
+    const existing = acc[row.class_id]
+    if (existing && existing.rank <= rank) return acc
+
+    acc[row.class_id] = {
+      href: `/glr/${row.id}`,
+      rank,
+    }
     return acc
   }, {})
+
+  const giftCardLinkByClassFinal = Object.fromEntries(
+    Object.entries(giftCardLinkByClass).map(([classId, value]) => [classId, value.href])
+  ) as Record<string, string>
 
   const nextClassCandidate = classes
     .filter(classRow => Boolean(classRow.workshop_id) && approvedWorkshopIds.has(classRow.workshop_id) && new Date(classRow.starts_at).getTime() > now)
@@ -447,7 +472,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     enrollments,
     classesByWorkshop,
     joinUrlByClass,
-    giftCardLinkByClass,
+    giftCardLinkByClass: giftCardLinkByClassFinal,
     selectedProfileIdByClass,
     selectedPhotoStatusByClass,
     nextClass,
