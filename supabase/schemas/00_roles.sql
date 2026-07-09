@@ -171,6 +171,11 @@ select r.role, p.permission
 from (values ('admin'::app_role), ('manager'::app_role)) as r(role)
 cross join (select unnest(enum_range(null::app_permissions)) as permission) p
 on conflict do nothing;
+
+insert into public.role_permission (role, permission)
+values ('staff'::app_role, 'profiles.read'::app_permissions)
+on conflict do nothing;
+
 grant execute on function public.current_user_role() to authenticated, supabase_auth_admin;
 
 -- Auto-provision a user role on signup.
