@@ -26,6 +26,8 @@ export const useRouterInstrumentation = () => {
   const navStartRef = useRef<number | null>(null)
   const navFromRef = useRef<string>('')
   const fetcherRunsRef = useRef<Map<string, FetcherRun>>(new Map())
+  const lastNavPendingLogRef = useRef<number>(0)
+  const lastFetcherPendingLogByKeyRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
     const state = navigation.state
@@ -56,6 +58,32 @@ export const useRouterInstrumentation = () => {
   }, [location.pathname, location.search, navigation.formAction, navigation.formMethod, navigation.location, navigation.state])
 
   useEffect(() => {
+    if (navigation.state === 'idle') {
+      lastNavPendingLogRef.current = 0
+      return
+    }
+
+    const tick = window.setInterval(() => {
+      if (navStartRef.current === null) return
+      const elapsedMs = Math.round(performance.now() - navStartRef.current)
+      const now = Date.now()
+      if (now - lastNavPendingLogRef.current < 2000) return
+      lastNavPendingLogRef.current = now
+      logEvent('navigation_still_blocked', {
+        from: navFromRef.current,
+        to: navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : null,
+        elapsedMs,
+        state: navigation.state,
+        activeFetcherCount: fetchers.filter(fetcher => fetcher.state !== 'idle').length,
+      })
+    }, 1000)
+
+    return () => {
+      window.clearInterval(tick)
+    }
+  }, [fetchers, navigation.location, navigation.state])
+
+  useEffect(() => {
     const activeKeys = new Set<string>()
 
     for (const fetcher of fetchers) {
@@ -76,6 +104,25 @@ export const useRouterInstrumentation = () => {
         })
       }
 
+      if (fetcher.state !== 'idle') {
+        const run = fetcherRunsRef.current.get(key)
+        if (run) {
+          const elapsedMs = Math.round(performance.now() - run.startedAt)
+          const lastLogAt = lastFetcherPendingLogByKeyRef.current.get(key) ?? 0
+          const now = Date.now()
+          if (elapsedMs >= 2000 && now - lastLogAt >= 2000) {
+            lastFetcherPendingLogByKeyRef.current.set(key, now)
+            logEvent('fetcher_still_blocked', {
+              key,
+              href: run.href,
+              elapsedMs,
+              state: fetcher.state,
+              currentUrl: `${location.pathname}${location.search}`,
+            })
+          }
+        }
+      }
+
       if (fetcher.state === 'idle' && fetcherRunsRef.current.has(key)) {
         const run = fetcherRunsRef.current.get(key)
         if (!run) continue
@@ -87,12 +134,14 @@ export const useRouterInstrumentation = () => {
           currentUrl: `${location.pathname}${location.search}`,
         })
         fetcherRunsRef.current.delete(key)
+        lastFetcherPendingLogByKeyRef.current.delete(key)
       }
     }
 
     for (const [key] of fetcherRunsRef.current.entries()) {
       if (activeKeys.has(key)) continue
       fetcherRunsRef.current.delete(key)
+      lastFetcherPendingLogByKeyRef.current.delete(key)
     }
   }, [fetchers, location.pathname, location.search])
 }
