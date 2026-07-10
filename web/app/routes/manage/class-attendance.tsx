@@ -1569,8 +1569,7 @@ export async function action({ request }: Route.ActionArgs) {
     const classEndsAt = classResult.data?.ends_at ?? null
     const releaseAt = nextReleaseAtIso(classEndsAt)
     const eligibilityTimingEnabled = isEligibilityTimingEnabled()
-    const hasAttendanceEvidence =
-      attendance.status === 'present' || attendance.camera_on === true || attendance.photo_status === 'accepted' || attendance.photo_status === 'uploaded'
+    const hasAttendanceEvidence = attendance.camera_on === true || attendance.photo_status === 'accepted'
     const qualificationSinceAt = eligibilityTimingEnabled && hasAttendanceEvidence ? nowIso : null
     const releaseReadyAt = eligibilityTimingEnabled
       ? releaseReadyAtIso({ classAtIso: classAt, qualificationSinceAtIso: qualificationSinceAt })

@@ -560,7 +560,7 @@ const allocateGiftCards = async () => {
     }
 
     for (const row of typedRows) {
-      const hasAttendanceEvidence = row.camera_on === true || row.photo_status === 'accepted' || row.photo_status === 'uploaded'
+      const hasAttendanceEvidence = row.camera_on === true || row.photo_status === 'accepted'
       if (!hasAttendanceEvidence) continue
       if (row.gift_card_blocked) continue
       if (allocationByPair.has(allocationKey(row.class_id, row.profile_id))) continue
