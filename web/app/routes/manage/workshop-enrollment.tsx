@@ -9,6 +9,7 @@ import { Constants, type Database } from '@/lib/database.types'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
 import { loadWorkshopEnrollmentData } from '@/lib/exports/workshop-enrollment-query.server'
+import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { TABLE_DEFINITIONS } from './table-definitions'
 import { Download } from 'lucide-react'
 
@@ -50,7 +51,17 @@ const parseEnrollmentField = (
 }
 
 export async function loader(args: Route.LoaderArgs) {
+  const profile = createLoaderProfile({
+    name: 'workshop_enrollment_loader',
+    request: args.request,
+  })
+
   const base = await loadWorkshopEnrollmentData(args.request)
+  profile.mark('load_workshop_enrollment_data', {
+    rowCount: base.rows.length,
+    totalRows: base.totalRows ?? base.rows.length,
+  })
+
   let giftCardOptions: string[] = []
   let federalDistrictOptions: Array<{ value: string; label: string }> = []
   try {
@@ -58,6 +69,9 @@ export async function loader(args: Route.LoaderArgs) {
   } catch (error) {
     console.error('[workshop enrollment] unable to load gift card question options', error)
   }
+  profile.mark('load_gift_card_options', {
+    optionCount: giftCardOptions.length,
+  })
 
   try {
     const { data, error } = await adminClient
@@ -76,11 +90,23 @@ export async function loader(args: Route.LoaderArgs) {
     console.error('[workshop enrollment] unable to load federal district options', error)
   }
 
-  return {
+  profile.mark('load_federal_district_options', {
+    optionCount: federalDistrictOptions.length,
+  })
+
+  const result = {
     ...base,
     giftCardOptions,
     federalDistrictOptions,
   }
+
+  profile.complete({
+    rowCount: result.rows.length,
+    giftCardOptionCount: giftCardOptions.length,
+    districtOptionCount: federalDistrictOptions.length,
+  })
+
+  return result
 }
 
 export async function action({ request }: Route.ActionArgs) {
