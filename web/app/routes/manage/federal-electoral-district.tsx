@@ -83,7 +83,7 @@ export async function loader(args: Route.LoaderArgs) {
       giftcard_pc: { label: 'PC', numeric: true, minWidth: 90, preferredWidth: 90 },
       giftcard_sobeys: { label: 'Sobeys', numeric: true, minWidth: 90, preferredWidth: 90 },
       giftcard_meal_kit: { label: 'Meal Kit', numeric: true, minWidth: 90, preferredWidth: 90 },
-      household_count: { label: 'households', numeric: true, minWidth: 90, preferredWidth: 90 },
+      household_count: { label: 'people', numeric: true, minWidth: 90, preferredWidth: 90 },
       household_child_count: { label: 'children', numeric: true, minWidth: 90, preferredWidth: 90 },
     },
   }

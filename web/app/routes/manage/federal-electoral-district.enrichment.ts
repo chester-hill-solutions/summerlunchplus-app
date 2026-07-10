@@ -37,6 +37,8 @@ const RELATED_PROFILE_IN_BATCH_SIZE = 80
 const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
 const HOUSEHOLD_TOTAL_PEOPLE_QUESTION_CODE = 'household_total_people'
 const HOUSEHOLD_TOTAL_CHILDREN_QUESTION_CODE = 'household_total_children'
+const MAX_REASONABLE_HOUSEHOLD_PEOPLE = 30
+const MAX_REASONABLE_HOUSEHOLD_CHILDREN = 30
 
 const statusBucketFor = (status: Database['public']['Enums']['workshop_enrollment_status']) => {
   if (status === 'approved') return 'accepted'
@@ -82,11 +84,23 @@ const normalizeGiftCardBucket = (value: unknown): GiftCardBucket | null => {
   return 'other'
 }
 
-const normalizeNumericAnswer = (value: unknown): number | null => {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value !== 'string') return null
-  const parsed = Number(value.trim())
+const normalizeNumericAnswer = ({
+  value,
+  min,
+  max,
+}: {
+  value: unknown
+  min: number
+  max: number
+}): number | null => {
+  const parsed =
+    typeof value === 'number' && Number.isFinite(value)
+      ? value
+      : typeof value === 'string'
+        ? Number(value.trim())
+        : Number.NaN
   if (!Number.isFinite(parsed)) return null
+  if (parsed < min || parsed > max) return null
   return parsed
 }
 
@@ -438,13 +452,26 @@ export async function loader({ request }: { request: Request }) {
 
       const submittedAt = Date.parse(submission.submitted_at ?? '')
       const submittedAtTime = Number.isNaN(submittedAt) ? 0 : submittedAt
+      const submissionProfileId =
+        typeof submission.profile_id === 'string' && submission.profile_id ? submission.profile_id : null
+      const submissionUserId = typeof submission.user_id === 'string' && submission.user_id ? submission.user_id : null
+
       const associatedProfileIds = new Set<string>()
-      if (typeof submission.profile_id === 'string' && submission.profile_id) {
-        associatedProfileIds.add(submission.profile_id)
+      if (submissionProfileId) {
+        associatedProfileIds.add(submissionProfileId)
       }
-      if (typeof submission.user_id === 'string' && submission.user_id) {
-        for (const profileId of profileIdsByUserId.get(submission.user_id) ?? []) {
+      if (submissionUserId) {
+        for (const profileId of profileIdsByUserId.get(submissionUserId) ?? []) {
           associatedProfileIds.add(profileId)
+        }
+      }
+
+      const householdAssociatedProfileIds = new Set<string>()
+      if (submissionProfileId) {
+        householdAssociatedProfileIds.add(submissionProfileId)
+      } else if (submissionUserId) {
+        for (const profileId of profileIdsByUserId.get(submissionUserId) ?? []) {
+          householdAssociatedProfileIds.add(profileId)
         }
       }
 
@@ -461,9 +488,13 @@ export async function loader({ request }: { request: Request }) {
       }
 
       if (answer.question_code === HOUSEHOLD_TOTAL_PEOPLE_QUESTION_CODE) {
-        const value = normalizeNumericAnswer(answer.value)
+        const value = normalizeNumericAnswer({
+          value: answer.value,
+          min: 1,
+          max: MAX_REASONABLE_HOUSEHOLD_PEOPLE,
+        })
         if (value === null) continue
-        for (const profileId of associatedProfileIds) {
+        for (const profileId of householdAssociatedProfileIds) {
           const existing = latestHouseholdPeopleByProfileId.get(profileId)
           if (!existing || submittedAtTime > existing.submittedAt) {
             latestHouseholdPeopleByProfileId.set(profileId, { value, submittedAt: submittedAtTime })
@@ -473,9 +504,13 @@ export async function loader({ request }: { request: Request }) {
       }
 
       if (answer.question_code === HOUSEHOLD_TOTAL_CHILDREN_QUESTION_CODE) {
-        const value = normalizeNumericAnswer(answer.value)
+        const value = normalizeNumericAnswer({
+          value: answer.value,
+          min: 0,
+          max: MAX_REASONABLE_HOUSEHOLD_CHILDREN,
+        })
         if (value === null) continue
-        for (const profileId of associatedProfileIds) {
+        for (const profileId of householdAssociatedProfileIds) {
           const existing = latestHouseholdChildrenByProfileId.get(profileId)
           if (!existing || submittedAtTime > existing.submittedAt) {
             latestHouseholdChildrenByProfileId.set(profileId, { value, submittedAt: submittedAtTime })
@@ -488,20 +523,11 @@ export async function loader({ request }: { request: Request }) {
   const householdPeopleByKey = new Map<string, number>()
   const householdChildrenByKey = new Map<string, number>()
   for (const [householdKey, householdMembers] of householdMembersByKey.entries()) {
-    const candidateProfileIds = new Set<string>(householdMembers)
-    for (const memberId of householdMembers) {
-      const userId = profileById.get(memberId)?.user_id
-      if (typeof userId !== 'string' || !userId) continue
-      for (const siblingProfileId of profileIdsByUserId.get(userId) ?? []) {
-        candidateProfileIds.add(siblingProfileId)
-      }
-    }
-
     let resolvedPeople = 0
     let resolvedPeopleSubmittedAt = -1
     let resolvedChildren = 0
     let resolvedChildrenSubmittedAt = -1
-    for (const candidateProfileId of candidateProfileIds) {
+    for (const candidateProfileId of householdMembers) {
       const people = latestHouseholdPeopleByProfileId.get(candidateProfileId)
       if (people && people.submittedAt > resolvedPeopleSubmittedAt) {
         resolvedPeople = people.value
