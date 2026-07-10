@@ -2555,7 +2555,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         <div>
           <h1 className="text-2xl font-semibold">{label}</h1>
           <p className="text-sm text-muted-foreground">
-            Showing live entries from the {label.toLowerCase()} table ({totalRows} rows).
+            Showing live entries from the {label.toLowerCase()} table.
           </p>
           <p className="text-xs text-muted-foreground">Time values shown in {displayTimeZone}.</p>
         </div>
@@ -2607,9 +2607,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
             : ''
         }`}
       >
-        <p className="text-xs text-muted-foreground">
-          Page {effectivePage} of {totalPages}
-        </p>
+        <p className="text-xs text-muted-foreground">Page {effectivePage} of {totalPages} ({totalRows} rows)</p>
         <div className="flex items-center gap-2 text-xs">
           {paginationActions ? <div className="mr-1">{paginationActions}</div> : null}
           <label className="text-muted-foreground" htmlFor="page-size">

@@ -17,9 +17,9 @@ import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import { runZoomRegistrantForStudent } from '@/lib/zoom-jobs/runner.server'
 import { Download } from 'lucide-react'
-import { Form, useLocation } from 'react-router'
+import { Form, useLoaderData, useLocation } from 'react-router'
 import type { Route } from './+types/class-attendance'
-import TableDisplay from './table-display'
+import DeferredTableDisplay from './deferred-table-display'
 
 type AttendanceRow = {
   id: string
@@ -200,9 +200,46 @@ export async function loader({ request }: Route.LoaderArgs) {
   })
 
   const auth = await requireAuth(request)
+  const url = new URL(request.url)
+  const deferTable = url.searchParams.get('_deferTable') === '1'
   profile.mark('require_auth', {
     role: auth.claims.role,
+    deferTable,
   })
+
+  if (!deferTable) {
+    const shell = {
+      label: 'Class attendance',
+      tableName: 'class-attendance',
+      columns: [
+        'workshop_description',
+        'class_starts_at',
+        'profile_display',
+        'status',
+        'camera_on',
+        'photo_status',
+        'latest_geo',
+        'giftcard_display',
+      ],
+      rows: [] as Record<string, unknown>[],
+      columnMeta: {
+        workshop_description: { label: 'Workshop', filterable: true, fitContentOnLoad: true },
+        class_starts_at: { label: 'Class starts', filterable: true, fitContentOnLoad: true },
+        profile_display: { label: 'Profile', filterable: true, fitContentOnLoad: true },
+        status: { label: 'Attendance', filterable: true },
+        camera_on: { label: 'Camera on', filterable: true },
+        photo_status: { label: 'Photo status', filterable: true },
+        latest_geo: { label: 'Geo', filterable: true, truncate: true },
+        giftcard_display: { label: 'Provider', filterable: true, truncate: true },
+      },
+      canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
+    }
+    profile.complete({
+      deferredShell: true,
+      columnCount: shell.columns.length,
+    })
+    return shell
+  }
 
   const attendanceRows: AttendanceRow[] = []
   let classAttendanceSelect =
@@ -1628,11 +1665,14 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function ClassAttendancePage() {
+  const data = useLoaderData<typeof loader>()
   const location = useLocation()
   const sourcePath = `/manage/class-attendance${location.search}`
 
   return (
-    <TableDisplay
+    <DeferredTableDisplay
+      dataPath="/manage/class-attendance/table-data"
+      fallbackData={data}
       paginationActions={
         <Form method="post" action="/manage/exports" className="flex items-center gap-2">
           <input type="hidden" name="intent" value="create-export" />

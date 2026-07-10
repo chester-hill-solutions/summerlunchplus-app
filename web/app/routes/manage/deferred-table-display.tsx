@@ -6,22 +6,21 @@ import TableDisplay, { type LoaderData } from './table-display'
 
 type DeferredTableDisplayProps = {
   dataPath: string
-  fallbackLabel: string
-  fallbackTableName: string
+  fallbackData: LoaderData
   headerActions?: ReactNode
   paginationActions?: ReactNode
 }
 
 export default function DeferredTableDisplay({
   dataPath,
-  fallbackLabel,
-  fallbackTableName,
+  fallbackData,
   headerActions,
   paginationActions,
 }: DeferredTableDisplayProps) {
   const fetcher = useFetcher<LoaderData>()
   const location = useLocation()
   const lastRequestedUrlRef = useRef<string | null>(null)
+  const lastResolvedDataRef = useRef<LoaderData | null>(null)
 
   const dataRequestUrl = useMemo(() => {
     const [basePath, existingQuery = ''] = dataPath.split('?')
@@ -38,22 +37,27 @@ export default function DeferredTableDisplay({
     if (lastRequestedUrlRef.current === dataRequestUrl) return
     lastRequestedUrlRef.current = dataRequestUrl
     fetcher.load(dataRequestUrl)
-  }, [dataRequestUrl])
+  }, [dataRequestUrl, fetcher])
 
-  const data =
-    fetcher.data ??
-    ({
-      columns: [],
-      rows: [],
-      label: fallbackLabel,
-      tableName: fallbackTableName,
-    } satisfies LoaderData)
+  useEffect(() => {
+    if (!fetcher.data) return
+    lastResolvedDataRef.current = fetcher.data
+  }, [fetcher.data])
+
+  const resolvedData = fetcher.data ?? lastResolvedDataRef.current ?? fallbackData
+  const data: LoaderData = {
+    ...resolvedData,
+    label: fallbackData.label,
+    tableName: fallbackData.tableName,
+  }
 
   return (
     <div className="space-y-2">
-      {fetcher.state !== 'idle' && !fetcher.data ? (
+      {fetcher.state !== 'idle' ? (
         <div className="rounded border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-          Loading {fallbackLabel.toLowerCase()}...
+          {fetcher.data || lastResolvedDataRef.current
+            ? `Refreshing ${fallbackData.label.toLowerCase()}...`
+            : `Loading ${fallbackData.label.toLowerCase()}...`}
         </div>
       ) : null}
       <TableDisplay headerActions={headerActions} paginationActions={paginationActions} data={data} />
