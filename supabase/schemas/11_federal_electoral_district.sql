@@ -7,6 +7,29 @@ create table if not exists public.federal_electoral_district (
   updated_at timestamptz not null default now()
 );
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'federal_electoral_district_name_key'
+      and conrelid = 'public.federal_electoral_district'::regclass
+  ) then
+    alter table public.federal_electoral_district
+      add constraint federal_electoral_district_name_key unique (name);
+  end if;
+end
+$$;
+
+alter table if exists public.profile
+drop constraint if exists profile_federal_electoral_district_name_fkey;
+
+alter table if exists public.profile
+add constraint profile_federal_electoral_district_name_fkey
+foreign key (federal_electoral_district_name)
+references public.federal_electoral_district(name)
+on delete set null;
+
 create index if not exists federal_electoral_district_code_idx
   on public.federal_electoral_district (code);
 

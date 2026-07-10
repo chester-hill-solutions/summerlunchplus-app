@@ -1,6 +1,6 @@
 create type semester_survey_kind as enum (
-  'pre_program_survey',
-  'post_program_survey'
+  'pre_survey',
+  'post_survey'
 );
 
 create table public.semester_form_requirement (

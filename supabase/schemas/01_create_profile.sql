@@ -40,7 +40,7 @@ create table public.profile (
     public.normalize_address_fingerprint(street_address, city, province, postcode)
   ) stored,
   partner_program text,
-  federal_electoral_district_name text references public.federal_electoral_district(name) on delete set null,
+  federal_electoral_district_name text,
   riding_lookup_status text,
   riding_lookup_last_attempt_at timestamptz,
   riding_lookup_error text,
@@ -174,3 +174,9 @@ grant select, update, insert on table public.profile to authenticated;
 
 create index if not exists profile_address_fingerprint_idx
   on public.profile (address_fingerprint);
+
+create index if not exists profile_user_id_idx
+  on public.profile (user_id);
+
+create index if not exists profile_federal_electoral_district_name_idx
+  on public.profile (federal_electoral_district_name);

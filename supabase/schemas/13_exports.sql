@@ -195,3 +195,44 @@ revoke all on table public.export_job_row from authenticated, anon, public;
 grant select, insert on table public.export_job_row to authenticated;
 
 grant execute on function public.claim_next_export_job() to supabase_auth_admin;
+
+drop policy if exists storage_manage_exports_staff_read on storage.objects;
+drop policy if exists storage_manage_exports_staff_write on storage.objects;
+drop policy if exists storage_manage_exports_staff_update on storage.objects;
+drop policy if exists storage_manage_exports_staff_delete on storage.objects;
+
+create policy storage_manage_exports_staff_read
+  on storage.objects
+  for select
+  using (
+    bucket_id = 'manage-exports'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  );
+
+create policy storage_manage_exports_staff_write
+  on storage.objects
+  for insert
+  with check (
+    bucket_id = 'manage-exports'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  );
+
+create policy storage_manage_exports_staff_update
+  on storage.objects
+  for update
+  using (
+    bucket_id = 'manage-exports'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  )
+  with check (
+    bucket_id = 'manage-exports'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  );
+
+create policy storage_manage_exports_staff_delete
+  on storage.objects
+  for delete
+  using (
+    bucket_id = 'manage-exports'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  );
