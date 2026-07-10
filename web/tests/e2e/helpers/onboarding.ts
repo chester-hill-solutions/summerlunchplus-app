@@ -98,6 +98,7 @@ const fillRequiredFields = async (page: Page, context?: OnboardingAutofillContex
     const checkbox = form.locator(`input[type="checkbox"][name="${name}"]`).first()
     if (!(await checkbox.isVisible())) continue
     if (!(await checkbox.isEnabled())) continue
+    if (await checkbox.isChecked()) continue
     await checkbox.check()
   }
 

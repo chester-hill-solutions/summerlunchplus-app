@@ -78,7 +78,7 @@ create table public.class_attendance (
   gift_card_blocked boolean not null default false,
   gift_card_block_reason text,
   gift_card_blocked_at timestamptz,
-  gift_card_blocked_by uuid references auth.users (id) on update cascade on delete set null,
+  gift_card_blocked_by uuid references auth.users (id) on delete set null,
   recorded_by uuid references auth.users (id) on update cascade on delete set null,
   notes text,
   created_at timestamptz not null default now(),
@@ -148,6 +148,18 @@ create table public.workshop_enrollment (
   updated_at timestamptz not null default now(),
   unique (semester_id, profile_id)
 );
+
+create index if not exists workshop_enrollment_profile_requested_idx
+  on public.workshop_enrollment (profile_id, requested_at desc);
+
+create index if not exists workshop_enrollment_workshop_status_idx
+  on public.workshop_enrollment (workshop_id, status);
+
+create index if not exists class_workshop_starts_idx
+  on public.class (workshop_id, starts_at);
+
+create unique index if not exists class_workshop_start_unique_idx
+  on public.class (workshop_id, starts_at);
 
 -- Timestamp helpers.
 create or replace function public.touch_workshop_updated_at()
@@ -715,3 +727,48 @@ grant all on table public.workshop_enrollment to authenticated;
 
 revoke all on function public.request_family_workshop_enrollment(uuid, uuid, uuid[]) from public, anon, authenticated;
 grant execute on function public.request_family_workshop_enrollment(uuid, uuid, uuid[]) to service_role, supabase_auth_admin;
+
+insert into storage.buckets (id, name, public)
+values ('class-attendance-photos', 'class-attendance-photos', false)
+on conflict (id) do nothing;
+
+drop policy if exists storage_class_attendance_photos_staff_read on storage.objects;
+drop policy if exists storage_class_attendance_photos_staff_write on storage.objects;
+drop policy if exists storage_class_attendance_photos_staff_update on storage.objects;
+drop policy if exists storage_class_attendance_photos_staff_delete on storage.objects;
+
+create policy storage_class_attendance_photos_staff_read
+  on storage.objects
+  for select
+  using (
+    bucket_id = 'class-attendance-photos'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  );
+
+create policy storage_class_attendance_photos_staff_write
+  on storage.objects
+  for insert
+  with check (
+    bucket_id = 'class-attendance-photos'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  );
+
+create policy storage_class_attendance_photos_staff_update
+  on storage.objects
+  for update
+  using (
+    bucket_id = 'class-attendance-photos'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  )
+  with check (
+    bucket_id = 'class-attendance-photos'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  );
+
+create policy storage_class_attendance_photos_staff_delete
+  on storage.objects
+  for delete
+  using (
+    bucket_id = 'class-attendance-photos'
+    and public.current_user_role() in ('admin', 'manager', 'staff')
+  );

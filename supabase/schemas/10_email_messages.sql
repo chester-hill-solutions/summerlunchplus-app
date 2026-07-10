@@ -22,6 +22,15 @@ create table public.email_message (
   updated_at timestamptz not null default now()
 );
 
+alter table if exists public.gift_card_allocation
+drop constraint if exists gift_card_allocation_reminder_email_message_id_fkey;
+
+alter table if exists public.gift_card_allocation
+add constraint gift_card_allocation_reminder_email_message_id_fkey
+foreign key (reminder_email_message_id)
+references public.email_message (id)
+on delete set null;
+
 create unique index email_message_event_key_to_email_unique
   on public.email_message (event_key, to_email)
   where event_key is not null;

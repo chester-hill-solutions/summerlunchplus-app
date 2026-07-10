@@ -1,9 +1,8 @@
 import { requireAuth } from '@/lib/auth.server'
 import { Button } from '@/components/ui/button'
+import { createActionProfile } from '@/lib/action-profile.server'
 import { Constants, type Database } from '@/lib/database.types'
-import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { EXPORT_TYPE_CLASS_ATTENDANCE_CSV } from '@/lib/exports/types'
-import { resolveIpGeolocation } from '@/lib/geoip.server'
 import { createLoaderProfile } from '@/lib/loader-profile.server'
 import {
   eligibleAfterIso,
@@ -21,7 +20,6 @@ import { Download } from 'lucide-react'
 import { Form, useLocation } from 'react-router'
 import type { Route } from './+types/class-attendance'
 import TableDisplay from './table-display'
-import { isIP } from 'node:net'
 
 type AttendanceRow = {
   id: string
@@ -132,39 +130,6 @@ type GiftCardClickRow = {
   created_at: string
 }
 
-type FormSubmissionIpRow = {
-  profile_id: string | null
-  submitted_at: string | null
-  ip_selected?: unknown
-  ip_address: unknown
-  forwarded_for: unknown
-}
-
-type LoginEventIpRow = {
-  user_id: string | null
-  event_at: string | null
-  ip_selected?: unknown
-  ip_address: unknown
-  forwarded_for: unknown
-}
-
-type GuardianChildEdge = {
-  guardian_profile_id: string
-  child_profile_id: string
-}
-
-type FormSubmissionPreferenceRow = {
-  id: string
-  profile_id: string | null
-  user_id: string | null
-  submitted_at: string | null
-}
-
-type FormAnswerPreferenceRow = {
-  submission_id: string
-  value: unknown
-}
-
 const IN_CLAUSE_BATCH_SIZE = 150
 const CLASS_ATTENDANCE_FETCH_BATCH_SIZE = 1000
 const RELATED_FETCH_BATCH_SIZE = 1000
@@ -204,56 +169,6 @@ const displayName = (profile: ProfileRow | null) => {
 const displayNameOrId = (profile: ProfileRow | null, fallbackId: string) => {
   const label = displayName(profile)
   return label || `Unknown student (${fallbackId.slice(0, 8)})`
-}
-
-const flagEmojiForCountryCode = (countryCode: string | null) => {
-  if (!countryCode) return ''
-  const normalized = countryCode.trim().toUpperCase()
-  if (!/^[A-Z]{2}$/.test(normalized)) return ''
-  return String.fromCodePoint(...Array.from(normalized).map(char => 127397 + char.charCodeAt(0)))
-}
-
-const formatGeoLabel = (geo: Awaited<ReturnType<typeof resolveIpGeolocation>> | null) => {
-  const countryCode = geo?.countryCode ?? null
-  const flag = flagEmojiForCountryCode(countryCode)
-  const geoParts = [geo?.city, geo?.region, countryCode].filter(Boolean)
-  return geoParts.length
-    ? `${flag ? `${flag} ` : ''}${geoParts.join(', ')}`
-    : countryCode
-      ? `${flag ? `${flag} ` : ''}${countryCode}`
-      : 'Unknown location'
-}
-
-const parsePrimaryIp = (ipSelected: unknown, ipAddress: unknown, forwardedFor: unknown) => {
-  const normalizeIp = (value: unknown) => {
-    if (typeof value !== 'string') return ''
-    const trimmed = value.trim()
-    if (!trimmed || trimmed.length > 64) return ''
-    return isIP(trimmed) ? trimmed : ''
-  }
-
-  const selected = normalizeIp(ipSelected)
-  if (selected) return selected
-
-  const direct = normalizeIp(ipAddress)
-  if (direct) return direct
-
-  if (typeof forwardedFor !== 'string' || !forwardedFor.trim()) return ''
-  const first = forwardedFor
-    .split(',')
-    .map(part => part.trim())
-    .find(Boolean)
-
-  return normalizeIp(first)
-}
-
-const normalizeGiftCardPreference = (value: string | null | undefined) => {
-  const normalized = (value ?? '').trim().toLowerCase()
-  if (!normalized) return 'N/A'
-  if (normalized.includes('meal kit')) return 'Meal Kit'
-  if (normalized.includes('sobeys')) return 'Sobeys'
-  if (normalized.includes('pc') || normalized.includes('president')) return 'PC'
-  return value?.trim() || 'N/A'
 }
 
 const normalizeGiftCardAvailabilityState = (value: string | null | undefined) => {
@@ -439,181 +354,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     profilesByUserId: profilesByUserRows.length,
   })
 
-  const relatedProfilesByTarget = new Map<string, Set<string>>()
-  for (const profileId of profileIds) {
-    relatedProfilesByTarget.set(profileId, new Set([profileId]))
-  }
-
-  const guardianRowsByChild: GuardianChildEdge[] = []
-  for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('person_guardian_child')
-      .select('guardian_profile_id, child_profile_id')
-      .in('child_profile_id', chunk)
-    if (error) throw new Response(error.message, { status: 500 })
-    guardianRowsByChild.push(...((data ?? []) as GuardianChildEdge[]))
-  }
-
-  const childRowsByGuardian: GuardianChildEdge[] = []
-  for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('person_guardian_child')
-      .select('guardian_profile_id, child_profile_id')
-      .in('guardian_profile_id', chunk)
-    if (error) throw new Response(error.message, { status: 500 })
-    childRowsByGuardian.push(...((data ?? []) as GuardianChildEdge[]))
-  }
-
-  for (const edge of guardianRowsByChild) {
-    const related = relatedProfilesByTarget.get(edge.child_profile_id)
-    if (related) related.add(edge.guardian_profile_id)
-  }
-  for (const edge of childRowsByGuardian) {
-    const related = relatedProfilesByTarget.get(edge.guardian_profile_id)
-    if (related) related.add(edge.child_profile_id)
-  }
-
-  const preferenceProfileScopeIds = Array.from(
-    new Set(
-      Array.from(relatedProfilesByTarget.values()).flatMap(set => Array.from(set))
-    )
-  )
-
-  const preferenceScopeProfiles: Array<ProfileRow & { user_id?: string | null }> = []
-  for (const chunk of chunkArray(preferenceProfileScopeIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data: profileChunk, error: profileError } = await adminClient
-      .from('profile')
-      .select('id, firstname, surname, email, user_id')
-      .in('id', chunk)
-    if (profileError) throw new Response(profileError.message, { status: 500 })
-    preferenceScopeProfiles.push(...((profileChunk ?? []) as Array<ProfileRow & { user_id?: string | null }>))
-  }
-
-  const userIdsByProfileId = new Map<string, string>()
-  const profileIdsByUserId = new Map<string, string[]>()
-  for (const row of preferenceScopeProfiles) {
-    if (typeof row.user_id !== 'string' || !row.user_id) continue
-    userIdsByProfileId.set(row.id, row.user_id)
-    const existing = profileIdsByUserId.get(row.user_id) ?? []
-    if (!existing.includes(row.id)) {
-      existing.push(row.id)
-      profileIdsByUserId.set(row.user_id, existing)
-    }
-  }
-
-  const expandedRelatedProfilesByTarget = new Map<string, Set<string>>()
-  for (const profileId of profileIds) {
-    const expanded = new Set(relatedProfilesByTarget.get(profileId) ?? [profileId])
-    for (const relatedProfileId of Array.from(expanded)) {
-      const userId = userIdsByProfileId.get(relatedProfileId)
-      if (!userId) continue
-      for (const sameUserProfileId of profileIdsByUserId.get(userId) ?? []) {
-        expanded.add(sameUserProfileId)
-      }
-    }
-    expandedRelatedProfilesByTarget.set(profileId, expanded)
-  }
-
-  const preferenceSubmissionScopeProfileIds = Array.from(
-    new Set(Array.from(expandedRelatedProfilesByTarget.values()).flatMap(set => Array.from(set)))
-  )
-
-  const submissionsById = new Map<string, FormSubmissionPreferenceRow>()
-  for (const chunk of chunkArray(preferenceSubmissionScopeProfileIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data: submissionRows, error } = await adminClient
-      .from('form_submission')
-      .select('id, profile_id, user_id, submitted_at')
-      .in('profile_id', chunk)
-
-    if (error) throw new Response(error.message, { status: 500 })
-    for (const row of (submissionRows ?? []) as FormSubmissionPreferenceRow[]) {
-      submissionsById.set(row.id, row)
-    }
-  }
-
-  const preferenceUserIds = Array.from(
-    new Set(
-      preferenceSubmissionScopeProfileIds
-        .map(profileId => userIdsByProfileId.get(profileId) ?? '')
-        .filter(Boolean)
-    )
-  )
-  for (const chunk of chunkArray(preferenceUserIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data: submissionRows, error } = await adminClient
-      .from('form_submission')
-      .select('id, profile_id, user_id, submitted_at')
-      .in('user_id', chunk)
-
-    if (error) throw new Response(error.message, { status: 500 })
-    for (const row of (submissionRows ?? []) as FormSubmissionPreferenceRow[]) {
-      submissionsById.set(row.id, row)
-    }
-  }
-
-  const latestGiftCardPreferenceByProfileId = new Map<string, { value: string; submittedAtMs: number }>()
-  const submissionIds = Array.from(submissionsById.keys())
-  for (const chunk of chunkArray(submissionIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data: answerRows, error } = await adminClient
-      .from('form_answer')
-      .select('submission_id, value')
-      .eq('question_code', 'gift_card_store_preference')
-      .in('submission_id', chunk)
-
-    if (error) throw new Response(error.message, { status: 500 })
-
-    for (const row of (answerRows ?? []) as FormAnswerPreferenceRow[]) {
-      const submission = submissionsById.get(row.submission_id)
-      if (!submission) continue
-      const value = typeof row.value === 'string' ? row.value.trim() : ''
-      if (!value) continue
-      const submittedAtMs = Number.isFinite(Date.parse(submission.submitted_at ?? ''))
-        ? Date.parse(submission.submitted_at ?? '')
-        : 0
-
-      const associatedProfileIds = new Set<string>()
-      if (
-        typeof submission.profile_id === 'string' &&
-        submission.profile_id &&
-        preferenceSubmissionScopeProfileIds.includes(submission.profile_id)
-      ) {
-        associatedProfileIds.add(submission.profile_id)
-      }
-      if (typeof submission.user_id === 'string' && submission.user_id) {
-        for (const profileId of profileIdsByUserId.get(submission.user_id) ?? []) {
-          associatedProfileIds.add(profileId)
-        }
-      }
-
-      for (const profileId of associatedProfileIds) {
-        const existing = latestGiftCardPreferenceByProfileId.get(profileId)
-        if (!existing || submittedAtMs > existing.submittedAtMs) {
-          latestGiftCardPreferenceByProfileId.set(profileId, {
-            value,
-            submittedAtMs,
-          })
-        }
-      }
-    }
-  }
   profile.mark('resolve_gift_card_preferences', {
-    preferenceScopeProfiles: preferenceScopeProfiles.length,
-    preferenceSubmissionScopeProfileIds: preferenceSubmissionScopeProfileIds.length,
-    submissionCount: submissionsById.size,
-    preferenceProfileCount: latestGiftCardPreferenceByProfileId.size,
+    deferred_to_async_enrichment: true,
   })
-
-  const latestGiftCardPreferenceByTargetProfileId = new Map<string, { value: string; submittedAtMs: number }>()
-  for (const targetProfileId of profileIds) {
-    const relatedIds = expandedRelatedProfilesByTarget.get(targetProfileId) ?? new Set([targetProfileId])
-    for (const relatedId of relatedIds) {
-      const candidate = latestGiftCardPreferenceByProfileId.get(relatedId)
-      if (!candidate) continue
-      const existing = latestGiftCardPreferenceByTargetProfileId.get(targetProfileId)
-      if (!existing || candidate.submittedAtMs > existing.submittedAtMs) {
-        latestGiftCardPreferenceByTargetProfileId.set(targetProfileId, candidate)
-      }
-    }
-  }
 
   const classes = classRows
   const workshopsIds = Array.from(new Set(classes.map(row => row.workshop_id).filter((id): id is string => Boolean(id))))
@@ -700,128 +443,22 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
-  const attendanceProfileByUserId = new Map<string, string[]>()
-  for (const profile of profilesByIdRows) {
-    if (typeof profile.user_id !== 'string' || !profile.user_id) continue
-    const bucket = attendanceProfileByUserId.get(profile.user_id) ?? []
-    if (!bucket.includes(profile.id)) {
-      bucket.push(profile.id)
-      attendanceProfileByUserId.set(profile.user_id, bucket)
-    }
-  }
-
-  const latestNetworkByProfileId = new Map<string, { occurredAt: string; ip: string }>()
-  const setLatestNetwork = (profileId: string, occurredAt: string, ip: string) => {
-    if (!profileId || !occurredAt || !ip) return
-    const existing = latestNetworkByProfileId.get(profileId)
-    if (!existing || occurredAt > existing.occurredAt) {
-      latestNetworkByProfileId.set(profileId, { occurredAt, ip })
-    }
-  }
-
-  for (const row of clickRows) {
-    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
-    const occurredAt = typeof row.created_at === 'string' ? row.created_at : ''
-    const ip = parsePrimaryIp(row.ip_address, row.ip_address, null)
-    setLatestNetwork(profileId, occurredAt, ip)
-  }
-
-  let formSubmissionSelect = 'profile_id, submitted_at, ip_selected, ip_address, forwarded_for'
-  for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
-    let query = (adminClient.from('form_submission' as any) as any)
-      .select(formSubmissionSelect)
-      .in('profile_id', chunk)
-      .order('submitted_at', { ascending: false })
-
-    let { data: submissionRows, error: submissionError } = await query
-
-    if (submissionError && formSubmissionSelect.includes('ip_selected')) {
-      const fallbackSelect = 'profile_id, submitted_at, ip_address, forwarded_for'
-      let fallbackQuery = (adminClient.from('form_submission' as any) as any)
-        .select(fallbackSelect)
-        .in('profile_id', chunk)
-        .order('submitted_at', { ascending: false })
-      const fallbackResult = await fallbackQuery
-      if (!fallbackResult.error) {
-        formSubmissionSelect = fallbackSelect
-        submissionRows = fallbackResult.data
-        submissionError = null
-      }
-    }
-
-    if (submissionError) throw new Response(submissionError.message, { status: 500 })
-
-    for (const row of (submissionRows ?? []) as FormSubmissionIpRow[]) {
-      const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
-      const occurredAt = typeof row.submitted_at === 'string' ? row.submitted_at : ''
-      const ip = parsePrimaryIp(row.ip_selected, row.ip_address, row.forwarded_for)
-      setLatestNetwork(profileId, occurredAt, ip)
-    }
-  }
-
-  const userIds = Array.from(attendanceProfileByUserId.keys())
-  let loginEventSelect = 'user_id, event_at, ip_selected, ip_address, forwarded_for'
-  for (const chunk of chunkArray(userIds, IN_CLAUSE_BATCH_SIZE)) {
-    let query = (adminClient.from('login_event' as any) as any)
-      .select(loginEventSelect)
-      .in('user_id', chunk)
-      .order('event_at', { ascending: false })
-
-    let { data: loginRows, error: loginError } = await query
-
-    if (loginError && loginEventSelect.includes('ip_selected')) {
-      const fallbackSelect = 'user_id, event_at, ip_address, forwarded_for'
-      let fallbackQuery = (adminClient.from('login_event' as any) as any)
-        .select(fallbackSelect)
-        .in('user_id', chunk)
-        .order('event_at', { ascending: false })
-      const fallbackResult = await fallbackQuery
-      if (!fallbackResult.error) {
-        loginEventSelect = fallbackSelect
-        loginRows = fallbackResult.data
-        loginError = null
-      }
-    }
-
-    if (loginError) throw new Response(loginError.message, { status: 500 })
-
-    for (const row of (loginRows ?? []) as LoginEventIpRow[]) {
-      const userId = typeof row.user_id === 'string' ? row.user_id : ''
-      const occurredAt = typeof row.event_at === 'string' ? row.event_at : ''
-      const ip = parsePrimaryIp(row.ip_selected, row.ip_address, row.forwarded_for)
-      if (!userId) continue
-      for (const profileId of attendanceProfileByUserId.get(userId) ?? []) {
-        setLatestNetwork(profileId, occurredAt, ip)
-      }
-    }
-  }
   profile.mark('resolve_latest_network', {
-    userIds: userIds.length,
-    networkProfileCount: latestNetworkByProfileId.size,
+    deferred_to_async_enrichment: true,
   })
 
-  const uniqueClickIps = Array.from(new Set(Array.from(latestNetworkByProfileId.values()).map(entry => entry.ip)))
-  const geoByIp = new Map<string, Awaited<ReturnType<typeof resolveIpGeolocation>>>()
-  await Promise.all(
-    uniqueClickIps.map(async ip => {
-      const geo = await resolveIpGeolocation(ip)
-      if (geo) {
-        geoByIp.set(ip, geo)
-      }
-    })
-  )
   profile.mark('resolve_geoip', {
-    uniqueIpCount: uniqueClickIps.length,
-    resolvedGeoCount: geoByIp.size,
+    deferred_to_async_enrichment: true,
   })
 
   const classById = new Map(classes.map(row => [row.id, row]))
   const workshopById = new Map(workshopRows.map(row => [row.id, row]))
   const profileRowsTyped = [...profilesByIdRows, ...profilesByUserRows]
-  const familyContextByProfileId = profileIds.length ? await loadFamilyContextByProfileIds(profileIds) : {}
+  const familyContextByProfileId: Record<string, Partial<typeof fallbackProfileHoverContext>> = {}
   profile.mark('load_family_context', {
-    profileIds: profileIds.length,
-    familyContextProfiles: Object.keys(familyContextByProfileId).length,
+    profileIds: 0,
+    familyContextProfiles: 0,
+    deferred_to_async_enrichment: true,
   })
   const profileById = new Map(profileRowsTyped.map(row => [row.id, row]))
   const profileByUserId = new Map(
@@ -936,17 +573,8 @@ export async function loader({ request }: Route.LoaderArgs) {
         : giftCardRelease.isReleased
           ? 'released'
           : `waiting_${giftCardRelease.source}`
-    const latestProfileNetwork = latestNetworkByProfileId.get(row.profile_id)
     const registrantReady = Boolean(studentRegistrant?.zoom_registrant_id && studentRegistrant.zoom_join_url)
     const reminderSent = Boolean(studentRegistrant?.last_sent_at)
-
-    const latestGeo = (() => {
-      const ip = latestProfileNetwork?.ip ?? ''
-      if (!ip) return ''
-      const geo = geoByIp.get(ip)
-      if (!geo) return 'Unknown location'
-      return formatGeoLabel(geo)
-    })()
 
     let stepAttendanceSync = 'Pending'
     if (!meeting || meeting.status !== 'created') {
@@ -1024,8 +652,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       step_attendance_sync_detail: stepAttendanceSyncDetail,
       latest_sync_payload: latestSyncPayload,
       latest_sync_error: latestSync?.error_message ?? null,
-      giftcard_display: normalizeGiftCardPreference(latestGiftCardPreferenceByTargetProfileId.get(row.profile_id)?.value),
-      latest_geo: latestGeo || 'N/A',
+      giftcard_display: '...',
+      latest_geo: '...',
       gift_card_allocated: giftCardAllocated,
       gift_card_available: giftCardAvailable,
       gift_card_available_state: normalizeGiftCardAvailabilityState(giftCardAllocation?.metadata?.availability_state),
@@ -1235,18 +863,36 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const auth = await requireAuth(request)
-  if (!isRoleAtLeast(auth.claims.role, 'staff')) {
-    return new Response('Unauthorized', { status: 403, headers: auth.headers })
-  }
+  const profile = createActionProfile({
+    name: 'class_attendance_action',
+    request,
+  })
+  let intent: string | null = null
+  let outcome = 'unknown'
+  let errorMessage: string | null = null
 
-  const formData = await request.formData()
-  const intent = formData.get('intent') as string | null
+  try {
+    const auth = await requireAuth(request)
+    profile.mark('require_auth', {
+      role: auth.claims.role,
+    })
+    if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      outcome = 'unauthorized'
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
 
-  if (intent === 'register-student') {
+    const formData = await request.formData()
+    intent = formData.get('intent') as string | null
+    profile.mark('parse_form_data', {
+      intent,
+    })
+
+    if (intent === 'register-student') {
+      profile.mark('intent_register_student_start')
     const classId = formData.get('class_id') as string
     const profileId = formData.get('profile_id') as string
     if (!classId || !profileId) {
+      outcome = 'register_missing_identifiers'
       return {
         ok: false,
         intent: 'register-student',
@@ -1268,8 +914,13 @@ export async function action({ request }: Route.ActionArgs) {
             .eq('profile_id', profileId)
             .maybeSingle<{ zoom_registrant_id: string | null; zoom_join_url: string | null }>(),
         ])
+      profile.mark('register_load_context', {
+        classId,
+        profileId,
+      })
 
       if (classError) {
+        outcome = 'register_class_context_error'
         return {
           ok: false,
           intent: 'register-student',
@@ -1280,6 +931,7 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       if (profileError) {
+        outcome = 'register_profile_context_error'
         return {
           ok: false,
           intent: 'register-student',
@@ -1290,6 +942,7 @@ export async function action({ request }: Route.ActionArgs) {
       }
 
       if (registrantBeforeError) {
+        outcome = 'register_existing_registrant_context_error'
         return {
           ok: false,
           intent: 'register-student',
@@ -1312,6 +965,7 @@ export async function action({ request }: Route.ActionArgs) {
         : { data: null, error: null }
 
       if (enrollmentError) {
+        outcome = 'register_enrollment_lookup_error'
         return {
           ok: false,
           intent: 'register-student',
@@ -1330,6 +984,7 @@ export async function action({ request }: Route.ActionArgs) {
         .eq('child_profile_id', profileId)
 
       if (guardianEdgeError) {
+        outcome = 'register_guardian_edge_error'
         return {
           ok: false,
           intent: 'register-student',
@@ -1348,6 +1003,7 @@ export async function action({ request }: Route.ActionArgs) {
         : { data: [] as Array<{ email: string | null }>, error: null }
 
       if (guardianError) {
+        outcome = 'register_guardian_lookup_error'
         return {
           ok: false,
           intent: 'register-student',
@@ -1365,6 +1021,10 @@ export async function action({ request }: Route.ActionArgs) {
         classId,
         profileId,
         runId: `manual-row-${Date.now().toString(36)}`,
+      })
+      profile.mark('register_run_zoom_registrant', {
+        classId,
+        profileId,
       })
       const provision = runResult.provision
       const firstRegistrantFailure =
@@ -1419,8 +1079,13 @@ export async function action({ request }: Route.ActionArgs) {
         .eq('class_id', classId)
         .eq('profile_id', profileId)
         .maybeSingle<{ zoom_registrant_id: string | null; zoom_join_url: string | null }>()
+      profile.mark('register_fetch_registrant_after_run', {
+        hasError: Boolean(error),
+        hasRegistrant: Boolean(registrant),
+      })
 
       if (error) {
+        outcome = 'register_registrant_fetch_error'
         return {
           ok: false,
           intent: 'register-student',
@@ -1449,6 +1114,7 @@ export async function action({ request }: Route.ActionArgs) {
         else if (registrant?.zoom_registrant_id && !registrant.zoom_join_url) rootCause = 'zoom_registrant_created_without_join_url'
         else if (!registrant) rootCause = 'registrant_row_not_created_for_profile'
 
+        outcome = 'register_missing_join_url_after_run'
         return {
           ok: false,
           intent: 'register-student',
@@ -1471,6 +1137,7 @@ export async function action({ request }: Route.ActionArgs) {
         }
       }
 
+      outcome = 'register_success'
       return {
         ok: true,
         intent: 'register-student',
@@ -1481,6 +1148,7 @@ export async function action({ request }: Route.ActionArgs) {
         run_result: runResult,
       }
     } catch (error) {
+      outcome = 'register_exception'
       return {
         ok: false,
         intent: 'register-student',
@@ -1492,19 +1160,28 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === 'delete-attendance-row') {
+    profile.mark('intent_delete_attendance_row_start')
     const classId = formData.get('class_id') as string
     const profileId = formData.get('profile_id') as string
     if (!classId || !profileId) {
+      outcome = 'delete_missing_identifiers'
       return new Response('Missing identifiers', { status: 400, headers: auth.headers })
     }
 
     const { supabase } = createClient(request)
     const { error } = await supabase.from('class_attendance').delete().eq('class_id', classId).eq('profile_id', profileId)
+    profile.mark('delete_attendance_row_execute', {
+      classId,
+      profileId,
+      hasError: Boolean(error),
+    })
 
     if (error) {
+      outcome = 'delete_error'
       return new Response(error.message, { status: 500, headers: auth.headers })
     }
 
+    outcome = 'delete_success'
     return {
       ok: true,
       intent: 'delete-attendance-row',
@@ -1514,6 +1191,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === 'allocate-gift-card') {
+    profile.mark('intent_allocate_gift_card_start')
     const classId = formData.get('class_id') as string
     const profileId = formData.get('profile_id') as string
     const preferredProviderRaw = String(formData.get('gift_card_preferred_provider') ?? '')
@@ -1523,6 +1201,7 @@ export async function action({ request }: Route.ActionArgs) {
       preferredProviderRaw === 'sobeys' ? 'Sobeys' : preferredProviderRaw === 'pc' ? 'PC' : null
 
     if (!classId || !profileId) {
+      outcome = 'allocate_missing_identifiers'
       return new Response('Missing identifiers', { status: 400, headers: auth.headers })
     }
 
@@ -1543,26 +1222,39 @@ export async function action({ request }: Route.ActionArgs) {
       supabase.from('gift_card_allocation').select('id').eq('class_id', classId).eq('profile_id', profileId).maybeSingle<{ id: string }>(),
       supabase.from('class').select('starts_at, ends_at').eq('id', classId).maybeSingle<{ starts_at: string | null; ends_at: string | null }>(),
     ])
+    profile.mark('allocate_load_context', {
+      classId,
+      profileId,
+      attendanceError: Boolean(attendanceResult.error),
+      allocationError: Boolean(allocationResult.error),
+      classError: Boolean(classResult.error),
+    })
 
     if (attendanceResult.error) {
+      outcome = 'allocate_attendance_error'
       return new Response(attendanceResult.error.message, { status: 500, headers: auth.headers })
     }
     if (allocationResult.error) {
+      outcome = 'allocate_existing_allocation_error'
       return new Response(allocationResult.error.message, { status: 500, headers: auth.headers })
     }
     if (classResult.error) {
+      outcome = 'allocate_class_error'
       return new Response(classResult.error.message, { status: 500, headers: auth.headers })
     }
 
     const attendance = attendanceResult.data
     if (!attendance?.id) {
+      outcome = 'allocate_attendance_missing'
       return new Response('Class attendance row not found for class/profile', { status: 409, headers: auth.headers })
     }
     if (attendance.gift_card_blocked) {
+      outcome = 'allocate_blocked'
       return new Response('Gift card is blocked for this attendance row', { status: 409, headers: auth.headers })
     }
 
     if (allocationResult.data?.id) {
+      outcome = 'allocate_already_allocated'
       return {
         ok: true,
         intent: 'allocate-gift-card',
@@ -1604,6 +1296,7 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     if (!selectedAsset) {
+      outcome = 'allocate_no_asset_available'
       return new Response('No available gift card asset found for allocation', { status: 409, headers: auth.headers })
     }
 
@@ -1621,6 +1314,7 @@ export async function action({ request }: Route.ActionArgs) {
       .maybeSingle<{ id: string; provider: 'PC' | 'Sobeys' }>()
 
     if (claimError || !claimedAsset?.id) {
+      outcome = 'allocate_asset_claim_failed'
       return new Response(claimError?.message ?? 'Gift card asset claim failed', { status: 409, headers: auth.headers })
     }
 
@@ -1666,6 +1360,11 @@ export async function action({ request }: Route.ActionArgs) {
       status: 'allocated',
       metadata,
     })
+    profile.mark('allocate_insert_allocation', {
+      classId,
+      profileId,
+      hasError: Boolean(insertError),
+    })
 
     if (insertError) {
       await supabase
@@ -1677,9 +1376,11 @@ export async function action({ request }: Route.ActionArgs) {
         })
         .eq('id', claimedAsset.id)
 
+      outcome = 'allocate_insert_error'
       return new Response(insertError.message, { status: 500, headers: auth.headers })
     }
 
+    outcome = 'allocate_success'
     return {
       ok: true,
       intent: 'allocate-gift-card',
@@ -1691,12 +1392,14 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === 'toggle-gift-card-block') {
+    profile.mark('intent_toggle_gift_card_block_start')
     const classId = formData.get('class_id') as string
     const profileId = formData.get('profile_id') as string
     const nextBlocked = String(formData.get('blocked') ?? '') === 'true'
     const reason = (formData.get('reason') as string | null)?.trim() ?? ''
 
     if (!classId || !profileId) {
+      outcome = 'toggle_block_missing_identifiers'
       return new Response('Missing identifiers', { status: 400, headers: auth.headers })
     }
 
@@ -1712,8 +1415,15 @@ export async function action({ request }: Route.ActionArgs) {
       })
       .eq('class_id', classId)
       .eq('profile_id', profileId)
+    profile.mark('toggle_block_update_attendance', {
+      classId,
+      profileId,
+      blocked: nextBlocked,
+      hasError: Boolean(error),
+    })
 
     if (error) {
+      outcome = 'toggle_block_attendance_update_error'
       return new Response(error.message, { status: 500, headers: auth.headers })
     }
 
@@ -1751,15 +1461,18 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === 'update-gift-availability-state') {
+    profile.mark('intent_update_gift_availability_state_start')
     const classId = formData.get('class_id') as string
     const profileId = formData.get('profile_id') as string
     const availabilityState = String(formData.get('gift_card_available_state') ?? '').trim().toLowerCase()
 
     if (!classId || !profileId) {
+      outcome = 'gift_availability_missing_identifiers'
       return new Response('Missing identifiers', { status: 400, headers: auth.headers })
     }
 
     if (availabilityState !== 'true' && availabilityState !== 'false') {
+      outcome = 'gift_availability_invalid_value'
       return new Response('Invalid availability state value', { status: 400, headers: auth.headers })
     }
 
@@ -1770,12 +1483,20 @@ export async function action({ request }: Route.ActionArgs) {
       .eq('class_id', classId)
       .eq('profile_id', profileId)
       .maybeSingle()
+    profile.mark('gift_availability_load_allocation', {
+      classId,
+      profileId,
+      hasError: Boolean(allocationError),
+      hasAllocation: Boolean(allocation?.id),
+    })
 
     if (allocationError) {
+      outcome = 'gift_availability_lookup_error'
       return new Response(allocationError.message, { status: 500, headers: auth.headers })
     }
 
     if (!allocation?.id) {
+      outcome = 'gift_availability_allocation_missing'
       return new Response('Gift card allocation not found for class/profile', { status: 409, headers: auth.headers })
     }
 
@@ -1790,11 +1511,18 @@ export async function action({ request }: Route.ActionArgs) {
       .from('gift_card_allocation')
       .update({ metadata })
       .eq('id', allocation.id)
+    profile.mark('gift_availability_update_allocation', {
+      allocationId: allocation.id,
+      availabilityState,
+      hasError: Boolean(updateError),
+    })
 
     if (updateError) {
+      outcome = 'gift_availability_update_error'
       return new Response(updateError.message, { status: 500, headers: auth.headers })
     }
 
+    outcome = 'gift_availability_success'
     return {
       ok: true,
       intent: 'update-gift-availability-state',
@@ -1809,12 +1537,14 @@ export async function action({ request }: Route.ActionArgs) {
     intent !== 'update-photo-status' &&
     intent !== 'update-camera-on'
   ) {
+    outcome = 'unsupported_intent'
     return new Response('Unsupported action', { status: 400, headers: auth.headers })
   }
 
   const classId = formData.get('class_id') as string
   const profileId = formData.get('profile_id') as string
   if (!classId || !profileId) {
+    outcome = 'update_missing_identifiers'
     return new Response('Missing identifiers', { status: 400, headers: auth.headers })
   }
 
@@ -1831,6 +1561,7 @@ export async function action({ request }: Route.ActionArgs) {
     const status = (formData.get('status') as string | null) ?? null
     const allowedStatuses = Constants.public.Enums.class_attendance_status as readonly Database['public']['Enums']['class_attendance_status'][]
     if (status && !allowedStatuses.includes(status as Database['public']['Enums']['class_attendance_status'])) {
+      outcome = 'update_status_invalid_value'
       return new Response('Invalid status', { status: 400, headers: auth.headers })
     }
     updates.status = status || null
@@ -1841,6 +1572,7 @@ export async function action({ request }: Route.ActionArgs) {
     const allowedPhotoStatuses =
       Constants.public.Enums.class_attendance_photo_status as readonly Database['public']['Enums']['class_attendance_photo_status'][]
     if (photoStatus && !allowedPhotoStatuses.includes(photoStatus as Database['public']['Enums']['class_attendance_photo_status'])) {
+      outcome = 'update_photo_status_invalid_value'
       return new Response('Invalid photo status', { status: 400, headers: auth.headers })
     }
     updates.photo_status = photoStatus || null
@@ -1863,12 +1595,36 @@ export async function action({ request }: Route.ActionArgs) {
     .update(updates)
     .eq('class_id', classId)
     .eq('profile_id', profileId)
+  profile.mark('update_attendance_row', {
+    intent,
+    classId,
+    profileId,
+    hasError: Boolean(error),
+  })
 
   if (error) {
+    outcome = 'update_row_error'
     return new Response(error.message, { status: 500, headers: auth.headers })
   }
 
+  outcome = 'update_row_success'
   return { ok: true }
+  } catch (error) {
+    outcome = 'exception'
+    errorMessage = error instanceof Error ? error.message : String(error)
+    profile.log('class_attendance_action_error', {
+      intent,
+      outcome,
+      error: errorMessage,
+    })
+    throw error
+  } finally {
+    profile.complete({
+      intent,
+      outcome,
+      error: errorMessage,
+    })
+  }
 }
 
 export default function ClassAttendancePage() {

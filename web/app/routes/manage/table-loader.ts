@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { TABLE_DEFINITIONS } from './table-definitions'
 import type { LoaderFunctionArgs } from 'react-router'
 
@@ -595,90 +596,117 @@ export function createTableLoader(tableName: string) {
     { request }: LoaderFunctionArgs,
     options?: { includeForeignKeyOptions?: boolean }
   ) {
-    const definition = TABLE_DEFINITIONS[tableName]
-    if (!definition) {
-      throw new Response('Table not found', { status: 404 })
-    }
+    const profile = createLoaderProfile({
+      name: `table_loader_${tableName.replace(/[^a-zA-Z0-9]+/g, '_')}`,
+      request,
+    })
 
-    const { supabase } = createClient(request)
-    const { page, pageSize, searchParams } = parsePaginationState(request)
-    const requestedSortColumn = (searchParams.get('sort') ?? '').trim()
-    const requestedSortDirection = (searchParams.get('dir') ?? '').trim().toLowerCase()
-    const requestedSortAscending = requestedSortDirection === 'asc'
-    const orderAscending = definition.orderAscending ?? true
-    const selectableColumns = new Set(parseTopLevelSelectColumns(definition.select))
-    const parsedFilters = parseFiltersFromSearch(definition.columns, searchParams)
-
-    const hasUnsupportedFilter = Object.keys(parsedFilters).some(column => !selectableColumns.has(column))
-    const hasUnsupportedSort = requestedSortColumn.length > 0 && !selectableColumns.has(requestedSortColumn)
-    const hasMixedEmptyAndExplicit = Object.values(parsedFilters).some(
-      filter => filter.includeEmpty && filter.values.length > 0
-    )
-    const useServerSideQuery = !(hasUnsupportedFilter || hasUnsupportedSort || hasMixedEmptyAndExplicit)
-
-    let rows: Record<string, unknown>[] = []
-    let totalRows = 0
-
-    if (useServerSideQuery) {
-      let query = fromQualifiedTable(supabase, definition.table)
-        .select(definition.select, { count: 'exact' })
-
-      for (const [column, filter] of Object.entries(parsedFilters)) {
-        if (!selectableColumns.has(column)) continue
-        if (filter.includeEmpty && filter.values.length === 0) {
-          query = query.is(column, null)
-          continue
-        }
-        if (filter.values.length === 1) {
-          query = query.eq(column, filter.values[0])
-          continue
-        }
-        if (filter.values.length > 1) {
-          query = query.in(column, filter.values)
-        }
+    try {
+      const definition = TABLE_DEFINITIONS[tableName]
+      if (!definition) {
+        profile.log('table_loader_not_found', { tableName })
+        throw new Response('Table not found', { status: 404 })
       }
 
-      const orderColumn =
-        requestedSortColumn && selectableColumns.has(requestedSortColumn)
-          ? requestedSortColumn
-          : definition.order
-      const ascending = requestedSortColumn
-        ? requestedSortAscending
-        : orderAscending
+      const { supabase } = createClient(request)
+      const { page, pageSize, searchParams } = parsePaginationState(request)
+      const requestedSortColumn = (searchParams.get('sort') ?? '').trim()
+      const requestedSortDirection = (searchParams.get('dir') ?? '').trim().toLowerCase()
+      const requestedSortAscending = requestedSortDirection === 'asc'
+      const orderAscending = definition.orderAscending ?? true
+      const selectableColumns = new Set(parseTopLevelSelectColumns(definition.select))
+      const parsedFilters = parseFiltersFromSearch(definition.columns, searchParams)
 
-      const from = (page - 1) * pageSize
-      const to = from + pageSize - 1
-
-      const { data, error, count } = await query.order(orderColumn, { ascending }).range(from, to)
-
-      if (error) {
-        throw new Response(error.message, { status: 500 })
-      }
-
-      rows = (data ?? []) as unknown as Record<string, unknown>[]
-      totalRows = count ?? rows.length
-    } else {
-      rows = await fetchAllRowsInBatches({
-        supabase,
-        table: definition.table,
-        select: definition.select,
-        order: definition.order,
-        ascending: orderAscending,
+      const hasUnsupportedFilter = Object.keys(parsedFilters).some(column => !selectableColumns.has(column))
+      const hasUnsupportedSort = requestedSortColumn.length > 0 && !selectableColumns.has(requestedSortColumn)
+      const hasMixedEmptyAndExplicit = Object.values(parsedFilters).some(
+        filter => filter.includeEmpty && filter.values.length > 0
+      )
+      const useServerSideQuery = !(hasUnsupportedFilter || hasUnsupportedSort || hasMixedEmptyAndExplicit)
+      profile.mark('parse_request', {
+        page,
+        pageSize,
+        filterColumnCount: Object.keys(parsedFilters).length,
+        requestedSortColumn,
+        requestedSortDirection,
+        useServerSideQuery,
       })
-      totalRows = rows.length
-    }
 
-    if (definition.lookupMappings?.length && rows.length) {
-      for (const mapping of definition.lookupMappings) {
-        const keyCol = mapping.keyColumn
-        const ids = new Set<string>()
-        for (const row of rows) {
+      let rows: Record<string, unknown>[] = []
+      let totalRows = 0
+
+      if (useServerSideQuery) {
+        let query = fromQualifiedTable(supabase, definition.table)
+          .select(definition.select, { count: 'exact' })
+
+        for (const [column, filter] of Object.entries(parsedFilters)) {
+          if (!selectableColumns.has(column)) continue
+          if (filter.includeEmpty && filter.values.length === 0) {
+            query = query.is(column, null)
+            continue
+          }
+          if (filter.values.length === 1) {
+            query = query.eq(column, filter.values[0])
+            continue
+          }
+          if (filter.values.length > 1) {
+            query = query.in(column, filter.values)
+          }
+        }
+
+        const orderColumn =
+          requestedSortColumn && selectableColumns.has(requestedSortColumn)
+            ? requestedSortColumn
+            : definition.order
+        const ascending = requestedSortColumn
+          ? requestedSortAscending
+          : orderAscending
+
+        const from = (page - 1) * pageSize
+        const to = from + pageSize - 1
+
+        const { data, error, count } = await query.order(orderColumn, { ascending }).range(from, to)
+
+        if (error) {
+          throw new Response(error.message, { status: 500 })
+        }
+
+        rows = (data ?? []) as unknown as Record<string, unknown>[]
+        totalRows = count ?? rows.length
+        profile.mark('fetch_rows_server_side', {
+          rowCount: rows.length,
+          totalRows,
+          orderColumn,
+          ascending,
+        })
+      } else {
+        rows = await fetchAllRowsInBatches({
+          supabase,
+          table: definition.table,
+          select: definition.select,
+          order: definition.order,
+          ascending: orderAscending,
+        })
+        totalRows = rows.length
+        profile.mark('fetch_rows_full_scan', {
+          rowCount: rows.length,
+          totalRows,
+          orderColumn: definition.order,
+          ascending: orderAscending,
+        })
+      }
+
+      if (definition.lookupMappings?.length && rows.length) {
+        for (const mapping of definition.lookupMappings) {
+          const keyCol = mapping.keyColumn
+          const ids = new Set<string>()
+          for (const row of rows) {
           const value = row[keyCol]
           if (typeof value === 'string' && value) {
             ids.add(value)
           }
         }
-        if (!ids.size) continue
+          if (!ids.size) continue
 
         const keyColumn = mapping.keyColumnInTable ?? 'id'
         const selectColumns = mapping.select
@@ -700,17 +728,17 @@ export function createTableLoader(tableName: string) {
           lookupRows.push(...((lookupRowsRaw ?? []) as unknown as Record<string, unknown>[]))
         }
 
-        if (lookupErrorMessage) {
-          console.error('[table-loader] lookup mapping failed', {
-            tableName,
-            sourceTable: definition.table,
-            lookupTable: mapping.table,
-            keyColumn,
-            resultColumn: mapping.resultColumn,
-            format: mapping.format ?? null,
-            idsCount: ids.size,
-            error: lookupErrorMessage,
-          })
+          if (lookupErrorMessage) {
+            profile.log('table_loader_lookup_mapping_failed', {
+              tableName,
+              sourceTable: definition.table,
+              lookupTable: mapping.table,
+              keyColumn,
+              resultColumn: mapping.resultColumn,
+              format: mapping.format ?? null,
+              idsCount: ids.size,
+              error: lookupErrorMessage,
+            })
 
           if (mapping.format === 'profile_display') {
             for (const row of rows) {
@@ -786,24 +814,48 @@ export function createTableLoader(tableName: string) {
           const lookupValue = valueById.get(idValue) ?? ''
           row[mapping.resultColumn] = lookupValue
         }
+        }
+        profile.mark('apply_lookup_mappings', {
+          mappingCount: definition.lookupMappings.length,
+        })
       }
-    }
 
-    const editorConfig = definition.editor
-    const includeForeignKeyOptions = options?.includeForeignKeyOptions ?? true
-    const fkOptions = editorConfig && includeForeignKeyOptions ? await foreignKeyOptions(supabase, tableName) : {}
+      const editorConfig = definition.editor
+      const includeForeignKeyOptions = options?.includeForeignKeyOptions ?? true
+      const fkOptions = editorConfig && includeForeignKeyOptions ? await foreignKeyOptions(supabase, tableName) : {}
+      profile.mark('load_foreign_key_options', {
+        includeForeignKeyOptions,
+        optionColumnCount: Object.keys(fkOptions).length,
+      })
 
-    return {
-      columns: definition.columns,
-      rows,
-      totalRows,
-      serverSideQuery: useServerSideQuery,
-      label: definition.label,
-      tableName,
-      tableVariant: 'default' as const,
-      columnMeta: {},
-      editorConfig,
-      foreignKeyOptions: fkOptions,
+      const result = {
+        columns: definition.columns,
+        rows,
+        totalRows,
+        serverSideQuery: useServerSideQuery,
+        label: definition.label,
+        tableName,
+        tableVariant: 'default' as const,
+        columnMeta: {},
+        editorConfig,
+        foreignKeyOptions: fkOptions,
+      }
+
+      profile.complete({
+        tableName,
+        rowCount: rows.length,
+        totalRows,
+        columnCount: definition.columns.length,
+        serverSideQuery: useServerSideQuery,
+      })
+
+      return result
+    } catch (error) {
+      profile.log('table_loader_error', {
+        tableName,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      throw error
     }
   }
 }

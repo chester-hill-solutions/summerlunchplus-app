@@ -14,6 +14,9 @@ create unique index person_guardian_child_primary_one
 create index person_guardian_child_child_guardian_idx
   on public.person_guardian_child (child_profile_id, guardian_profile_id);
 
+create index if not exists person_guardian_child_child_idx
+  on public.person_guardian_child (child_profile_id);
+
 alter table public.person_guardian_child enable row level security;
 
 create policy person_guardian_child_read_guardian

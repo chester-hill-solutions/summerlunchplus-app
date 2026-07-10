@@ -11,6 +11,8 @@ const onboardingGuardTimeoutMs = Number.isFinite(ONBOARDING_GUARD_TIMEOUT_MS) ? 
 const ONBOARDING_STATUS_CACHE_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 5000
 const AUTH_PERMISSION_DRIFT_ALERT_TIMEOUT_MS = 2000
 const authPermissionDriftWebhookUrl = (process.env.AUTH_PERMISSION_DRIFT_WEBHOOK_URL ?? '').trim()
+const authPermissionDriftEnabled =
+  (process.env.AUTH_PERMISSION_DRIFT_ENABLED ?? 'false') === 'true'
 
 const shouldLogAuthInstrumentation =
   process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
@@ -163,7 +165,7 @@ export async function requireAuth(request: Request) {
     }
   }
 
-  if (rolePermissions.length) {
+  if (rolePermissions.length && authPermissionDriftEnabled) {
     const sortedJwtPermissions = sortedPermissions(claimPermissions)
     const sortedRolePermissions = sortedPermissions(rolePermissions)
     const driftDetected =
