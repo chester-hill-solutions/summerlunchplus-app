@@ -248,17 +248,19 @@ type FilterOptionsCacheEntry = {
 
 const isTimestampColumn = (column: string) => column.endsWith('_at') || timestampColumns.has(column)
 
+const TABLE_DISPLAY_LOCALE = 'en-US'
 const displayTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local time'
 
 const formatTimestamp = (value: string) => {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(TABLE_DISPLAY_LOCALE, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    hour12: true,
     timeZoneName: 'short',
   }).format(date)
 }
@@ -266,7 +268,7 @@ const formatTimestamp = (value: string) => {
 const formatDateOnly = (value: string) => {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
+  return new Intl.DateTimeFormat(TABLE_DISPLAY_LOCALE, { dateStyle: 'medium' }).format(date)
 }
 
 const isTimestampLabelValue = (value: unknown): value is TimestampLabelValue => {
