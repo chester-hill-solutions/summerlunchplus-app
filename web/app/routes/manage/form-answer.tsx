@@ -1,3 +1,9 @@
+import { Form, useLocation } from 'react-router'
+import { Download } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { EXPORT_TYPE_FORM_ANSWER_CSV } from '@/lib/exports/types'
+
 import TableDisplay from './table-display'
 import { createTableAction } from './table-actions.server'
 import { createTableLoader } from './table-loader'
@@ -27,5 +33,21 @@ export async function loader(args: Route.LoaderArgs) {
 export const action = createTableAction('form-answer')
 
 export default function FormAnswersTablePage() {
-  return <TableDisplay />
+  const location = useLocation()
+  const sourcePath = `/manage/form-answer${location.search}`
+
+  return (
+    <TableDisplay
+      paginationActions={
+        <Form method="post" action="/manage/exports" className="flex items-center gap-2">
+          <input type="hidden" name="intent" value="create-export" />
+          <input type="hidden" name="export_type" value={EXPORT_TYPE_FORM_ANSWER_CSV} />
+          <input type="hidden" name="source_path" value={sourcePath} />
+          <Button type="submit" variant="outline" size="icon-sm" aria-label="Export CSV" title="Export CSV">
+            <Download className="size-4" />
+          </Button>
+        </Form>
+      }
+    />
+  )
 }

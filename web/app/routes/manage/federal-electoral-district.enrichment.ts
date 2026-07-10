@@ -14,7 +14,6 @@ type ProfileRidingRow = {
   user_id: string | null
   role: Database['public']['Enums']['app_role'] | null
   federal_electoral_district_name: string | null
-  household_children_count: number | null
 }
 
 type FormSubmissionRow = {
@@ -36,6 +35,8 @@ const PROFILE_IN_BATCH_SIZE = 80
 const FAMILY_EDGE_IN_BATCH_SIZE = 40
 const RELATED_PROFILE_IN_BATCH_SIZE = 80
 const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
+const HOUSEHOLD_TOTAL_PEOPLE_QUESTION_CODE = 'household_total_people'
+const HOUSEHOLD_TOTAL_CHILDREN_QUESTION_CODE = 'household_total_children'
 
 const statusBucketFor = (status: Database['public']['Enums']['workshop_enrollment_status']) => {
   if (status === 'approved') return 'accepted'
@@ -79,6 +80,14 @@ const normalizeGiftCardBucket = (value: unknown): GiftCardBucket | null => {
     return 'sobeys'
   }
   return 'other'
+}
+
+const normalizeNumericAnswer = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string') return null
+  const parsed = Number(value.trim())
+  if (!Number.isFinite(parsed)) return null
+  return parsed
 }
 
 const chunk = <T,>(items: T[], size: number) => {
@@ -212,7 +221,7 @@ export async function loader({ request }: { request: Request }) {
   for (const profileChunk of chunk(profileIds, PROFILE_IN_BATCH_SIZE)) {
     const { data, error } = await supabase
       .from('profile')
-      .select('id, user_id, role, federal_electoral_district_name, household_children_count')
+      .select('id, user_id, role, federal_electoral_district_name')
       .in('id', profileChunk)
 
     if (error) {
@@ -290,7 +299,7 @@ export async function loader({ request }: { request: Request }) {
   for (const relatedChunk of chunk(missingRelatedProfileIds, RELATED_PROFILE_IN_BATCH_SIZE)) {
     const { data: relatedProfiles, error: relatedProfilesError } = await supabase
       .from('profile')
-      .select('id, user_id, role, federal_electoral_district_name, household_children_count')
+      .select('id, user_id, role, federal_electoral_district_name')
       .in('id', relatedChunk)
 
     if (relatedProfilesError) {
@@ -312,8 +321,6 @@ export async function loader({ request }: { request: Request }) {
           user_id: typeof related.user_id === 'string' ? related.user_id : null,
           role: (related.role ?? null) as Database['public']['Enums']['app_role'] | null,
           federal_electoral_district_name: relatedRiding,
-          household_children_count:
-            typeof related.household_children_count === 'number' ? related.household_children_count : null,
         })
       }
       if (typeof related.user_id === 'string' && related.user_id) {
@@ -345,7 +352,6 @@ export async function loader({ request }: { request: Request }) {
 
   const householdKeyByProfileId = new Map<string, string>()
   const householdMembersByKey = new Map<string, string[]>()
-  const householdChildCountByKey = new Map<string, number>()
   const visitedProfiles = new Set<string>()
 
   for (const startProfileId of familyAdjacency.keys()) {
@@ -371,24 +377,6 @@ export async function loader({ request }: { request: Request }) {
     for (const memberId of members) {
       householdKeyByProfileId.set(memberId, householdKey)
     }
-
-    const inferredChildrenCount = members.reduce((count, memberId) => {
-      const profile = profileById.get(memberId)
-      const isStudent = profile?.role === 'student'
-      const isChildRoleByLink = guardiansByChild.has(memberId)
-      return count + (isStudent || isChildRoleByLink ? 1 : 0)
-    }, 0)
-
-    if (inferredChildrenCount > 0) {
-      householdChildCountByKey.set(householdKey, inferredChildrenCount)
-      continue
-    }
-
-    const fallbackChildrenCount = members.reduce((maxValue, memberId) => {
-      const value = Number(profileById.get(memberId)?.household_children_count ?? 0)
-      return Number.isFinite(value) ? Math.max(maxValue, value) : maxValue
-    }, 0)
-    householdChildCountByKey.set(householdKey, fallbackChildrenCount)
   }
 
   const submissionRowsById = new Map<string, FormSubmissionRow>()
@@ -425,12 +413,18 @@ export async function loader({ request }: { request: Request }) {
   }
 
   const latestGiftCardByProfileId = new Map<string, { bucket: GiftCardBucket; submittedAt: number }>()
+  const latestHouseholdPeopleByProfileId = new Map<string, { value: number; submittedAt: number }>()
+  const latestHouseholdChildrenByProfileId = new Map<string, { value: number; submittedAt: number }>()
   const submissionIds = Array.from(submissionRowsById.keys())
   for (const submissionChunk of chunk(submissionIds, PROFILE_IN_BATCH_SIZE)) {
     const { data: answers, error } = await supabase
       .from('form_answer')
       .select('submission_id, question_code, value')
-      .eq('question_code', GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+      .in('question_code', [
+        GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
+        HOUSEHOLD_TOTAL_PEOPLE_QUESTION_CODE,
+        HOUSEHOLD_TOTAL_CHILDREN_QUESTION_CODE,
+      ])
       .in('submission_id', submissionChunk)
 
     if (error) {
@@ -439,8 +433,6 @@ export async function loader({ request }: { request: Request }) {
     }
 
     for (const answer of (answers ?? []) as FormAnswerRow[]) {
-      const bucket = normalizeGiftCardBucket(answer.value)
-      if (!bucket) continue
       const submission = submissionRowsById.get(answer.submission_id)
       if (!submission) continue
 
@@ -456,13 +448,75 @@ export async function loader({ request }: { request: Request }) {
         }
       }
 
-      for (const profileId of associatedProfileIds) {
-        const existing = latestGiftCardByProfileId.get(profileId)
-        if (!existing || submittedAtTime > existing.submittedAt) {
-          latestGiftCardByProfileId.set(profileId, { bucket, submittedAt: submittedAtTime })
+      if (answer.question_code === GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE) {
+        const bucket = normalizeGiftCardBucket(answer.value)
+        if (!bucket) continue
+        for (const profileId of associatedProfileIds) {
+          const existing = latestGiftCardByProfileId.get(profileId)
+          if (!existing || submittedAtTime > existing.submittedAt) {
+            latestGiftCardByProfileId.set(profileId, { bucket, submittedAt: submittedAtTime })
+          }
+        }
+        continue
+      }
+
+      if (answer.question_code === HOUSEHOLD_TOTAL_PEOPLE_QUESTION_CODE) {
+        const value = normalizeNumericAnswer(answer.value)
+        if (value === null) continue
+        for (const profileId of associatedProfileIds) {
+          const existing = latestHouseholdPeopleByProfileId.get(profileId)
+          if (!existing || submittedAtTime > existing.submittedAt) {
+            latestHouseholdPeopleByProfileId.set(profileId, { value, submittedAt: submittedAtTime })
+          }
+        }
+        continue
+      }
+
+      if (answer.question_code === HOUSEHOLD_TOTAL_CHILDREN_QUESTION_CODE) {
+        const value = normalizeNumericAnswer(answer.value)
+        if (value === null) continue
+        for (const profileId of associatedProfileIds) {
+          const existing = latestHouseholdChildrenByProfileId.get(profileId)
+          if (!existing || submittedAtTime > existing.submittedAt) {
+            latestHouseholdChildrenByProfileId.set(profileId, { value, submittedAt: submittedAtTime })
+          }
         }
       }
     }
+  }
+
+  const householdPeopleByKey = new Map<string, number>()
+  const householdChildrenByKey = new Map<string, number>()
+  for (const [householdKey, householdMembers] of householdMembersByKey.entries()) {
+    const candidateProfileIds = new Set<string>(householdMembers)
+    for (const memberId of householdMembers) {
+      const userId = profileById.get(memberId)?.user_id
+      if (typeof userId !== 'string' || !userId) continue
+      for (const siblingProfileId of profileIdsByUserId.get(userId) ?? []) {
+        candidateProfileIds.add(siblingProfileId)
+      }
+    }
+
+    let resolvedPeople = 0
+    let resolvedPeopleSubmittedAt = -1
+    let resolvedChildren = 0
+    let resolvedChildrenSubmittedAt = -1
+    for (const candidateProfileId of candidateProfileIds) {
+      const people = latestHouseholdPeopleByProfileId.get(candidateProfileId)
+      if (people && people.submittedAt > resolvedPeopleSubmittedAt) {
+        resolvedPeople = people.value
+        resolvedPeopleSubmittedAt = people.submittedAt
+      }
+
+      const children = latestHouseholdChildrenByProfileId.get(candidateProfileId)
+      if (children && children.submittedAt > resolvedChildrenSubmittedAt) {
+        resolvedChildren = children.value
+        resolvedChildrenSubmittedAt = children.submittedAt
+      }
+    }
+
+    householdPeopleByKey.set(householdKey, resolvedPeople)
+    householdChildrenByKey.set(householdKey, resolvedChildren)
   }
 
   const seenHouseholdsByRiding = new Map<string, Set<string>>()
@@ -508,10 +562,13 @@ export async function loader({ request }: { request: Request }) {
     seenHouseholds.add(householdId)
     seenHouseholdsByRiding.set(requestedRiding, seenHouseholds)
 
-    byRiding[requestedRiding].household_count += 1
+    const householdPeople = Number(householdPeopleByKey.get(householdId) ?? 0)
+    if (Number.isFinite(householdPeople) && householdPeople >= 0) {
+      byRiding[requestedRiding].household_count += householdPeople
+    }
 
-    const householdChildren = Number(householdChildCountByKey.get(householdId) ?? 0)
-    if (Number.isFinite(householdChildren) && householdChildren > 0) {
+    const householdChildren = Number(householdChildrenByKey.get(householdId) ?? 0)
+    if (Number.isFinite(householdChildren) && householdChildren >= 0) {
       byRiding[requestedRiding].household_child_count += householdChildren
     }
 

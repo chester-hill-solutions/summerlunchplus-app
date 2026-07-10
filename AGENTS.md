@@ -16,6 +16,7 @@
 ## Manage table patterns
 - Default all manage tables to server-side query behavior so filter options stay correct across pagination/sorting states.
 - Default all manage pages to the deferred table pattern: lightweight shell loader + `DeferredTableDisplay` + route-level `table-data` loader that sets `_deferTable=1`.
+- Add a CSV download button to manage table pagination actions using the `/manage/exports` form pattern (`intent=create-export`, `export_type`, `source_path`).
 - For full-dataset filter UIs (for example `email-message`), in the deferred table-data request clear `page`/`pageSize` and force `sort=__full_scan__`.
 - Supabase API row cap is `1000` (`supabase/config.toml`); batch large related reads with stable ordered `.range(...)` loops instead of one large `.in(...)` fetch.
 

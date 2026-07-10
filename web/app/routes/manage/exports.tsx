@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react'
 import { Form, redirect, useActionData, useFetcher, useLoaderData, useNavigation, useRevalidator } from 'react-router'
 
 import { Button } from '@/components/ui/button'
+import { createActionProfile } from '@/lib/action-profile.server'
 import { requireAuth } from '@/lib/auth.server'
+import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { triggerExportRunner } from '@/lib/exports/dispatch.server'
 import { buildClassAttendanceSnapshot } from '@/lib/exports/class-attendance-snapshot.server'
 import { buildEmailMessageSnapshot } from '@/lib/exports/email-message-snapshot.server'
 import { buildFederalElectoralDistrictSnapshot } from '@/lib/exports/federal-electoral-district-snapshot.server'
+import { buildFormAnswerSnapshot } from '@/lib/exports/form-answer-snapshot.server'
 import { processExportJobById } from '@/lib/exports/runner.server'
 import {
   createExportJob,
@@ -20,6 +23,7 @@ import {
   EXPORT_TYPE_CLASS_ATTENDANCE_CSV,
   EXPORT_TYPE_EMAIL_MESSAGE_CSV,
   EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV,
+  EXPORT_TYPE_FORM_ANSWER_CSV,
   EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV,
 } from '@/lib/exports/types'
 import { isRoleAtLeast } from '@/lib/roles'
@@ -45,6 +49,49 @@ type ToastState = {
 } | null
 
 const isActiveStatus = (status: string) => status === 'queued' || status === 'running'
+const EXPORTS_DISPLAY_LOCALE = 'en-US'
+const EXPORTS_DISPLAY_TIME_ZONE = 'UTC'
+
+const formatExportDateTime = (value: string | null) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat(EXPORTS_DISPLAY_LOCALE, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+    timeZone: EXPORTS_DISPLAY_TIME_ZONE,
+  }).format(date)
+}
+
+const toActionErrorMessage = async (error: unknown) => {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    const preferred = [
+      record.message,
+      record.error,
+      record.error_description,
+      record.details,
+      record.hint,
+      record.code,
+    ].find(value => typeof value === 'string' && value.trim())
+    if (typeof preferred === 'string') return preferred
+  }
+  if (error instanceof Response) {
+    try {
+      const text = (await error.text()).trim()
+      return text || `Request failed (${error.status})`
+    } catch {
+      return `Request failed (${error.status})`
+    }
+  }
+  if (typeof error === 'string') return error
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return 'Unable to queue export.'
+  }
+}
 
 const EXPORT_CONFIG = {
   [EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV]: {
@@ -66,6 +113,11 @@ const EXPORT_CONFIG = {
     sourcePathname: '/manage/class-attendance',
     sourceTable: 'class_attendance',
     buildSnapshot: buildClassAttendanceSnapshot,
+  },
+  [EXPORT_TYPE_FORM_ANSWER_CSV]: {
+    sourcePathname: '/manage/form-answer',
+    sourceTable: 'form_answer',
+    buildSnapshot: buildFormAnswerSnapshot,
   },
 } as const
 
@@ -98,13 +150,27 @@ const triggerExportRunnerWithFallback = async ({ request, jobId }: { request: Re
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const profile = createLoaderProfile({
+    name: 'manage_exports_loader',
+    request,
+  })
   const auth = await requireAuth(request)
+  profile.mark('require_auth', {
+    role: auth.claims.role,
+  })
   if (!isRoleAtLeast(auth.claims.role, 'staff')) {
     throw redirect('/manage', { headers: auth.headers })
   }
 
   const { supabase } = createClient(request)
   const jobs = await listExportJobs({ supabase })
+  profile.mark('list_export_jobs', {
+    jobCount: jobs.length,
+  })
+
+  profile.complete({
+    jobCount: jobs.length,
+  })
 
   return {
     jobs,
@@ -112,14 +178,30 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const auth = await requireAuth(request)
-  if (!isRoleAtLeast(auth.claims.role, 'staff')) {
-    return new Response('Unauthorized', { status: 403, headers: auth.headers })
-  }
+  const profile = createActionProfile({
+    name: 'manage_exports_action',
+    request,
+  })
+  let intent: string | null = null
+  let outcome = 'unknown'
+  let errorMessage: string | null = null
 
-  const { supabase } = createClient(request)
-  const formData = await request.formData()
-  const intent = String(formData.get('intent') ?? '')
+  try {
+    const auth = await requireAuth(request)
+    profile.mark('require_auth', {
+      role: auth.claims.role,
+    })
+    if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      outcome = 'unauthorized'
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    const { supabase } = createClient(request)
+    const formData = await request.formData()
+    intent = String(formData.get('intent') ?? '')
+    profile.mark('parse_form_data', {
+      intent,
+    })
 
   if (intent === 'create-export') {
     const exportType = String(formData.get('export_type') ?? '')
@@ -139,48 +221,92 @@ export async function action({ request }: Route.ActionArgs) {
       headers: request.headers,
     })
 
-    const snapshot = await exportConfig.buildSnapshot({ request: sourceRequest })
-    const job = await createExportJob({
-      supabase,
-      requestedBy: auth.user.id,
-      exportType,
-      sourceTable: exportConfig.sourceTable,
-      queryParams: snapshot.queryParams,
-      filters: snapshot.filters,
-      sort: snapshot.sort,
-      columnOrder: snapshot.columns,
-    })
+    try {
+      const snapshot = await exportConfig.buildSnapshot({ request: sourceRequest })
+      profile.mark('create_export_build_snapshot', {
+        exportType,
+        sourcePath,
+        rowCount: snapshot.rows.length,
+        columnCount: snapshot.columns.length,
+      })
+      const job = await createExportJob({
+        supabase,
+        requestedBy: auth.user.id,
+        exportType,
+        sourceTable: exportConfig.sourceTable,
+        queryParams: snapshot.queryParams,
+        filters: snapshot.filters,
+        sort: snapshot.sort,
+        columnOrder: snapshot.columns,
+      })
+      profile.mark('create_export_create_job', {
+        jobId: job.id,
+        exportType,
+      })
 
-    await insertExportJobRows({
-      supabase,
-      jobId: job.id,
-      rows: snapshot.rows,
-    })
+      await insertExportJobRows({
+        supabase,
+        jobId: job.id,
+        rows: snapshot.rows,
+      })
+      profile.mark('create_export_insert_rows', {
+        jobId: job.id,
+        rowCount: snapshot.rows.length,
+      })
 
-    const triggerOutcome = await triggerExportRunnerWithFallback({ request, jobId: job.id })
-    if (triggerOutcome.warning) {
+      const triggerOutcome = await triggerExportRunnerWithFallback({ request, jobId: job.id })
+      profile.mark('create_export_trigger_runner', {
+        jobId: job.id,
+        warning: triggerOutcome.warning ?? null,
+      })
+      if (triggerOutcome.warning) {
+        outcome = 'create_export_queued_with_warning'
+        return {
+          success: `Export queued (${snapshot.rows.length} rows).`,
+          warning: triggerOutcome.warning,
+        } satisfies ActionData
+      }
+
+      outcome = 'create_export_success'
+      return { success: `Export queued (${snapshot.rows.length} rows).` } satisfies ActionData
+    } catch (error) {
+      outcome = 'create_export_error'
+      errorMessage = await toActionErrorMessage(error)
+      profile.log('create_export_failed', {
+        exportType,
+        sourcePath,
+        error: errorMessage,
+      })
       return {
-        success: `Export queued (${snapshot.rows.length} rows).`,
-        warning: triggerOutcome.warning,
+        error: errorMessage,
       } satisfies ActionData
     }
-
-    return { success: `Export queued (${snapshot.rows.length} rows).` } satisfies ActionData
   }
 
   if (intent === 'retry-export') {
     const jobId = String(formData.get('job_id') ?? '')
     if (!jobId) return { error: 'Missing export job id.' } satisfies ActionData
     const job = await getExportJobById({ supabase, jobId })
+    profile.mark('retry_export_load_job', {
+      jobId,
+      status: job.status,
+    })
     if (job.status !== 'failed') {
       return { error: 'Only failed exports can be retried.' } satisfies ActionData
     }
 
     await setExportJobStatus({ supabase, jobId, status: 'queued' })
+    profile.mark('retry_export_queue_job', { jobId })
     const triggerOutcome = await triggerExportRunnerWithFallback({ request, jobId })
+    profile.mark('retry_export_trigger_runner', {
+      jobId,
+      warning: triggerOutcome.warning ?? null,
+    })
     if (triggerOutcome.warning) {
+      outcome = 'retry_queued_with_warning'
       return { success: 'Export re-queued.', warning: triggerOutcome.warning } satisfies ActionData
     }
+    outcome = 'retry_success'
     return { success: 'Export re-queued.' } satisfies ActionData
   }
 
@@ -188,14 +314,37 @@ export async function action({ request }: Route.ActionArgs) {
     const jobId = String(formData.get('job_id') ?? '')
     if (!jobId) return { error: 'Missing export job id.' } satisfies ActionData
     const job = await getExportJobById({ supabase, jobId })
+    profile.mark('cancel_export_load_job', {
+      jobId,
+      status: job.status,
+    })
     if (!isActiveStatus(job.status)) {
       return { error: 'Only queued or running exports can be cancelled.' } satisfies ActionData
     }
     await setExportJobStatus({ supabase, jobId, status: 'cancelled' })
+    profile.mark('cancel_export_set_status', { jobId })
+    outcome = 'cancel_success'
     return { success: 'Export cancelled.' } satisfies ActionData
   }
 
+  outcome = 'unsupported_action'
   return { error: 'Unsupported action.' } satisfies ActionData
+  } catch (error) {
+    outcome = 'exception'
+    errorMessage = error instanceof Error ? error.message : String(error)
+    profile.log('manage_exports_action_error', {
+      intent,
+      outcome,
+      error: errorMessage,
+    })
+    throw error
+  } finally {
+    profile.complete({
+      intent,
+      outcome,
+      error: errorMessage,
+    })
+  }
 }
 
 export default function ManageExportsPage() {
@@ -298,14 +447,14 @@ export default function ManageExportsPage() {
           <tbody>
             {jobs.map(job => (
               <tr key={job.id} className="border-t align-top">
-                <td className="px-3 py-2">{new Date(job.created_at).toLocaleString()}</td>
+                <td className="px-3 py-2">{formatExportDateTime(job.created_at)}</td>
                 <td className="px-3 py-2 font-mono text-xs">{job.export_type}</td>
                 <td className="px-3 py-2 font-mono text-xs">{job.requested_by}</td>
                 <td className="px-3 py-2">{job.status}</td>
                 <td className="px-3 py-2">{job.row_count ?? '-'}</td>
                 <td className="px-3 py-2">{job.file_size_bytes ?? '-'}</td>
-                <td className="px-3 py-2">{job.completed_at ? new Date(job.completed_at).toLocaleString() : '-'}</td>
-                <td className="px-3 py-2">{job.expires_at ? new Date(job.expires_at).toLocaleString() : '-'}</td>
+                <td className="px-3 py-2">{formatExportDateTime(job.completed_at)}</td>
+                <td className="px-3 py-2">{formatExportDateTime(job.expires_at)}</td>
                 <td className="px-3 py-2 text-xs text-destructive">{job.error_message ?? '-'}</td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-2">

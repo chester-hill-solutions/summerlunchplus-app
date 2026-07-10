@@ -5,6 +5,7 @@ import { adminClient } from '@/lib/supabase/adminClient'
 import type { ExportJobStatus } from './types'
 
 type AnyClient = SupabaseClient<any>
+const EXPORT_JOB_ROW_INSERT_BATCH_SIZE = 1000
 
 export type ExportJobRecord = {
   id: string
@@ -79,15 +80,19 @@ export const insertExportJobRows = async ({
   rows: Array<Record<string, unknown>>
 }) => {
   if (!rows.length) return
-  const payload = rows.map((row, index) => ({
-    job_id: jobId,
-    row_index: index,
-    row_data: row,
-  }))
 
-  const { error } = await (supabase.from('export_job_row' as any) as any).insert(payload)
-  if (error) {
-    throw new Error(error.message)
+  for (let offset = 0; offset < rows.length; offset += EXPORT_JOB_ROW_INSERT_BATCH_SIZE) {
+    const batch = rows.slice(offset, offset + EXPORT_JOB_ROW_INSERT_BATCH_SIZE)
+    const payload = batch.map((row, index) => ({
+      job_id: jobId,
+      row_index: offset + index,
+      row_data: row,
+    }))
+
+    const { error } = await (supabase.from('export_job_row' as any) as any).insert(payload)
+    if (error) {
+      throw new Error(error.message)
+    }
   }
 }
 
