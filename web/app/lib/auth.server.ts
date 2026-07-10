@@ -12,7 +12,7 @@ const ONBOARDING_STATUS_CACHE_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 500
 const AUTH_PERMISSION_DRIFT_ALERT_TIMEOUT_MS = 2000
 const authPermissionDriftWebhookUrl = (process.env.AUTH_PERMISSION_DRIFT_WEBHOOK_URL ?? '').trim()
 const authPermissionDriftEnabled =
-  (process.env.AUTH_PERMISSION_DRIFT_ENABLED ?? (process.env.NODE_ENV === 'production' ? 'false' : 'true')) === 'true'
+  (process.env.AUTH_PERMISSION_DRIFT_ENABLED ?? 'false') === 'true'
 
 const shouldLogAuthInstrumentation =
   process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
