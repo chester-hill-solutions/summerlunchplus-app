@@ -4,6 +4,7 @@ import { Constants, type Database } from '@/lib/database.types'
 import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { EXPORT_TYPE_CLASS_ATTENDANCE_CSV } from '@/lib/exports/types'
 import { resolveIpGeolocation } from '@/lib/geoip.server'
+import { createLoaderProfile } from '@/lib/loader-profile.server'
 import {
   eligibleAfterIso,
   isEligibilityTimingEnabled,
@@ -278,7 +279,16 @@ const fallbackProfileHoverContext = {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const profile = createLoaderProfile({
+    name: 'class_attendance_loader',
+    request,
+  })
+
   const auth = await requireAuth(request)
+  profile.mark('require_auth', {
+    role: auth.claims.role,
+  })
+
   const attendanceRows: AttendanceRow[] = []
   let classAttendanceSelect =
     'id, class_id, profile_id, status, photo_status, camera_on, gift_card_blocked, gift_card_block_reason, gift_card_blocked_at, gift_card_blocked_by, recorded_by, created_at, updated_at'
@@ -322,6 +332,10 @@ export async function loader({ request }: Route.LoaderArgs) {
       break
     }
   }
+  profile.mark('fetch_class_attendance_rows', {
+    rowCount: attendanceRows.length,
+  })
+
   const classIds = Array.from(new Set(attendanceRows.map(row => row.class_id).filter(Boolean)))
   const profileIds = Array.from(new Set(attendanceRows.map(row => row.profile_id).filter(Boolean)))
   const recordedByIds = Array.from(new Set(attendanceRows.map(row => row.recorded_by).filter((id): id is string => Boolean(id))))
@@ -391,6 +405,14 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     allocationRowsRaw.push(...((data ?? []) as GiftCardAllocationRow[]))
   }
+  profile.mark('fetch_class_related_records', {
+    classIds: classIds.length,
+    classRows: classRows.length,
+    meetingRows: meetingRows.length,
+    registrantRows: registrantRows.length,
+    photoRows: photoRows.length,
+    giftCardAllocations: allocationRowsRaw.length,
+  })
 
   const profilesByIdRows: Array<ProfileRow & { user_id?: string | null }> = []
   for (const chunk of chunkArray(profileIds, IN_CLAUSE_BATCH_SIZE)) {
@@ -411,6 +433,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     if (profileError) throw new Response(profileError.message, { status: 500 })
     profilesByUserRows.push(...((profileChunk ?? []) as Array<ProfileRow & { user_id?: string | null }>))
   }
+  profile.mark('fetch_profile_lookups', {
+    profileIds: profileIds.length,
+    profilesById: profilesByIdRows.length,
+    profilesByUserId: profilesByUserRows.length,
+  })
 
   const relatedProfilesByTarget = new Map<string, Set<string>>()
   for (const profileId of profileIds) {
@@ -568,6 +595,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
     }
   }
+  profile.mark('resolve_gift_card_preferences', {
+    preferenceScopeProfiles: preferenceScopeProfiles.length,
+    preferenceSubmissionScopeProfileIds: preferenceSubmissionScopeProfileIds.length,
+    submissionCount: submissionsById.size,
+    preferenceProfileCount: latestGiftCardPreferenceByProfileId.size,
+  })
 
   const latestGiftCardPreferenceByTargetProfileId = new Map<string, { value: string; submittedAtMs: number }>()
   for (const targetProfileId of profileIds) {
@@ -646,6 +679,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
     }
   }
+  profile.mark('fetch_zoom_and_giftcard_details', {
+    workshopRows: workshopRows.length,
+    syncRows: syncRows.length,
+    giftCardAssetRows: assetRowsRaw.length,
+    giftCardClickRows: clickRowsRaw.length,
+  })
 
   const assetById = new Map(assetRowsRaw.map(row => [row.id, row]))
   const allocationByClassProfile = new Map<string, GiftCardAllocationRow>()
@@ -756,6 +795,10 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
     }
   }
+  profile.mark('resolve_latest_network', {
+    userIds: userIds.length,
+    networkProfileCount: latestNetworkByProfileId.size,
+  })
 
   const uniqueClickIps = Array.from(new Set(Array.from(latestNetworkByProfileId.values()).map(entry => entry.ip)))
   const geoByIp = new Map<string, Awaited<ReturnType<typeof resolveIpGeolocation>>>()
@@ -767,11 +810,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
     })
   )
+  profile.mark('resolve_geoip', {
+    uniqueIpCount: uniqueClickIps.length,
+    resolvedGeoCount: geoByIp.size,
+  })
 
   const classById = new Map(classes.map(row => [row.id, row]))
   const workshopById = new Map(workshopRows.map(row => [row.id, row]))
   const profileRowsTyped = [...profilesByIdRows, ...profilesByUserRows]
   const familyContextByProfileId = profileIds.length ? await loadFamilyContextByProfileIds(profileIds) : {}
+  profile.mark('load_family_context', {
+    profileIds: profileIds.length,
+    familyContextProfiles: Object.keys(familyContextByProfileId).length,
+  })
   const profileById = new Map(profileRowsTyped.map(row => [row.id, row]))
   const profileByUserId = new Map(
     profileRowsTyped
@@ -1019,6 +1070,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     const leftProfile = typeof left.profile_display === 'string' ? left.profile_display : ''
     const rightProfile = typeof right.profile_display === 'string' ? right.profile_display : ''
     return leftProfile.localeCompare(rightProfile)
+  })
+
+  profile.mark('build_and_sort_rows', {
+    rowCount: rows.length,
+  })
+  profile.complete({
+    classIdCount: classIds.length,
+    profileIdCount: profileIds.length,
   })
 
   return {
