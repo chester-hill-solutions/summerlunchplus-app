@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'react-router'
-import { Filter } from 'lucide-react'
+import { Filter, Plus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
@@ -121,6 +121,11 @@ type FederalDistrictCounts = {
   pending: number
   waitlisted: number
   declined: number
+  giftcard_pc: number
+  giftcard_sobeys: number
+  giftcard_meal_kit: number
+  household_count: number
+  household_child_count: number
 }
 
 type FederalDistrictEnrichmentResponse = {
@@ -870,6 +875,11 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
             pending: '...',
             waitlisted: '...',
             declined: '...',
+            giftcard_pc: '...',
+            giftcard_sobeys: '...',
+            giftcard_meal_kit: '...',
+            household_count: '...',
+            household_child_count: '...',
           }
         }
       }
@@ -1500,12 +1510,71 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         return aValue.localeCompare(bValue) * order
       })
     }
-    return adjustedRows
-  }, [rowsWithEnrichment, serverSideQuery, columns, filters, sortColumn, sortStage, tableName])
 
+    if (isFederalDistrictTable) {
+      const districtRows = adjustedRows.filter(row => row.__is_total_row !== true)
+      const totals = districtRows.reduce<FederalDistrictCounts>(
+        (acc, row) => {
+          const toCount = (value: unknown) => {
+            if (typeof value === 'number' && Number.isFinite(value)) return value
+            const parsed = Number(value)
+            return Number.isFinite(parsed) ? parsed : 0
+          }
+
+          acc.total += toCount(row.total)
+          acc.accepted += toCount(row.accepted)
+          acc.pending += toCount(row.pending)
+          acc.waitlisted += toCount(row.waitlisted)
+          acc.declined += toCount(row.declined)
+          acc.giftcard_pc += toCount(row.giftcard_pc)
+          acc.giftcard_sobeys += toCount(row.giftcard_sobeys)
+          acc.giftcard_meal_kit += toCount(row.giftcard_meal_kit)
+          acc.household_count += toCount(row.household_count)
+          acc.household_child_count += toCount(row.household_child_count)
+          return acc
+        },
+        {
+          total: 0,
+          accepted: 0,
+          pending: 0,
+          waitlisted: 0,
+          declined: 0,
+          giftcard_pc: 0,
+          giftcard_sobeys: 0,
+          giftcard_meal_kit: 0,
+          household_count: 0,
+          household_child_count: 0,
+        }
+      )
+
+      adjustedRows = [
+        {
+          __is_total_row: true,
+          _row_class: 'sticky top-0 z-20 bg-muted font-semibold',
+          code: '',
+          name: 'Total',
+          ...totals,
+        },
+        ...districtRows,
+      ]
+    }
+
+    return adjustedRows
+  }, [
+    rowsWithEnrichment,
+    serverSideQuery,
+    columns,
+    filters,
+    sortColumn,
+    sortStage,
+    tableName,
+    isFederalDistrictTable,
+  ])
+
+  const disablePaginationForTable = isFederalDistrictTable
   const totalRows = serverSideQuery ? Number(source?.totalRows ?? rowsWithEnrichment.length) : derivedRows.length
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
-  const effectivePage = Math.min(page, totalPages)
+  const totalPages = disablePaginationForTable ? 1 : Math.max(1, Math.ceil(totalRows / pageSize))
+  const effectivePage = disablePaginationForTable ? 1 : Math.min(page, totalPages)
   const hasActiveEnrichmentBackedFilters = useMemo(
     () =>
       Object.keys(filters).some(column =>
@@ -1536,16 +1605,18 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   }, [filters])
 
   useEffect(() => {
+    if (disablePaginationForTable) return
     if (effectivePage === page) return
     setPage(effectivePage)
     syncSearch(filters, sortColumn, sortStage, effectivePage, pageSize)
-  }, [effectivePage, page, filters, sortColumn, sortStage, pageSize])
+  }, [disablePaginationForTable, effectivePage, page, filters, sortColumn, sortStage, pageSize])
 
   const paginatedRows = useMemo(() => {
+    if (disablePaginationForTable) return derivedRows
     if (serverSideQuery) return derivedRows
     const start = (effectivePage - 1) * pageSize
     return derivedRows.slice(start, start + pageSize)
-  }, [serverSideQuery, derivedRows, effectivePage, pageSize])
+  }, [disablePaginationForTable, serverSideQuery, derivedRows, effectivePage, pageSize])
 
   useEffect(() => {
     if (!isWorkshopEnrollmentTable && !isClassAttendance) return
@@ -1700,6 +1771,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           .filter(
             riding =>
               Boolean(riding) &&
+              riding !== 'Total' &&
               !districtCountsByRiding[riding] &&
               !loadingDistrictRidingsRef.current.has(riding)
           )
@@ -1729,6 +1801,11 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
             pending: 0,
             waitlisted: 0,
             declined: 0,
+            giftcard_pc: 0,
+            giftcard_sobeys: 0,
+            giftcard_meal_kit: 0,
+            household_count: 0,
+            household_child_count: 0,
           }
           return acc
         }, {})
@@ -2562,39 +2639,27 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         {headerActions ? <div className="ml-auto">{headerActions}</div> : null}
       </div>
 
-      {canInlineInsert ? (
+      {canInlineInsert && showCreate ? (
         <section className="relative z-30 mx-6 overflow-visible rounded-lg border bg-card p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Add row</h2>
-            <button
-              type="button"
-              onClick={() => setShowCreate(prev => !prev)}
-              className="rounded border border-input px-2 py-1 text-xs"
-            >
-              {showCreate ? 'Hide' : 'New row'}
-            </button>
-          </div>
-          {showCreate ? (
-            <div className="mt-3 space-y-3">
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {fieldKeys.map(fieldName =>
-                  editorConfig
-                    ? renderField(fieldName, editorConfig.fields[fieldName], createValues, setCreateValues)
-                    : null
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={submitCreate}
-                  disabled={editorFetcher.state === 'submitting'}
-                  className="rounded bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
-                >
-                  {editorFetcher.state === 'submitting' ? 'Saving...' : 'Create'}
-                </button>
-              </div>
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {fieldKeys.map(fieldName =>
+                editorConfig
+                  ? renderField(fieldName, editorConfig.fields[fieldName], createValues, setCreateValues)
+                  : null
+              )}
             </div>
-          ) : null}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={submitCreate}
+                disabled={editorFetcher.state === 'submitting'}
+                className="rounded bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
+              >
+                {editorFetcher.state === 'submitting' ? 'Saving...' : 'Create'}
+              </button>
+            </div>
+          </div>
         </section>
       ) : null}
 
@@ -2610,41 +2675,57 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         <p className="text-xs text-muted-foreground">Page {effectivePage} of {totalPages} ({totalRows} rows)</p>
         <div className="flex items-center gap-2 text-xs">
           {paginationActions ? <div className="mr-1">{paginationActions}</div> : null}
-          <label className="text-muted-foreground" htmlFor="page-size">
-            Rows per page
-          </label>
-          <select
-            id="page-size"
-            value={pageSize}
-            onChange={event => {
-              const nextPageSize = Number(event.target.value)
-              if (!PAGE_SIZE_OPTIONS.includes(nextPageSize as (typeof PAGE_SIZE_OPTIONS)[number])) return
-              setPageAndSync(1, nextPageSize)
-            }}
-            className="h-8 rounded border border-input bg-background px-2 pr-8"
-          >
-            {PAGE_SIZE_OPTIONS.map(option => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => setPageAndSync(effectivePage - 1)}
-            disabled={effectivePage <= 1}
-            className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Prev
-          </button>
-          <button
-            type="button"
-            onClick={() => setPageAndSync(effectivePage + 1)}
-            disabled={effectivePage >= totalPages}
-            className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Next
-          </button>
+          {canInlineInsert ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label={showCreate ? 'Hide new row form' : 'New row'}
+              title={showCreate ? 'Hide new row form' : 'New row'}
+              onClick={() => setShowCreate(prev => !prev)}
+            >
+              <Plus className="size-4" />
+            </Button>
+          ) : null}
+          {disablePaginationForTable ? null : (
+            <>
+              <label className="text-muted-foreground" htmlFor="page-size">
+                Rows per page
+              </label>
+              <select
+                id="page-size"
+                value={pageSize}
+                onChange={event => {
+                  const nextPageSize = Number(event.target.value)
+                  if (!PAGE_SIZE_OPTIONS.includes(nextPageSize as (typeof PAGE_SIZE_OPTIONS)[number])) return
+                  setPageAndSync(1, nextPageSize)
+                }}
+                className="h-8 rounded border border-input bg-background px-2 pr-8"
+              >
+                {PAGE_SIZE_OPTIONS.map(option => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setPageAndSync(effectivePage - 1)}
+                disabled={effectivePage <= 1}
+                className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageAndSync(effectivePage + 1)}
+                disabled={effectivePage >= totalPages}
+                className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </>
+          )}
         </div>
       </div>
 

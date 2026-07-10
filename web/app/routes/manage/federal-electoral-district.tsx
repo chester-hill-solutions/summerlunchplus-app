@@ -1,4 +1,4 @@
-import { Form, useLocation } from 'react-router'
+import { Form, redirect, useLocation } from 'react-router'
 
 import { Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -12,11 +12,60 @@ import type { Route } from './+types/federal-electoral-district'
 const baseLoader = createTableLoader('federal-electoral-district')
 
 export async function loader(args: Route.LoaderArgs) {
-  const base = await baseLoader(args)
+  const url = new URL(args.request.url)
+  const allowedQueryColumns = new Set(['code', 'name', 'whitelist', 'meal_kit', 'updated_at'])
+  const normalizedSearch = new URLSearchParams(url.searchParams)
+  let searchChanged = false
+
+  for (const key of Array.from(normalizedSearch.keys())) {
+    if (!key.startsWith('f_')) continue
+    const column = key.slice(2)
+    if (allowedQueryColumns.has(column)) continue
+    normalizedSearch.delete(key)
+    searchChanged = true
+  }
+
+  const requestedSort = (normalizedSearch.get('sort') ?? '').trim()
+  if (requestedSort && !allowedQueryColumns.has(requestedSort)) {
+    normalizedSearch.delete('sort')
+    normalizedSearch.delete('dir')
+    searchChanged = true
+  }
+
+  if (!url.searchParams.has('pageSize')) {
+    normalizedSearch.set('page', '1')
+    normalizedSearch.set('pageSize', '1000')
+    searchChanged = true
+  }
+
+  if (searchChanged) {
+    const nextSearch = normalizedSearch.toString()
+    throw redirect(nextSearch ? `${url.pathname}?${nextSearch}` : url.pathname)
+  }
+
+  url.search = normalizedSearch.toString()
+  const request = new Request(url.toString(), args.request)
+  const base = await baseLoader({ ...args, request })
 
   const columns = base.columns.includes('accepted')
     ? base.columns
-    : ['code', 'name', 'total', 'accepted', 'pending', 'waitlisted', 'declined', ...base.columns.filter(column => !['code', 'name'].includes(column))]
+    : [
+        'code',
+        'name',
+        'whitelist',
+        'meal_kit',
+        'total',
+        'accepted',
+        'pending',
+        'waitlisted',
+        'declined',
+        'giftcard_pc',
+        'giftcard_sobeys',
+        'giftcard_meal_kit',
+        'household_count',
+        'household_child_count',
+        ...base.columns.filter(column => !['code', 'name', 'whitelist', 'meal_kit'].includes(column)),
+      ]
 
   const rows = (base.rows ?? []).map(row => {
     return {
@@ -26,20 +75,39 @@ export async function loader(args: Route.LoaderArgs) {
       pending: null,
       waitlisted: null,
       declined: null,
+      giftcard_pc: null,
+      giftcard_sobeys: null,
+      giftcard_meal_kit: null,
+      household_count: null,
+      household_child_count: null,
     }
   })
 
   return {
     ...base,
+    // This page computes the totals row from the full in-memory dataset.
+    // That approach does not work for typical server-side query tables that only load one page.
+    totalRows: rows.length,
     columns,
     rows,
     columnMeta: {
       ...(base.columnMeta ?? {}),
+      name: {
+        label: 'name',
+        fitContentOnLoad: true,
+        minWidth: 240,
+        preferredWidth: 360,
+      },
       total: { label: 'total', numeric: true },
-      accepted: { label: 'accepted', numeric: true },
-      pending: { label: 'pending', numeric: true },
-      waitlisted: { label: 'waitlisted', numeric: true },
-      declined: { label: 'declined', numeric: true },
+      accepted: { label: 'accepted', numeric: true, minWidth: 90, preferredWidth: 90 },
+      pending: { label: 'pending', numeric: true, minWidth: 90, preferredWidth: 90 },
+      waitlisted: { label: 'waitlisted', numeric: true, minWidth: 90, preferredWidth: 90 },
+      declined: { label: 'declined', numeric: true, minWidth: 90, preferredWidth: 90 },
+      giftcard_pc: { label: 'PC', numeric: true, minWidth: 90, preferredWidth: 90 },
+      giftcard_sobeys: { label: 'Sobeys', numeric: true, minWidth: 90, preferredWidth: 90 },
+      giftcard_meal_kit: { label: 'Meal Kit', numeric: true, minWidth: 90, preferredWidth: 90 },
+      household_count: { label: 'households', numeric: true, minWidth: 90, preferredWidth: 90 },
+      household_child_count: { label: 'children', numeric: true, minWidth: 90, preferredWidth: 90 },
     },
   }
 }
