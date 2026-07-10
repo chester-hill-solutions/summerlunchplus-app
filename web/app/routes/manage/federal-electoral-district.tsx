@@ -1,4 +1,4 @@
-import { Form, redirect, useLocation } from 'react-router'
+import { Form, useLocation } from 'react-router'
 
 import { Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -13,34 +13,10 @@ const baseLoader = createTableLoader('federal-electoral-district')
 
 export async function loader(args: Route.LoaderArgs) {
   const url = new URL(args.request.url)
-  const allowedQueryColumns = new Set(['code', 'name', 'whitelist', 'meal_kit', 'updated_at'])
   const normalizedSearch = new URLSearchParams(url.searchParams)
-  let searchChanged = false
-
-  for (const key of Array.from(normalizedSearch.keys())) {
-    if (!key.startsWith('f_')) continue
-    const column = key.slice(2)
-    if (allowedQueryColumns.has(column)) continue
-    normalizedSearch.delete(key)
-    searchChanged = true
-  }
-
-  const requestedSort = (normalizedSearch.get('sort') ?? '').trim()
-  if (requestedSort && !allowedQueryColumns.has(requestedSort)) {
-    normalizedSearch.delete('sort')
-    normalizedSearch.delete('dir')
-    searchChanged = true
-  }
-
   if (!url.searchParams.has('pageSize')) {
     normalizedSearch.set('page', '1')
     normalizedSearch.set('pageSize', '1000')
-    searchChanged = true
-  }
-
-  if (searchChanged) {
-    const nextSearch = normalizedSearch.toString()
-    throw redirect(nextSearch ? `${url.pathname}?${nextSearch}` : url.pathname)
   }
 
   url.search = normalizedSearch.toString()
@@ -85,6 +61,7 @@ export async function loader(args: Route.LoaderArgs) {
 
   return {
     ...base,
+    serverSideQuery: false,
     // This page computes the totals row from the full in-memory dataset.
     // That approach does not work for typical server-side query tables that only load one page.
     totalRows: rows.length,

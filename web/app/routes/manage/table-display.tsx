@@ -1513,39 +1513,60 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
     if (isFederalDistrictTable) {
       const districtRows = adjustedRows.filter(row => row.__is_total_row !== true)
-      const totals = districtRows.reduce<FederalDistrictCounts>(
-        (acc, row) => {
-          const toCount = (value: unknown) => {
-            if (typeof value === 'number' && Number.isFinite(value)) return value
-            const parsed = Number(value)
-            return Number.isFinite(parsed) ? parsed : 0
-          }
-
-          acc.total += toCount(row.total)
-          acc.accepted += toCount(row.accepted)
-          acc.pending += toCount(row.pending)
-          acc.waitlisted += toCount(row.waitlisted)
-          acc.declined += toCount(row.declined)
-          acc.giftcard_pc += toCount(row.giftcard_pc)
-          acc.giftcard_sobeys += toCount(row.giftcard_sobeys)
-          acc.giftcard_meal_kit += toCount(row.giftcard_meal_kit)
-          acc.household_count += toCount(row.household_count)
-          acc.household_child_count += toCount(row.household_child_count)
-          return acc
-        },
-        {
-          total: 0,
-          accepted: 0,
-          pending: 0,
-          waitlisted: 0,
-          declined: 0,
-          giftcard_pc: 0,
-          giftcard_sobeys: 0,
-          giftcard_meal_kit: 0,
-          household_count: 0,
-          household_child_count: 0,
-        }
+      const unresolvedCountColumns = districtRows.some(
+        row =>
+          typeof row.total !== 'number' ||
+          typeof row.accepted !== 'number' ||
+          typeof row.pending !== 'number' ||
+          typeof row.waitlisted !== 'number' ||
+          typeof row.declined !== 'number' ||
+          typeof row.giftcard_pc !== 'number' ||
+          typeof row.giftcard_sobeys !== 'number' ||
+          typeof row.giftcard_meal_kit !== 'number' ||
+          typeof row.household_count !== 'number' ||
+          typeof row.household_child_count !== 'number'
       )
+
+      const totals = unresolvedCountColumns
+        ? {
+            total: '...',
+            accepted: '...',
+            pending: '...',
+            waitlisted: '...',
+            declined: '...',
+            giftcard_pc: '...',
+            giftcard_sobeys: '...',
+            giftcard_meal_kit: '...',
+            household_count: '...',
+            household_child_count: '...',
+          }
+        : districtRows.reduce<FederalDistrictCounts>(
+            (acc, row) => {
+              acc.total += Number(row.total)
+              acc.accepted += Number(row.accepted)
+              acc.pending += Number(row.pending)
+              acc.waitlisted += Number(row.waitlisted)
+              acc.declined += Number(row.declined)
+              acc.giftcard_pc += Number(row.giftcard_pc)
+              acc.giftcard_sobeys += Number(row.giftcard_sobeys)
+              acc.giftcard_meal_kit += Number(row.giftcard_meal_kit)
+              acc.household_count += Number(row.household_count)
+              acc.household_child_count += Number(row.household_child_count)
+              return acc
+            },
+            {
+              total: 0,
+              accepted: 0,
+              pending: 0,
+              waitlisted: 0,
+              declined: 0,
+              giftcard_pc: 0,
+              giftcard_sobeys: 0,
+              giftcard_meal_kit: 0,
+              household_count: 0,
+              household_child_count: 0,
+            }
+          )
 
       adjustedRows = [
         {
@@ -1572,7 +1593,11 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   ])
 
   const disablePaginationForTable = isFederalDistrictTable
-  const totalRows = serverSideQuery ? Number(source?.totalRows ?? rowsWithEnrichment.length) : derivedRows.length
+  const totalRows = isFederalDistrictTable
+    ? Math.max(0, derivedRows.length - 1)
+    : serverSideQuery
+      ? Number(source?.totalRows ?? rowsWithEnrichment.length)
+      : derivedRows.length
   const totalPages = disablePaginationForTable ? 1 : Math.max(1, Math.ceil(totalRows / pageSize))
   const effectivePage = disablePaginationForTable ? 1 : Math.min(page, totalPages)
   const hasActiveEnrichmentBackedFilters = useMemo(

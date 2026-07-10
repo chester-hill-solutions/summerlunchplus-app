@@ -290,7 +290,7 @@ export async function loader({ request }: { request: Request }) {
   for (const relatedChunk of chunk(missingRelatedProfileIds, RELATED_PROFILE_IN_BATCH_SIZE)) {
     const { data: relatedProfiles, error: relatedProfilesError } = await supabase
       .from('profile')
-      .select('id, user_id, federal_electoral_district_name, household_children_count')
+      .select('id, user_id, role, federal_electoral_district_name, household_children_count')
       .in('id', relatedChunk)
 
     if (relatedProfilesError) {
@@ -310,7 +310,7 @@ export async function loader({ request }: { request: Request }) {
         profileById.set(relatedId, {
           id: relatedId,
           user_id: typeof related.user_id === 'string' ? related.user_id : null,
-          role: null,
+          role: (related.role ?? null) as Database['public']['Enums']['app_role'] | null,
           federal_electoral_district_name: relatedRiding,
           household_children_count:
             typeof related.household_children_count === 'number' ? related.household_children_count : null,
@@ -324,6 +324,71 @@ export async function loader({ request }: { request: Request }) {
         }
       }
     }
+  }
+
+  const familyAdjacency = new Map<string, Set<string>>()
+  for (const profileId of profileById.keys()) {
+    familyAdjacency.set(profileId, new Set())
+  }
+  for (const edgeKey of familyEdgeKeys) {
+    const [guardianId, childId] = edgeKey.split(':')
+    if (!guardianId || !childId) continue
+    if (!familyAdjacency.has(guardianId)) {
+      familyAdjacency.set(guardianId, new Set())
+    }
+    if (!familyAdjacency.has(childId)) {
+      familyAdjacency.set(childId, new Set())
+    }
+    familyAdjacency.get(guardianId)?.add(childId)
+    familyAdjacency.get(childId)?.add(guardianId)
+  }
+
+  const householdKeyByProfileId = new Map<string, string>()
+  const householdMembersByKey = new Map<string, string[]>()
+  const householdChildCountByKey = new Map<string, number>()
+  const visitedProfiles = new Set<string>()
+
+  for (const startProfileId of familyAdjacency.keys()) {
+    if (visitedProfiles.has(startProfileId)) continue
+    const queue = [startProfileId]
+    const members: string[] = []
+    visitedProfiles.add(startProfileId)
+
+    while (queue.length) {
+      const current = queue.shift()
+      if (!current) continue
+      members.push(current)
+      for (const neighbor of familyAdjacency.get(current) ?? []) {
+        if (visitedProfiles.has(neighbor)) continue
+        visitedProfiles.add(neighbor)
+        queue.push(neighbor)
+      }
+    }
+
+    members.sort((left, right) => left.localeCompare(right))
+    const householdKey = members[0] ?? startProfileId
+    householdMembersByKey.set(householdKey, members)
+    for (const memberId of members) {
+      householdKeyByProfileId.set(memberId, householdKey)
+    }
+
+    const inferredChildrenCount = members.reduce((count, memberId) => {
+      const profile = profileById.get(memberId)
+      const isStudent = profile?.role === 'student'
+      const isChildRoleByLink = guardiansByChild.has(memberId)
+      return count + (isStudent || isChildRoleByLink ? 1 : 0)
+    }, 0)
+
+    if (inferredChildrenCount > 0) {
+      householdChildCountByKey.set(householdKey, inferredChildrenCount)
+      continue
+    }
+
+    const fallbackChildrenCount = members.reduce((maxValue, memberId) => {
+      const value = Number(profileById.get(memberId)?.household_children_count ?? 0)
+      return Number.isFinite(value) ? Math.max(maxValue, value) : maxValue
+    }, 0)
+    householdChildCountByKey.set(householdKey, fallbackChildrenCount)
   }
 
   const submissionRowsById = new Map<string, FormSubmissionRow>()
@@ -436,10 +501,7 @@ export async function loader({ request }: { request: Request }) {
     byRiding[requestedRiding].total += 1
     byRiding[requestedRiding][bucket] += 1
 
-    const householdId =
-      enrolledRole === 'guardian'
-        ? profileId
-        : (guardiansByChild.get(profileId)?.[0]?.profileId ?? profileId)
+    const householdId = householdKeyByProfileId.get(profileId) ?? profileId
 
     const seenHouseholds = seenHouseholdsByRiding.get(requestedRiding) ?? new Set<string>()
     if (seenHouseholds.has(householdId)) continue
@@ -448,8 +510,7 @@ export async function loader({ request }: { request: Request }) {
 
     byRiding[requestedRiding].household_count += 1
 
-    const householdProfile = profileById.get(householdId)
-    const householdChildren = Number(householdProfile?.household_children_count ?? 0)
+    const householdChildren = Number(householdChildCountByKey.get(householdId) ?? 0)
     if (Number.isFinite(householdChildren) && householdChildren > 0) {
       byRiding[requestedRiding].household_child_count += householdChildren
     }
@@ -459,13 +520,8 @@ export async function loader({ request }: { request: Request }) {
       continue
     }
 
-    const giftCardCandidates = new Set<string>([householdId, profileId])
-    for (const child of childrenByGuardian.get(householdId) ?? []) {
-      giftCardCandidates.add(child.profileId)
-    }
-    for (const guardian of guardiansByChild.get(profileId) ?? []) {
-      giftCardCandidates.add(guardian.profileId)
-    }
+    const giftCardCandidates = new Set<string>(householdMembersByKey.get(householdId) ?? [profileId])
+    giftCardCandidates.add(profileId)
 
     let resolvedGiftCardBucket: GiftCardBucket | null = null
     let resolvedGiftCardSubmittedAt = -1
