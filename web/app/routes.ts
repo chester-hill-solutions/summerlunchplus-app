@@ -59,6 +59,7 @@ export default [
     route("class", "routes/manage/class.tsx"),
     route("class-attendance", "routes/manage/class-attendance.tsx"),
     route("class-attendance/table-data", "routes/manage/class-attendance.table-data.ts"),
+    route("class-attendance/enrichment", "routes/manage/class-attendance.enrichment.ts"),
     route("class-attendance-raw", "routes/manage/class-attendance-raw.tsx"),
     route("class-attendance/photos", "routes/manage/class-attendance.photos.ts"),
     route("class-attendance-photo-upload-attempt", "routes/manage/class-attendance-photo-upload-attempt.tsx"),

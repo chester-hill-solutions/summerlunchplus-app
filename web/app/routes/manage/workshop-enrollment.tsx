@@ -1,4 +1,5 @@
 import { requireAuth } from '@/lib/auth.server'
+import { createActionProfile } from '@/lib/action-profile.server'
 import { localDateTimeToUtcIso, parseOffsetMinutes } from '@/lib/datetime'
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
 import { Button } from '@/components/ui/button'
@@ -110,19 +111,37 @@ export async function loader(args: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const auth = await requireAuth(request)
+  const profile = createActionProfile({
+    name: 'workshop_enrollment_action',
+    request,
+  })
+  let intent: string | null = null
+  let outcome = 'unknown'
+  let errorMessage: string | null = null
 
-  const formData = await request.formData()
-  const intent = formData.get('intent') as string | null
+  try {
+    const auth = await requireAuth(request)
+    profile.mark('require_auth', {
+      role: auth.claims.role,
+    })
 
-  if (intent === 'update-status') {
+    const formData = await request.formData()
+    intent = formData.get('intent') as string | null
+    profile.mark('parse_form_data', {
+      intent,
+    })
+
+    if (intent === 'update-status') {
+      profile.mark('intent_update_status_start')
     if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      outcome = 'update_status_unauthorized'
       return new Response('Unauthorized', { status: 403, headers: auth.headers })
     }
 
     const enrollmentId = formData.get('enrollment_id') as string
     const status = formData.get('status') as string | null
     if (!enrollmentId || !status) {
+      outcome = 'update_status_missing_data'
       return new Response('Missing enrollment data', { status: 400, headers: auth.headers })
     }
 
@@ -131,6 +150,7 @@ export async function action({ request }: Route.ActionArgs) {
         status as Database['public']['Enums']['workshop_enrollment_status']
       )
     ) {
+      outcome = 'update_status_invalid_value'
       return new Response('Invalid status', { status: 400, headers: auth.headers })
     }
 
@@ -140,8 +160,15 @@ export async function action({ request }: Route.ActionArgs) {
       actorUserId: auth.user.id,
       scope: 'admin',
     })
+    profile.mark('update_status_transition', {
+      enrollmentId,
+      status,
+      ok: transitionResult.ok,
+      code: transitionResult.code ?? null,
+    })
 
     if (!transitionResult.ok || !transitionResult.enrollment) {
+      outcome = 'update_status_transition_error'
       return new Response(transitionResult.error ?? 'Unable to update enrollment', {
         status: transitionResult.code === 'not_found' ? 404 : 500,
         headers: auth.headers,
@@ -189,19 +216,30 @@ export async function action({ request }: Route.ActionArgs) {
              })
           })
         )
+        profile.mark('update_status_send_acceptance_emails', {
+          enrollmentId,
+          recipientCount: recipientEmails.length,
+        })
       } catch (notificationError) {
         console.error('[workshop enrollment] accepted notification failed', {
           enrollmentId,
           error: notificationError,
         })
+        profile.log('update_status_send_acceptance_emails_failed', {
+          enrollmentId,
+          error: notificationError instanceof Error ? notificationError.message : String(notificationError),
+        })
       }
     }
 
+    outcome = 'update_status_success'
     return { ok: true }
   }
 
   if (intent === 'update-family-form-answer') {
+    profile.mark('intent_update_family_form_answer_start')
     if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      outcome = 'update_family_form_answer_unauthorized'
       return new Response('Unauthorized', { status: 403, headers: auth.headers })
     }
 
@@ -210,6 +248,7 @@ export async function action({ request }: Route.ActionArgs) {
     const value = String(formData.get('value') ?? '').trim()
 
     if (!profileId || !questionCode) {
+      outcome = 'update_family_form_answer_missing_data'
       return new Response('Missing profile or question code', { status: 400, headers: auth.headers })
     }
 
@@ -219,11 +258,18 @@ export async function action({ request }: Route.ActionArgs) {
       value,
       actorUserId: auth.user.id,
     })
+    profile.mark('update_family_form_answer_upsert', {
+      profileId,
+      questionCode,
+      ok: result.ok,
+    })
 
     if (!result.ok) {
+      outcome = 'update_family_form_answer_error'
       return new Response(result.error, { status: 400, headers: auth.headers })
     }
 
+    outcome = 'update_family_form_answer_success'
     return {
       ok: true,
       intent,
@@ -235,12 +281,15 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === 'update-workshop-enrollment-modal') {
+    profile.mark('intent_update_workshop_enrollment_modal_start')
     if (!isRoleAtLeast(auth.claims.role, 'admin')) {
+      outcome = 'update_modal_unauthorized'
       return new Response('Unauthorized', { status: 403, headers: auth.headers })
     }
 
     const definition = TABLE_DEFINITIONS['class-enrollment']
     if (!definition?.editor) {
+      outcome = 'update_modal_editor_not_enabled'
       return { error: 'Editing is not enabled for workshop enrollments.' }
     }
 
@@ -249,12 +298,14 @@ export async function action({ request }: Route.ActionArgs) {
       if (fieldName === 'profile_id') continue
       const parsed = parseEnrollmentField(formData, fieldName, fieldConfig.type, fieldConfig.nullable)
       if (!parsed.valid) {
+        outcome = 'update_modal_invalid_field'
         return { error: `Invalid value for ${fieldConfig.label ?? fieldName}.` }
       }
       if (
         fieldConfig.required &&
         (parsed.value === '' || parsed.value === null || parsed.value === undefined)
       ) {
+        outcome = 'update_modal_missing_required_field'
         return { error: `${fieldConfig.label ?? fieldName} is required.` }
       }
       payload[fieldName] = parsed.value === '' ? null : parsed.value
@@ -262,6 +313,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     const statusValueRaw = String(formData.get('status_value') ?? '').trim()
     if (!statusValueRaw) {
+      outcome = 'update_modal_missing_status'
       return { error: 'Status is required.' }
     }
     if (
@@ -269,12 +321,14 @@ export async function action({ request }: Route.ActionArgs) {
         statusValueRaw as Database['public']['Enums']['workshop_enrollment_status']
       )
     ) {
+      outcome = 'update_modal_invalid_status'
       return { error: 'Invalid status.' }
     }
     payload.status = statusValueRaw
 
     const enrollmentId = String(formData.get('pk_id') ?? '')
     if (!enrollmentId) {
+      outcome = 'update_modal_missing_enrollment_id'
       return { error: 'Missing key field id.' }
     }
 
@@ -283,8 +337,13 @@ export async function action({ request }: Route.ActionArgs) {
       .from('workshop_enrollment')
       .update(payload)
       .eq('id', enrollmentId)
+    profile.mark('update_modal_update_enrollment', {
+      enrollmentId,
+      hasError: Boolean(updateError),
+    })
 
     if (updateError) {
+      outcome = 'update_modal_update_error'
       return { error: updateError.message }
     }
 
@@ -302,9 +361,11 @@ export async function action({ request }: Route.ActionArgs) {
           .maybeSingle()
 
         if (districtError) {
+          outcome = 'update_modal_district_lookup_error'
           return { error: districtError.message }
         }
         if (!districtRow?.name) {
+          outcome = 'update_modal_district_missing'
           return { error: 'Selected riding does not exist.' }
         }
       }
@@ -315,6 +376,7 @@ export async function action({ request }: Route.ActionArgs) {
         .eq('id', giftcardProfileId)
 
       if (ridingUpdateError) {
+        outcome = 'update_modal_riding_update_error'
         return { error: ridingUpdateError.message }
       }
     }
@@ -328,23 +390,28 @@ export async function action({ request }: Route.ActionArgs) {
       })
 
       if (!giftcardResult.ok) {
+        outcome = 'update_modal_giftcard_answer_error'
         return { error: giftcardResult.error }
       }
     }
 
+    outcome = 'update_modal_success'
     return { success: true }
   }
 
   if (intent !== 'insert-row' && intent !== 'update-row') {
+    outcome = 'unsupported_intent'
     return new Response('Unsupported action', { status: 400, headers: auth.headers })
   }
 
   if (!isRoleAtLeast(auth.claims.role, 'admin')) {
+    outcome = 'insert_update_unauthorized'
     return new Response('Unauthorized', { status: 403, headers: auth.headers })
   }
 
   const definition = TABLE_DEFINITIONS['class-enrollment']
   if (!definition?.editor) {
+    outcome = 'insert_update_editor_not_enabled'
     return { error: 'Editing is not enabled for workshop enrollments.' }
   }
 
@@ -352,12 +419,14 @@ export async function action({ request }: Route.ActionArgs) {
   for (const [fieldName, fieldConfig] of Object.entries(definition.editor.fields)) {
     const parsed = parseEnrollmentField(formData, fieldName, fieldConfig.type, fieldConfig.nullable)
     if (!parsed.valid) {
+      outcome = 'insert_update_invalid_field'
       return { error: `Invalid value for ${fieldConfig.label ?? fieldName}.` }
     }
     if (
       fieldConfig.required &&
       (parsed.value === '' || parsed.value === null || parsed.value === undefined)
     ) {
+      outcome = 'insert_update_missing_required_field'
       return { error: `${fieldConfig.label ?? fieldName} is required.` }
     }
     payload[fieldName] = parsed.value === '' ? null : parsed.value
@@ -369,16 +438,22 @@ export async function action({ request }: Route.ActionArgs) {
     const { error: insertError } = await supabase
       .from('workshop_enrollment')
       .insert(payload)
+    profile.mark('insert_row_execute', {
+      hasError: Boolean(insertError),
+    })
 
     if (insertError) {
+      outcome = 'insert_row_error'
       return { error: insertError.message }
     }
 
+    outcome = 'insert_row_success'
     return { success: true }
   }
 
   const enrollmentId = String(formData.get('pk_id') ?? '')
   if (!enrollmentId) {
+    outcome = 'update_row_missing_enrollment_id'
     return { error: 'Missing key field id.' }
   }
 
@@ -386,12 +461,34 @@ export async function action({ request }: Route.ActionArgs) {
     .from('workshop_enrollment')
     .update(payload)
     .eq('id', enrollmentId)
+  profile.mark('update_row_execute', {
+    enrollmentId,
+    hasError: Boolean(updateError),
+  })
 
   if (updateError) {
+    outcome = 'update_row_error'
     return { error: updateError.message }
   }
 
+  outcome = 'update_row_success'
   return { success: true }
+  } catch (error) {
+    outcome = 'exception'
+    errorMessage = error instanceof Error ? error.message : String(error)
+    profile.log('workshop_enrollment_action_error', {
+      intent,
+      outcome,
+      error: errorMessage,
+    })
+    throw error
+  } finally {
+    profile.complete({
+      intent,
+      outcome,
+      error: errorMessage,
+    })
+  }
 }
 
 export default function WorkshopEnrollmentPage() {

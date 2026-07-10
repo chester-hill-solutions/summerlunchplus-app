@@ -104,6 +104,17 @@ type FamilyContextEnrichmentResponse = {
   byProfileId: Record<string, FamilyContextEnrichment>
 }
 
+type ClassAttendanceEnrichment = {
+  latest_geo: string
+  giftcard_display: string
+} & FamilyContextEnrichment
+
+type ClassAttendanceEnrichmentResponse = {
+  byProfileId: Record<string, ClassAttendanceEnrichment>
+}
+
+type ProfileEnrichment = Partial<WorkshopEnrollmentEnrichment & ClassAttendanceEnrichment>
+
 type FederalDistrictCounts = {
   total: number
   accepted: number
@@ -211,8 +222,16 @@ const WORKSHOP_FILTER_ENRICHMENT_COLUMNS = new Set([
   ...Array.from(WORKSHOP_ENRICHMENT_COLUMNS),
   ...Array.from(FAMILY_CONTEXT_COLUMNS),
 ])
+const CLASS_ATTENDANCE_ENRICHMENT_COLUMNS = new Set([
+  'latest_geo',
+  'giftcard_display',
+])
+const CLASS_ATTENDANCE_FILTER_ENRICHMENT_COLUMNS = new Set([
+  ...Array.from(CLASS_ATTENDANCE_ENRICHMENT_COLUMNS),
+  ...Array.from(FAMILY_CONTEXT_COLUMNS),
+])
 
-const hasHydratedFamilyContext = (enrichment?: WorkshopEnrollmentEnrichment) =>
+const hasHydratedFamilyContext = (enrichment?: ProfileEnrichment) =>
   Boolean(
     enrichment?.profile_hover_name ||
       enrichment?.profile_hover_parent_name ||
@@ -756,7 +775,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [createValues, setCreateValues] = useState<Record<string, string>>({})
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Record<string, string>>({})
-  const [enrichmentByProfileId, setEnrichmentByProfileId] = useState<Record<string, WorkshopEnrollmentEnrichment>>({})
+  const [enrichmentByProfileId, setEnrichmentByProfileId] = useState<Record<string, ProfileEnrichment>>({})
   const [districtCountsByRiding, setDistrictCountsByRiding] = useState<Record<string, FederalDistrictCounts>>({})
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [columnMinWidths, setColumnMinWidths] = useState<Record<string, number>>({})
@@ -1309,9 +1328,18 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
       let mergedEnrichmentByProfileId = enrichmentByProfileId
       if (
-        isWorkshopEnrollmentTable &&
-        (WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn) || FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))
+        (isWorkshopEnrollmentTable &&
+          (WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn) || FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))) ||
+        (isClassAttendance &&
+          (CLASS_ATTENDANCE_ENRICHMENT_COLUMNS.has(openFilterColumn) || FAMILY_CONTEXT_COLUMNS.has(openFilterColumn)))
       ) {
+        const shouldLoadWorkshopValues = isWorkshopEnrollmentTable && WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn)
+        const shouldLoadClassAttendanceValues =
+          isClassAttendance &&
+          (CLASS_ATTENDANCE_ENRICHMENT_COLUMNS.has(openFilterColumn) || FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))
+        const shouldLoadFamilyContext =
+          isWorkshopEnrollmentTable && FAMILY_CONTEXT_COLUMNS.has(openFilterColumn)
+
         const allProfileIds = Array.from(
           new Set(
             rows
@@ -1321,14 +1349,14 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         )
 
         if (allProfileIds.length) {
-          const fetchedByProfileId: Record<string, WorkshopEnrollmentEnrichment> = {}
+          const fetchedByProfileId: Record<string, ProfileEnrichment> = {}
           for (let i = 0; i < allProfileIds.length; i += 40) {
             const requestProfileIds = allProfileIds.slice(i, i + 40)
             const query = new URLSearchParams()
             requestProfileIds.forEach(profileId => query.append('profileId', profileId))
 
-            const [workshopPayload, familyPayload] = await Promise.all([
-              WORKSHOP_ENRICHMENT_COLUMNS.has(openFilterColumn)
+            const [workshopPayload, classAttendancePayload, familyPayload] = await Promise.all([
+              shouldLoadWorkshopValues
                 ? fetch(`/manage/workshop-enrollment/enrichment?${query.toString()}`)
                     .then(async response =>
                       response.ok
@@ -1336,7 +1364,15 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                         : ({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse)
                     )
                 : Promise.resolve({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse),
-              FAMILY_CONTEXT_COLUMNS.has(openFilterColumn)
+              shouldLoadClassAttendanceValues
+                ? fetch(`/manage/class-attendance/enrichment?${query.toString()}`)
+                    .then(async response =>
+                      response.ok
+                        ? ((await response.json()) as ClassAttendanceEnrichmentResponse)
+                        : ({ byProfileId: {} } as ClassAttendanceEnrichmentResponse)
+                    )
+                : Promise.resolve({ byProfileId: {} } as ClassAttendanceEnrichmentResponse),
+              shouldLoadFamilyContext
                 ? fetch(`/manage/family-context/enrichment?${query.toString()}`)
                     .then(async response =>
                       response.ok
@@ -1346,11 +1382,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                 : Promise.resolve({ byProfileId: {} } as FamilyContextEnrichmentResponse),
             ])
 
-            const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
+            const fallbackEnrichment: ProfileEnrichment = {
               riding_display: 'Not looked up',
               geo_locations_display: 'N/A',
               giftcard_display: 'N/A',
               prior_participation_display: 'N/A',
+              latest_geo: 'N/A',
               profile_hover_top_discrepancy: '',
               profile_hover_more_discrepancies: '',
               profile_hover_name: '',
@@ -1369,6 +1406,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
               fetchedByProfileId[profileId] = {
                 ...fallbackEnrichment,
                 ...(workshopPayload?.byProfileId?.[profileId] ?? {}),
+                ...(classAttendancePayload?.byProfileId?.[profileId] ?? {}),
                 ...(familyPayload?.byProfileId?.[profileId] ?? {}),
               }
             })
@@ -1389,7 +1427,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       }
 
       const rowsWithFullEnrichment = rows.map(row => {
-        if (!isWorkshopEnrollmentTable) return row
+        if (!isWorkshopEnrollmentTable && !isClassAttendance) return row
         const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
         if (!profileId) return row
         const enrichment = mergedEnrichmentByProfileId[profileId]
@@ -1437,7 +1475,17 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         filterActiveRequestRef.current.delete(openFilterCacheKey)
       }
     }
-  }, [columns, filters, openFilterCacheKey, openFilterColumn, rowsWithEnrichment, serverSideQuery, tableName])
+  }, [
+    columns,
+    filters,
+    isClassAttendance,
+    isWorkshopEnrollmentTable,
+    openFilterCacheKey,
+    openFilterColumn,
+    rowsWithEnrichment,
+    serverSideQuery,
+    tableName,
+  ])
 
   const derivedRows = useMemo(() => {
     let adjustedRows = serverSideQuery
@@ -1459,8 +1507,15 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
   const effectivePage = Math.min(page, totalPages)
   const hasActiveEnrichmentBackedFilters = useMemo(
-    () => Object.keys(filters).some(column => WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column)),
-    [filters]
+    () =>
+      Object.keys(filters).some(column =>
+        isWorkshopEnrollmentTable
+          ? WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column)
+          : isClassAttendance
+            ? CLASS_ATTENDANCE_FILTER_ENRICHMENT_COLUMNS.has(column)
+            : false
+      ),
+    [filters, isClassAttendance, isWorkshopEnrollmentTable]
   )
   const hasActiveFamilyContextFilters = useMemo(
     () => Object.keys(filters).some(column => FAMILY_CONTEXT_COLUMNS.has(column)),
@@ -1469,7 +1524,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const baseFiltersForEnrichmentFetch = useMemo(() => {
     const next: Record<string, string[]> = {}
     for (const [column, values] of Object.entries(filters)) {
-      if (WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column)) continue
+      if (
+        WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column) ||
+        CLASS_ATTENDANCE_FILTER_ENRICHMENT_COLUMNS.has(column)
+      ) {
+        continue
+      }
       next[column] = values
     }
     return next
@@ -1488,13 +1548,17 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   }, [serverSideQuery, derivedRows, effectivePage, pageSize])
 
   useEffect(() => {
-    if (!isWorkshopEnrollmentTable) return
+    if (!isWorkshopEnrollmentTable && !isClassAttendance) return
 
-    const shouldLoadWorkshopValues = columns.some(column => WORKSHOP_ENRICHMENT_COLUMNS.has(column))
-    const shouldLoadFamilyContext =
-      hasActiveFamilyContextFilters || Boolean(openFilterColumn && FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))
+    const shouldLoadWorkshopValues =
+      isWorkshopEnrollmentTable && columns.some(column => WORKSHOP_ENRICHMENT_COLUMNS.has(column))
+    const shouldLoadClassAttendanceValues =
+      isClassAttendance && columns.some(column => CLASS_ATTENDANCE_ENRICHMENT_COLUMNS.has(column))
+    const shouldLoadFamilyContext = hasActiveFamilyContextFilters || Boolean(openFilterColumn && FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))
+    const shouldLoadWorkshopFamilyContext = isWorkshopEnrollmentTable && shouldLoadFamilyContext
+    const shouldLoadClassAttendancePayload = isClassAttendance && (shouldLoadClassAttendanceValues || shouldLoadFamilyContext)
 
-    if (!shouldLoadWorkshopValues && !shouldLoadFamilyContext) return
+    if (!shouldLoadWorkshopValues && !shouldLoadClassAttendancePayload && !shouldLoadWorkshopFamilyContext) return
 
     const enrichmentSeedRows = hasActiveEnrichmentBackedFilters
       ? rows.filter(row => rowMatchesFilters(row, baseFiltersForEnrichmentFetch))
@@ -1526,7 +1590,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       try {
         const searchParams = new URLSearchParams()
         requestProfileIds.forEach(profileId => searchParams.append('profileId', profileId))
-        const [payload, familyPayload] = await Promise.all([
+        const [workshopPayload, classAttendancePayload, familyPayload] = await Promise.all([
           shouldLoadWorkshopValues
             ? fetch(`/manage/workshop-enrollment/enrichment?${searchParams.toString()}`, {
                 signal: abortController.signal,
@@ -1536,7 +1600,16 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
                   : ({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse)
               )
             : Promise.resolve({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse),
-          shouldLoadFamilyContext
+          shouldLoadClassAttendancePayload
+            ? fetch(`/manage/class-attendance/enrichment?${searchParams.toString()}`, {
+                signal: abortController.signal,
+              }).then(async response =>
+                response.ok
+                  ? ((await response.json()) as ClassAttendanceEnrichmentResponse)
+                  : ({ byProfileId: {} } as ClassAttendanceEnrichmentResponse)
+              )
+            : Promise.resolve({ byProfileId: {} } as ClassAttendanceEnrichmentResponse),
+          shouldLoadWorkshopFamilyContext
             ? fetch(`/manage/family-context/enrichment?${searchParams.toString()}`, {
                 signal: abortController.signal,
               }).then(async response =>
@@ -1546,11 +1619,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
               )
             : Promise.resolve({ byProfileId: {} } as FamilyContextEnrichmentResponse),
         ])
-        const fallbackEnrichment: WorkshopEnrollmentEnrichment = {
+        const fallbackEnrichment: ProfileEnrichment = {
           riding_display: 'Not looked up',
           geo_locations_display: 'N/A',
           giftcard_display: 'N/A',
           prior_participation_display: 'N/A',
+          latest_geo: 'N/A',
           profile_hover_top_discrepancy: '',
           profile_hover_more_discrepancies: '',
           profile_hover_name: '',
@@ -1565,11 +1639,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           profile_hover_parent_address: '',
         }
 
-        const resolvedByProfileId = requestProfileIds.reduce<Record<string, WorkshopEnrollmentEnrichment>>(
+        const resolvedByProfileId = requestProfileIds.reduce<Record<string, ProfileEnrichment>>(
           (acc, profileId) => {
             acc[profileId] = {
               ...fallbackEnrichment,
-              ...(payload?.byProfileId?.[profileId] ?? {}),
+              ...(workshopPayload?.byProfileId?.[profileId] ?? {}),
+              ...(classAttendancePayload?.byProfileId?.[profileId] ?? {}),
               ...(familyPayload?.byProfileId?.[profileId] ?? {}),
             }
             return acc
@@ -1582,10 +1657,11 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           ...resolvedByProfileId,
         }))
         if (debugPerf) {
-          console.info('[table-display] workshop row enrichment loaded', {
+          console.info('[table-display] row enrichment loaded', {
             requestedProfiles: requestProfileIds.length,
             workshopValues: shouldLoadWorkshopValues,
-            familyContext: shouldLoadFamilyContext,
+            classAttendanceValues: shouldLoadClassAttendancePayload,
+            familyContext: shouldLoadWorkshopFamilyContext,
             ms: Date.now() - startedAt,
           })
         }
@@ -1607,6 +1683,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     enrichmentByProfileId,
     hasActiveFamilyContextFilters,
     hasActiveEnrichmentBackedFilters,
+    isClassAttendance,
     isWorkshopEnrollmentTable,
     openFilterColumn,
     paginatedRows,
