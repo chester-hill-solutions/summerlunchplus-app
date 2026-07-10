@@ -3,7 +3,7 @@ import { createActionProfile } from '@/lib/action-profile.server'
 import { localDateTimeToUtcIso, parseOffsetMinutes } from '@/lib/datetime'
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
 import { Button } from '@/components/ui/button'
-import { Form, useLocation } from 'react-router'
+import { Form, useLoaderData, useLocation } from 'react-router'
 import { resolveFamilyContactsByProfileId } from '@/lib/family.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { Constants, type Database } from '@/lib/database.types'
@@ -15,7 +15,7 @@ import { TABLE_DEFINITIONS } from './table-definitions'
 import { Download } from 'lucide-react'
 
 import type { Route } from './+types/workshop-enrollment'
-import TableDisplay from './table-display'
+import DeferredTableDisplay from './deferred-table-display'
 import { EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV } from '@/lib/exports/types'
 import { transitionWorkshopEnrollmentStatus } from '@/lib/workshop-enrollment-status.server'
 import {
@@ -56,6 +56,48 @@ export async function loader(args: Route.LoaderArgs) {
     name: 'workshop_enrollment_loader',
     request: args.request,
   })
+
+  const url = new URL(args.request.url)
+  const deferTable = url.searchParams.get('_deferTable') === '1'
+  profile.mark('defer_table_mode', {
+    deferTable,
+  })
+
+  if (!deferTable) {
+    const auth = await requireAuth(args.request)
+    const shell = {
+      label: 'Workshop Enrollments',
+      tableName: 'class-enrollment',
+      columns: [
+        'workshop_description',
+        'status',
+        'profile_display',
+        'enrolled_capacity',
+        'riding_display',
+        'geo_locations_display',
+        'giftcard_display',
+        'prior_participation_display',
+      ],
+      rows: [] as Record<string, unknown>[],
+      columnMeta: {
+        workshop_description: { label: 'Workshop', filterable: true, fitContentOnLoad: true },
+        status: { label: 'Status', filterable: true, fitContentOnLoad: true },
+        profile_display: { label: 'Profile', filterable: true, fitContentOnLoad: true },
+        enrolled_capacity: { label: 'enrolled', filterable: true },
+        riding_display: { label: 'riding', filterable: true },
+        geo_locations_display: { label: 'geo locations', filterable: true, fitContentOnLoad: true },
+        giftcard_display: { label: 'giftcard', filterable: true },
+        prior_participation_display: { label: 'been before?', filterable: true },
+      },
+      canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
+    }
+
+    profile.complete({
+      deferredShell: true,
+      columnCount: shell.columns.length,
+    })
+    return shell
+  }
 
   const base = await loadWorkshopEnrollmentData(args.request)
   profile.mark('load_workshop_enrollment_data', {
@@ -492,11 +534,14 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function WorkshopEnrollmentPage() {
+  const data = useLoaderData<typeof loader>()
   const location = useLocation()
   const sourcePath = `/manage/workshop-enrollment${location.search}`
 
   return (
-    <TableDisplay
+    <DeferredTableDisplay
+      dataPath="/manage/workshop-enrollment/table-data"
+      fallbackData={data}
       paginationActions={
         <Form method="post" action="/manage/exports" className="flex items-center gap-2">
           <input type="hidden" name="intent" value="create-export" />
