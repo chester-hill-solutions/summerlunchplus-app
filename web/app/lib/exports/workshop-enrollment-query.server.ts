@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from 'react-router'
 
 import { requireAuth } from '@/lib/auth.server'
 import { concernBandForScore, concernBandForSignals, concernRowClass, scoreConcernSignals } from '@/lib/concern-scoring'
+import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createTableLoader } from '@/routes/manage/table-loader'
@@ -9,13 +10,26 @@ import { createTableLoader } from '@/routes/manage/table-loader'
 const baseLoader = createTableLoader('class-enrollment')
 
 export async function loadWorkshopEnrollmentData(request: Request) {
+  const profile = createLoaderProfile({
+    name: 'workshop_enrollment_data_loader',
+    request,
+  })
+
   const auth = await requireAuth(request)
+  profile.mark('require_auth', {
+    role: auth.claims.role,
+  })
+
   const canManageEnrollments = isRoleAtLeast(auth.claims.role, 'admin')
 
   const base = await baseLoader(
     { request } as LoaderFunctionArgs,
     { includeForeignKeyOptions: canManageEnrollments }
   )
+  profile.mark('base_table_loader', {
+    rowCount: base.rows.length,
+    serverSideQuery: Boolean(base.serverSideQuery),
+  })
 
   const rows = (base.rows ?? []) as Array<Record<string, unknown>>
   const workshopIds = Array.from(
@@ -52,6 +66,10 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       }, new Map<string, number>())
     }
   }
+  profile.mark('fetch_workshop_capacities', {
+    workshopIds: workshopIds.length,
+    workshopCapacityRows: workshopCapacityById.size,
+  })
 
   let openSignalsByProfileId = new Map<string, Array<{ signal_type: string; severity: string; summary: string }>>()
 
@@ -78,6 +96,10 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       )
     }
   }
+  profile.mark('fetch_open_suspicious_signals', {
+    profileIds: profileIds.length,
+    mappedSignalProfiles: openSignalsByProfileId.size,
+  })
 
   const enrichedRows: Array<Record<string, unknown>> = rows.map(row => {
     const workshopId = typeof row.workshop_id === 'string' ? row.workshop_id : ''
@@ -139,6 +161,9 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       _row_concern_band: concernBand,
       _row_signal_summary: `Concern ${concernScore} (${concernBand}) · ${countLabel}: ${primarySignal.summary}`,
     }
+  })
+  profile.mark('enrich_rows', {
+    enrichedRowCount: enrichedRows.length,
   })
 
   let columns = base.columns.includes('enrolled_capacity')
@@ -220,6 +245,9 @@ export async function loadWorkshopEnrollmentData(request: Request) {
       ...columnsWithoutStatus.slice(insertAt),
     ]
   }
+  profile.mark('finalize_columns', {
+    columnCount: columns.length,
+  })
 
   const baseColumnMeta = (base.columnMeta ?? {}) as Record<
     string,
@@ -236,7 +264,7 @@ export async function loadWorkshopEnrollmentData(request: Request) {
     }
   >
 
-  return {
+  const result = {
     ...base,
     columns,
     rows: enrichedRows,
@@ -299,4 +327,12 @@ export async function loadWorkshopEnrollmentData(request: Request) {
     editorConfig: canManageEnrollments ? base.editorConfig : undefined,
     foreignKeyOptions: canManageEnrollments ? base.foreignKeyOptions : undefined,
   }
+
+  profile.complete({
+    rowCount: result.rows.length,
+    profileIdCount: profileIds.length,
+    workshopIdCount: workshopIds.length,
+  })
+
+  return result
 }
