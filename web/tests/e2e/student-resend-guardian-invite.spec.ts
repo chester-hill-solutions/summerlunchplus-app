@@ -278,7 +278,7 @@ test.describe.serial('student resend guardian invite', () => {
 
     await expect(page).toHaveURL(/\/auth\/waiting-on-guardian/)
 
-    await page.getByRole('button', { name: 'Resend invite' }).first().click()
+    await page.getByRole('button', { name: /Save \+ resend|Resend invite/ }).first().click()
     await expect(page.getByText(`Invite resent to ${guardianEmail}`)).toBeVisible()
 
     const inviteLink = await generateInviteLinkForEmail({

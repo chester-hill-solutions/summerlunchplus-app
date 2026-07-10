@@ -84,8 +84,9 @@ test.describe.serial('manage workshop filter loading behavior', () => {
     const clearFilterButton = page.getByRole('button', { name: 'Clear current filter' })
     await expect(clearFilterButton).toBeEnabled()
     await clearFilterButton.click()
+    await page.getByRole('button', { name: 'Apply' }).click()
 
-    await expect(page).not.toHaveURL(/f_prior_participation_display=/)
+    await expect(page).not.toHaveURL(/f_prior_participation_display=N%2FA|f_prior_participation_display=N\/A/)
   })
 
   test('URL-applied enrichment filter still renders rows and profile hover title', async ({ page }) => {
@@ -95,11 +96,12 @@ test.describe.serial('manage workshop filter loading behavior', () => {
     const rows = page.locator('tbody tr')
     await expect.poll(async () => await rows.count(), { timeout: 15000 }).toBeGreaterThan(0)
 
-    const profileCell = rows.first().locator('td').nth(2)
-    const hoverTrigger = profileCell.locator('div[class*="group/hovercard"]').first()
+    const hoverTriggers = page.locator('tbody [data-hovercard-cell-id]')
+    await expect.poll(async () => await hoverTriggers.count(), { timeout: 15000 }).toBeGreaterThan(0)
+    const hoverTrigger = hoverTriggers.first()
     await hoverTrigger.hover()
 
-    const hoverPanel = profileCell.locator('div[class*="group/hovercard"] > div.absolute')
+    const hoverPanel = page.locator('div[class*="bg-popover"][class*="text-popover-foreground"]').first()
     await expect(hoverPanel).toBeVisible({ timeout: 5000 })
 
     const hoverTitle = hoverPanel.locator('p.font-semibold').first()

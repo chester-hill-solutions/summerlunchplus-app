@@ -15,7 +15,7 @@ values (
   '2026-06-29 04:00:00+00',
   '2026-08-21 03:59:00+00',
   '2026-05-15 04:00:00+00',
-  '2026-07-30 03:59:00+00',
+  '2027-07-30 03:59:00+00',
   '26 Summer',
   null
 )
@@ -26,3 +26,8 @@ set starts_at = excluded.starts_at,
     enrollment_close_at = excluded.enrollment_close_at,
     name = excluded.name,
     description = excluded.description;
+
+update public.workshop
+set enrollment_open_at = '2026-05-15 04:00:00+00',
+    enrollment_close_at = '2027-07-30 03:59:00+00'
+where semester_id = '95b4cdf4-01fa-4c33-9863-506d4f6e91c2';
