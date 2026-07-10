@@ -57,6 +57,7 @@ export default [
     route("workshop", "routes/manage/workshop.tsx"),
     route("workshop/setup", "routes/manage/workshop.setup.tsx"),
     route("class", "routes/manage/class.tsx"),
+    route("class/table-data", "routes/manage/class.table-data.ts"),
     route("class-attendance", "routes/manage/class-attendance.tsx"),
     route("class-attendance/table-data", "routes/manage/class-attendance.table-data.ts"),
     route("class-attendance/enrichment", "routes/manage/class-attendance.enrichment.ts"),

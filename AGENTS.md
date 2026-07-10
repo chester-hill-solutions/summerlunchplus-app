@@ -14,8 +14,9 @@
 - `createClient` in `web/app/lib/supabase/server.ts` returns `{ supabase, headers }`; pass `headers` through redirects/responses or auth cookies are lost.
 
 ## Manage table patterns
-- For heavy manage pages, keep the deferred pattern: lightweight page loader + client `fetcher.load()` data request (`web/app/routes/manage/deferred-table-display.tsx`).
-- For full-dataset filter UIs (for example `email-message`), use `_deferTable=1`, clear `page`/`pageSize`, and force `sort=__full_scan__`.
+- Default all manage tables to server-side query behavior so filter options stay correct across pagination/sorting states.
+- Default all manage pages to the deferred table pattern: lightweight shell loader + `DeferredTableDisplay` + route-level `table-data` loader that sets `_deferTable=1`.
+- For full-dataset filter UIs (for example `email-message`), in the deferred table-data request clear `page`/`pageSize` and force `sort=__full_scan__`.
 - Supabase API row cap is `1000` (`supabase/config.toml`); batch large related reads with stable ordered `.range(...)` loops instead of one large `.in(...)` fetch.
 
 ## Local setup and verification

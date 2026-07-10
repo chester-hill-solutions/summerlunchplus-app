@@ -1,4 +1,4 @@
-import { Form, useActionData, useNavigation } from 'react-router'
+import { Form, useActionData, useLoaderData, useNavigation } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
@@ -6,7 +6,7 @@ import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
 import { runZoomJobs, runZoomJobsForClass } from '@/lib/zoom-jobs/runner.server'
 import type { Route } from './+types/class'
-import TableDisplay from './table-display'
+import DeferredTableDisplay from './deferred-table-display'
 import { createTableAction } from './table-actions.server'
 import { createTableLoader } from './table-loader'
 
@@ -28,6 +28,36 @@ type ClassRow = Record<string, unknown> & {
 }
 
 export async function loader(args: Route.LoaderArgs) {
+  const url = new URL(args.request.url)
+  const deferTable = url.searchParams.get('_deferTable') === '1'
+
+  if (!deferTable) {
+    await requireAuth(args.request)
+    return {
+      label: 'Classes',
+      tableName: 'class',
+      columns: [
+        'workshop_description',
+        'starts_at',
+        'step_meeting',
+        'step_registrants',
+        'step_attendance_rows',
+        'step_reminder',
+        'step_attendance',
+      ],
+      rows: [] as Record<string, unknown>[],
+      columnMeta: {
+        workshop_description: { label: 'Workshop', filterable: true, fitContentOnLoad: true },
+        starts_at: { label: 'Timestamp', filterable: true, fitContentOnLoad: true },
+        step_meeting: { label: 'Step 1: Meeting', filterable: true },
+        step_registrants: { label: 'Step 2: Zoom Registrants', filterable: true },
+        step_attendance_rows: { label: 'Step 3: Attendance Rows', filterable: true },
+        step_reminder: { label: 'Step 4: Reminder', filterable: true },
+        step_attendance: { label: 'Step 5: Attendance Sync', filterable: true },
+      },
+    }
+  }
+
   const base = await baseLoader(args)
   const rows = (base.rows ?? []) as ClassRow[]
 
@@ -355,6 +385,7 @@ export async function action(args: Route.ActionArgs) {
 }
 
 export default function ClassTablePage() {
+  const data = useLoaderData<typeof loader>()
   const actionData = useActionData<ActionData>()
   const navigation = useNavigation()
   const isRunningZoomJobs =
@@ -362,7 +393,9 @@ export default function ClassTablePage() {
     navigation.formData?.get('intent') === 'run-zoom-jobs'
 
   return (
-    <TableDisplay
+    <DeferredTableDisplay
+      dataPath="/manage/class/table-data"
+      fallbackData={data}
       headerActions={
         <div className="flex items-center gap-3">
           <Form method="post">
