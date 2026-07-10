@@ -51,16 +51,30 @@ export default function DeferredTableDisplay({
     tableName: fallbackData.tableName,
   }
 
+  const rowLoadingMessage =
+    fetcher.state !== 'idle'
+      ? fetcher.data || lastResolvedDataRef.current
+        ? 'Refreshing table rows...'
+        : 'Loading table rows...'
+      : null
+
+  const mergedPaginationActions =
+    rowLoadingMessage || paginationActions ? (
+      <div className="flex items-center gap-2">
+        {rowLoadingMessage ? (
+          <span className="rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
+            {rowLoadingMessage}
+          </span>
+        ) : null}
+        {paginationActions}
+      </div>
+    ) : undefined
+
   return (
-    <div className="space-y-2">
-      {fetcher.state !== 'idle' ? (
-        <div className="rounded border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-          {fetcher.data || lastResolvedDataRef.current
-            ? `Refreshing ${fallbackData.label.toLowerCase()}...`
-            : `Loading ${fallbackData.label.toLowerCase()}...`}
-        </div>
-      ) : null}
-      <TableDisplay headerActions={headerActions} paginationActions={paginationActions} data={data} />
-    </div>
+    <TableDisplay
+      headerActions={headerActions}
+      paginationActions={mergedPaginationActions}
+      data={data}
+    />
   )
 }
