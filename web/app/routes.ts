@@ -94,6 +94,7 @@ export default [
     route("email-drafts/:draftId", "routes/manage/email-drafts.$draftId.tsx"),
     route("form-answer", "routes/manage/form-answer.tsx"),
     route("gift-cards", "routes/manage/gift-cards.tsx"),
+    route("gift-cards/table-data", "routes/manage/gift-cards.table-data.ts"),
     route("gift-cards/upload", "routes/manage/gift-cards.upload.tsx"),
     route("role-permission", "routes/manage/role-permission.tsx"),
     route("user-roles", "routes/manage/user-roles.tsx"),

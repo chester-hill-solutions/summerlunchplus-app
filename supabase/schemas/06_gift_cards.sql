@@ -122,6 +122,7 @@ create table public.gift_card_inventory_alert_state (
 
 create index gift_card_asset_upload_id_idx on public.gift_card_asset(upload_id);
 create index gift_card_asset_status_idx on public.gift_card_asset(status);
+create index gift_card_asset_provider_status_idx on public.gift_card_asset(provider, status);
 create index gift_card_upload_status_idx on public.gift_card_upload(status);
 create index gift_card_allocation_status_idx on public.gift_card_allocation(status);
 create index gift_card_allocation_class_profile_idx on public.gift_card_allocation(class_id, profile_id);

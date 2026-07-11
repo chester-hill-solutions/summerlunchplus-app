@@ -1,13 +1,11 @@
-import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
-
-import { scanByIdKeyset } from '@/lib/supabase/keyset-pagination.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 
 export type GiftCardProvider = 'PC' | 'Sobeys'
 
 type GiftCardAssetStatus = 'available' | 'allocated' | 'sent' | 'opened' | 'used' | 'invalid'
 
-const PAGE_SIZE = 500
+const IN_CLAUSE_BATCH_SIZE = 200
+const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
 const PROVIDERS: GiftCardProvider[] = ['PC', 'Sobeys']
 const ASSET_STATUS_ORDER: GiftCardAssetStatus[] = ['available', 'allocated', 'sent', 'opened', 'used', 'invalid']
 
@@ -27,8 +25,6 @@ export const parseGiftCardProviderFromDisplay = (value: string | null | undefine
   if (normalized.includes('pc') || normalized.includes('president')) return 'PC'
   return 'PC'
 }
-
-const allocationPairKey = (classId: string, profileId: string) => `${classId}::${profileId}`
 
 export const resolveGiftCardLowThresholds = () => ({
   PC: parseNonNegativeIntEnv('GIFT_CARD_LOW_THRESHOLD_PC', 0),
@@ -83,89 +79,17 @@ export const loadGiftCardInventorySnapshot = async (): Promise<GiftCardInventory
     Sobeys: emptyStatusCounts(),
   }
 
-  await scanByIdKeyset<{ id: string; provider: GiftCardProvider; status: GiftCardAssetStatus }>({
-    batchSize: PAGE_SIZE,
-    fetchPage: async afterId => {
-      const query = adminClient
-        .from('gift_card_asset')
-        .select('id, provider, status')
-        .order('id', { ascending: true })
-        .limit(PAGE_SIZE)
-
-      const { data, error } = afterId ? await query.gt('id', afterId) : await query
-      if (error) {
-        throw new Error(`Failed to load gift-card inventory rows: ${error.message}`)
-      }
-
-      return (data ?? []) as Array<{ id: string; provider: GiftCardProvider; status: GiftCardAssetStatus }>
-    },
-    onPage: rows => {
-      for (const row of rows) {
-        const provider = row.provider === 'Sobeys' ? 'Sobeys' : 'PC'
-        const status = ASSET_STATUS_ORDER.includes(row.status) ? row.status : 'invalid'
-        statusByProvider[provider][status] += 1
-      }
-    },
-  })
-
-  const candidatePairs = new Set<string>()
-  const nearTermPairs: Array<{ classId: string; profileId: string }> = []
-
-  await scanByIdKeyset<{ id: string; class_id: string; profile_id: string }>({
-    batchSize: PAGE_SIZE,
-    fetchPage: async afterId => {
-      const query = adminClient
-        .from('class_attendance')
-        .select('id, class_id, profile_id')
-        .eq('gift_card_blocked', false)
-        .or('camera_on.eq.true,photo_status.eq.accepted,photo_status.eq.uploaded')
-        .order('id', { ascending: true })
-        .limit(PAGE_SIZE)
-
-      const { data, error } = afterId ? await query.gt('id', afterId) : await query
-      if (error) {
-        throw new Error(`Failed to load near-term demand attendance rows: ${error.message}`)
-      }
-
-      return (data ?? []) as Array<{ id: string; class_id: string; profile_id: string }>
-    },
-    onPage: rows => {
-      for (const row of rows) {
-        const key = allocationPairKey(row.class_id, row.profile_id)
-        if (!candidatePairs.has(key)) {
-          candidatePairs.add(key)
-          nearTermPairs.push({ classId: row.class_id, profileId: row.profile_id })
-        }
-      }
-    },
-  })
-
-  if (candidatePairs.size) {
-    await scanByIdKeyset<{ id: string; class_id: string; profile_id: string }>({
-      batchSize: PAGE_SIZE,
-      fetchPage: async afterId => {
-        const query = adminClient
-          .from('gift_card_allocation')
-          .select('id, class_id, profile_id')
-          .order('id', { ascending: true })
-          .limit(PAGE_SIZE)
-
-        const { data, error } = afterId ? await query.gt('id', afterId) : await query
-        if (error) {
-          throw new Error(`Failed to load allocations for near-term demand: ${error.message}`)
-        }
-
-        return (data ?? []) as Array<{ id: string; class_id: string; profile_id: string }>
-      },
-      onPage: rows => {
-        for (const row of rows) {
-          candidatePairs.delete(allocationPairKey(row.class_id, row.profile_id))
-        }
-      },
-    })
+  const statusCountTasks: Array<Promise<void>> = []
+  for (const provider of PROVIDERS) {
+    for (const status of ASSET_STATUS_ORDER) {
+      statusCountTasks.push(
+        countGiftCardAssets({ provider, status }).then(count => {
+          statusByProvider[provider][status] = count
+        })
+      )
+    }
   }
-
-  const unresolvedNearTermPairs = nearTermPairs.filter(pair => candidatePairs.has(allocationPairKey(pair.classId, pair.profileId)))
+  await Promise.all(statusCountTasks)
 
   const now = new Date()
   const horizonEnd = new Date(now)
@@ -173,84 +97,33 @@ export const loadGiftCardInventorySnapshot = async (): Promise<GiftCardInventory
   const nowIso = now.toISOString()
   const horizonEndIso = horizonEnd.toISOString()
 
-  const upcomingWorkshopIds = new Set<string>()
-  await scanByIdKeyset<{ id: string; workshop_id: string | null }>({
-    batchSize: PAGE_SIZE,
-    fetchPage: async afterId => {
-      const query = adminClient
-        .from('class')
-        .select('id, workshop_id')
-        .gte('starts_at', nowIso)
-        .lte('starts_at', horizonEndIso)
-        .order('id', { ascending: true })
-        .limit(PAGE_SIZE)
+  const { data: classRows, error: classError } = await adminClient
+    .from('class')
+    .select('workshop_id')
+    .gte('starts_at', nowIso)
+    .lte('starts_at', horizonEndIso)
 
-      const { data, error } = afterId ? await query.gt('id', afterId) : await query
-      if (error) {
-        throw new Error(`Failed to load upcoming classes for demand projection: ${error.message}`)
-      }
-
-      return (data ?? []) as Array<{ id: string; workshop_id: string | null }>
-    },
-    onPage: rows => {
-      for (const row of rows) {
-        if (row.workshop_id) {
-          upcomingWorkshopIds.add(row.workshop_id)
-        }
-      }
-    },
-  })
-
-  const upcomingApprovedProfiles = new Set<string>()
-  const workshopIdList = Array.from(upcomingWorkshopIds)
-  for (const workshopIdChunk of chunkArray(workshopIdList, 200)) {
-    if (!workshopIdChunk.length) continue
-
-    await scanByIdKeyset<{ id: string; profile_id: string | null }>({
-      batchSize: PAGE_SIZE,
-      fetchPage: async afterId => {
-        const query = adminClient
-          .from('workshop_enrollment')
-          .select('id, profile_id')
-          .in('workshop_id', workshopIdChunk)
-          .eq('status', 'approved')
-          .order('id', { ascending: true })
-          .limit(PAGE_SIZE)
-
-        const { data, error } = afterId ? await query.gt('id', afterId) : await query
-        if (error) {
-          throw new Error(`Failed to load upcoming approved enrollments: ${error.message}`)
-        }
-
-        return (data ?? []) as Array<{ id: string; profile_id: string | null }>
-      },
-      onPage: rows => {
-        for (const row of rows) {
-          if (row.profile_id) {
-            upcomingApprovedProfiles.add(row.profile_id)
-          }
-        }
-      },
-    })
+  if (classError) {
+    throw new Error(`Failed to load class demand windows: ${classError.message}`)
   }
 
-  const nearTermProfileIds = new Set(unresolvedNearTermPairs.map(pair => pair.profileId))
-  const upcomingProfileIds = Array.from(upcomingApprovedProfiles).filter(profileId => !nearTermProfileIds.has(profileId))
-  const profileIdsForProviderLookup = Array.from(new Set([...nearTermProfileIds, ...upcomingProfileIds]))
-  const enrichmentByProfileId = profileIdsForProviderLookup.length
-    ? await loadWorkshopEnrollmentEnrichment(profileIdsForProviderLookup)
-    : {}
+  const upcomingWorkshopIds = new Set<string>()
+
+  for (const row of classRows ?? []) {
+    if (row.workshop_id) {
+      upcomingWorkshopIds.add(row.workshop_id)
+    }
+  }
+
+  const upcomingApprovedProfiles = await loadApprovedEnrollmentProfilesForWorkshops(upcomingWorkshopIds)
+  const upcomingProfileIds = Array.from(upcomingApprovedProfiles)
+  const providerByProfileId = await resolveProviderByProfileIds(upcomingProfileIds)
 
   const nearTermDemandByProvider: Record<GiftCardProvider, number> = { PC: 0, Sobeys: 0 }
-  for (const pair of unresolvedNearTermPairs) {
-    const provider = parseGiftCardProviderFromDisplay(enrichmentByProfileId[pair.profileId]?.giftcard_display)
-    if (!provider) continue
-    nearTermDemandByProvider[provider] += 1
-  }
 
   const upcomingDemandByProvider: Record<GiftCardProvider, number> = { PC: 0, Sobeys: 0 }
   for (const profileId of upcomingProfileIds) {
-    const provider = parseGiftCardProviderFromDisplay(enrichmentByProfileId[profileId]?.giftcard_display)
+    const provider = providerByProfileId.get(profileId) ?? 'PC'
     if (!provider) continue
     upcomingDemandByProvider[provider] += 1
   }
@@ -293,6 +166,144 @@ export const loadGiftCardInventorySnapshot = async (): Promise<GiftCardInventory
       totalProjectedDemand: providers.PC.projectedDemand + providers.Sobeys.projectedDemand,
     },
   }
+}
+
+const countGiftCardAssets = async ({ provider, status }: { provider: GiftCardProvider; status: GiftCardAssetStatus }) => {
+  const { count, error } = await adminClient
+    .from('gift_card_asset')
+    .select('id', { count: 'exact', head: true })
+    .eq('provider', provider)
+    .eq('status', status)
+
+  if (error) {
+    throw new Error(`Failed to count gift-card assets (${provider}/${status}): ${error.message}`)
+  }
+  return count ?? 0
+}
+
+const loadApprovedEnrollmentProfilesForWorkshops = async (workshopIds: Set<string>) => {
+  const profiles = new Set<string>()
+  const workshopIdList = Array.from(workshopIds)
+
+  for (const workshopIdChunk of chunkArray(workshopIdList, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('workshop_enrollment')
+      .select('profile_id')
+      .in('workshop_id', workshopIdChunk)
+      .eq('status', 'approved')
+
+    if (error) {
+      throw new Error(`Failed to load upcoming approved enrollments: ${error.message}`)
+    }
+
+    for (const row of data ?? []) {
+      if (row.profile_id) {
+        profiles.add(row.profile_id)
+      }
+    }
+  }
+
+  return profiles
+}
+
+const resolveProviderByProfileIds = async (profileIds: string[]) => {
+  const normalizedProfileIds = Array.from(new Set(profileIds.filter(Boolean)))
+  const providerByProfileId = new Map<string, GiftCardProvider | null>()
+  if (!normalizedProfileIds.length) return providerByProfileId
+
+  const profileRows: Array<{ id: string; user_id: string | null }> = []
+  for (const chunk of chunkArray(normalizedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient.from('profile').select('id, user_id').in('id', chunk)
+    if (error) {
+      throw new Error(`Failed to load profiles for provider preferences: ${error.message}`)
+    }
+    profileRows.push(...((data ?? []) as Array<{ id: string; user_id: string | null }>))
+  }
+
+  const targetProfileIds = new Set(normalizedProfileIds)
+  const profileIdsByUserId = new Map<string, string[]>()
+  for (const row of profileRows) {
+    if (!row.user_id) continue
+    const bucket = profileIdsByUserId.get(row.user_id) ?? []
+    if (!bucket.includes(row.id)) {
+      bucket.push(row.id)
+      profileIdsByUserId.set(row.user_id, bucket)
+    }
+  }
+
+  const submissionsById = new Map<string, { id: string; profile_id: string | null; user_id: string | null; submitted_at: string | null }>()
+
+  for (const chunk of chunkArray(normalizedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient.from('form_submission').select('id, profile_id, user_id, submitted_at').in('profile_id', chunk)
+    if (error) {
+      throw new Error(`Failed to load profile form submissions for provider preferences: ${error.message}`)
+    }
+    for (const row of data ?? []) {
+      submissionsById.set(row.id, row)
+    }
+  }
+
+  const userIds = Array.from(profileIdsByUserId.keys())
+  for (const chunk of chunkArray(userIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient.from('form_submission').select('id, profile_id, user_id, submitted_at').in('user_id', chunk)
+    if (error) {
+      throw new Error(`Failed to load user form submissions for provider preferences: ${error.message}`)
+    }
+    for (const row of data ?? []) {
+      submissionsById.set(row.id, row)
+    }
+  }
+
+  const latestValueByProfileId = new Map<string, { value: string; submittedAtMs: number }>()
+  const submissionIds = Array.from(submissionsById.keys())
+
+  for (const chunk of chunkArray(submissionIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: answerRows, error: answerError } = await adminClient
+      .from('form_answer')
+      .select('submission_id, value')
+      .eq('question_code', GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+      .in('submission_id', chunk)
+
+    if (answerError) {
+      throw new Error(`Failed to load provider preference answers: ${answerError.message}`)
+    }
+
+    for (const answer of answerRows ?? []) {
+      const submission = submissionsById.get(answer.submission_id)
+      if (!submission) continue
+      const value = typeof answer.value === 'string' ? answer.value.trim() : ''
+      if (!value) continue
+
+      const submittedAtMs = Number.isFinite(Date.parse(submission.submitted_at ?? '')) ? Date.parse(submission.submitted_at ?? '') : 0
+      const associatedProfileIds = new Set<string>()
+
+      if (submission.profile_id && targetProfileIds.has(submission.profile_id)) {
+        associatedProfileIds.add(submission.profile_id)
+      }
+
+      if (submission.user_id) {
+        for (const profileId of profileIdsByUserId.get(submission.user_id) ?? []) {
+          if (targetProfileIds.has(profileId)) {
+            associatedProfileIds.add(profileId)
+          }
+        }
+      }
+
+      for (const profileId of associatedProfileIds) {
+        const existing = latestValueByProfileId.get(profileId)
+        if (!existing || submittedAtMs > existing.submittedAtMs) {
+          latestValueByProfileId.set(profileId, { value, submittedAtMs })
+        }
+      }
+    }
+  }
+
+  for (const profileId of normalizedProfileIds) {
+    const preferenceValue = latestValueByProfileId.get(profileId)?.value ?? null
+    providerByProfileId.set(profileId, parseGiftCardProviderFromDisplay(preferenceValue))
+  }
+
+  return providerByProfileId
 }
 
 const summarizeProviderInventory = ({
