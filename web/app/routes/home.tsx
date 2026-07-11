@@ -5,9 +5,11 @@ import type { Route } from './+types/home'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { adminClient } from '@/lib/supabase/adminClient'
+import { createActionProfile } from '@/lib/action-profile.server'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
 import { getMaskedEmailHint, normalizeEmail } from '@/lib/email-domain'
 import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
+import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
@@ -185,7 +187,15 @@ const sendInvite = async ({
 
 export async function loader({ request }: Route.LoaderArgs) {
   const startedAt = Date.now()
+  const profile = createLoaderProfile({
+    name: 'home_loader',
+    request,
+  })
   const auth = await enforceOnboardingGuard(request)
+  profile.mark('enforce_onboarding_guard', {
+    role: auth.claims.role,
+    emailHint: getMaskedEmailHint(auth.user.email),
+  })
   if (isRoleAtLeast(auth.claims.role, 'instructor')) {
     throw redirect('/manage', { headers: auth.headers })
   }
@@ -194,6 +204,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   const now = Date.now()
 
   const family = await resolveFamilyGraph(supabase, auth.user.id)
+  profile.mark('resolve_family_graph', {
+    familyProfileIds: family.familyProfileIds.length,
+  })
 
   const [familyProfilesResponse, enrollmentsResponse] = await Promise.all([
     adminClient
@@ -209,6 +222,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const familyProfilesRaw = familyProfilesResponse.data
   const enrollmentsRaw = enrollmentsResponse.data
+  profile.mark('fetch_profiles_and_enrollments')
 
   const familyProfiles = (familyProfilesRaw ?? []) as FamilyProfile[]
 
@@ -225,6 +239,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   const invites = (invitesRaw ?? []) as InviteRow[]
 
   const enrollments = (enrollmentsRaw ?? []) as EnrollmentRow[]
+  profile.mark('fetch_invites', {
+    inviteCount: invites.length,
+  })
   if (shouldLogHomeInstrumentation) {
     console.info('[home-instrumentation]', {
       event: 'home_loader_base',
@@ -237,6 +254,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   if (!enrollments.length) {
+    profile.complete({
+      role: auth.claims.role,
+      emailHint: getMaskedEmailHint(auth.user.email),
+      familyProfiles: familyProfiles.length,
+      enrollmentCount: enrollments.length,
+      durationMs: Date.now() - startedAt,
+    })
     return {
       family,
       familyProfiles,
@@ -463,6 +487,16 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
     : null
 
+  profile.complete({
+    role: auth.claims.role,
+    emailHint: getMaskedEmailHint(auth.user.email),
+    familyProfiles: familyProfiles.length,
+    enrollmentCount: enrollments.length,
+    classCount: classes.length,
+    inviteCount: invites.length,
+    durationMs: Date.now() - startedAt,
+  })
+
   return {
     family,
     familyProfiles,
@@ -480,23 +514,56 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
+  const profile = createActionProfile({
+    name: 'home_action',
+    request,
+  })
+  let outcome = 'unknown'
+  let intent: string | null = null
+  let emailHint: string | null = null
+  let role: string | null = null
+
   const auth = await enforceOnboardingGuard(request)
+  emailHint = getMaskedEmailHint(auth.user.email)
+  role = auth.claims.role
+  profile.mark('enforce_onboarding_guard', {
+    role: auth.claims.role,
+    emailHint,
+  })
   const { supabase } = createClient(request)
   const family = await resolveFamilyGraph(supabase, auth.user.id)
+  profile.mark('resolve_family_graph', {
+    familyProfiles: family.familyProfileIds.length,
+  })
   const formData = await request.formData()
-  const intent = String(formData.get('intent') ?? '')
+  intent = String(formData.get('intent') ?? '')
+  profile.mark('parse_form_data', {
+    intent,
+  })
 
   if (family.profileRole !== 'guardian') {
+    outcome = 'not_guardian'
+    profile.complete({ intent, outcome, role, emailHint })
     return { error: 'Only guardians can manage family membership.' } satisfies ActionData
   }
 
   if (intent === 'set_primary_child') {
     const childId = String(formData.get('child_id') ?? '')
-    if (!childId) return { error: 'Child is required.' } satisfies ActionData
-    if (!family.children.some(child => child.id === childId)) return { error: 'Invalid child.' } satisfies ActionData
+    if (!childId) {
+      outcome = 'set_primary_child_missing_child'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: 'Child is required.' } satisfies ActionData
+    }
+    if (!family.children.some(child => child.id === childId)) {
+      outcome = 'set_primary_child_invalid_child'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: 'Invalid child.' } satisfies ActionData
+    }
 
     const guardianIds = family.guardians.map(guardian => guardian.id)
     if (!guardianIds.length) {
+      outcome = 'set_primary_child_no_guardians'
+      profile.complete({ intent, outcome, role, emailHint })
       return { error: 'No guardians found for this family.' } satisfies ActionData
     }
 
@@ -512,11 +579,19 @@ export async function action({ request }: Route.ActionArgs) {
       .eq('child_profile_id', childId)
       .select('id')
 
-    if (error) return { error: error.message } satisfies ActionData
+    if (error) {
+      outcome = 'set_primary_child_update_error'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: error.message } satisfies ActionData
+    }
     if (!updatedRows?.length) {
+      outcome = 'set_primary_child_not_linked'
+      profile.complete({ intent, outcome, role, emailHint })
       return { error: 'Selected child is not linked to this family.' } satisfies ActionData
     }
 
+    outcome = 'set_primary_child_success'
+    profile.complete({ intent, outcome, role, emailHint })
     return { ok: true, message: 'Primary child updated for the family.' } satisfies ActionData
   }
 
@@ -538,6 +613,8 @@ export async function action({ request }: Route.ActionArgs) {
       .single()
 
     if (childError || !childRow?.id) {
+      outcome = 'add_child_error'
+      profile.complete({ intent, outcome, role, emailHint })
       return { error: childError?.message ?? 'Unable to add child.' } satisfies ActionData
     }
 
@@ -563,6 +640,8 @@ export async function action({ request }: Route.ActionArgs) {
         inviterUserId: auth.user.id,
       })
       if (inviteResult.error) {
+        outcome = 'add_child_invite_error'
+        profile.complete({ intent, outcome, role, emailHint })
         return { error: inviteResult.error } satisfies ActionData
       }
       if (inviteResult.inviteeUserId) {
@@ -570,6 +649,8 @@ export async function action({ request }: Route.ActionArgs) {
       }
     }
 
+    outcome = 'add_child_success'
+    profile.complete({ intent, outcome, role, emailHint })
     return { ok: true, message: email ? 'Child added and invite sent.' : 'Child added.' } satisfies ActionData
   }
 
@@ -580,9 +661,21 @@ export async function action({ request }: Route.ActionArgs) {
     const firstname = String(formData.get('firstname') ?? '').trim() || null
     const surname = String(formData.get('surname') ?? '').trim() || null
 
-    if (!childId) return { error: 'Select a child for this guardian.' } satisfies ActionData
-    if (!family.children.some(child => child.id === childId)) return { error: 'Invalid child.' } satisfies ActionData
-    if (!email) return { error: 'Guardian email is required.' } satisfies ActionData
+    if (!childId) {
+      outcome = 'add_guardian_missing_child'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: 'Select a child for this guardian.' } satisfies ActionData
+    }
+    if (!family.children.some(child => child.id === childId)) {
+      outcome = 'add_guardian_invalid_child'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: 'Invalid child.' } satisfies ActionData
+    }
+    if (!email) {
+      outcome = 'add_guardian_missing_email'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: 'Guardian email is required.' } satisfies ActionData
+    }
 
     const { data: guardianProfile, error: guardianError } = await adminClient
       .from('profile')
@@ -599,6 +692,8 @@ export async function action({ request }: Route.ActionArgs) {
       .single()
 
     if (guardianError || !guardianProfile?.id) {
+      outcome = 'add_guardian_create_error'
+      profile.complete({ intent, outcome, role, emailHint })
       return { error: guardianError?.message ?? 'Unable to create guardian.' } satisfies ActionData
     }
 
@@ -624,6 +719,8 @@ export async function action({ request }: Route.ActionArgs) {
     })
 
     if (inviteResult.error) {
+      outcome = 'add_guardian_invite_error'
+      profile.complete({ intent, outcome, role, emailHint })
       return { error: inviteResult.error } satisfies ActionData
     }
 
@@ -631,19 +728,37 @@ export async function action({ request }: Route.ActionArgs) {
       await adminClient.from('profile').update({ user_id: inviteResult.inviteeUserId }).eq('id', guardianProfile.id)
     }
 
+    outcome = 'add_guardian_success'
+    profile.complete({ intent, outcome, role, emailHint })
     return { ok: true, message: 'Guardian added and invite sent.' } satisfies ActionData
   }
 
   if (intent === 'send_or_resend_invite') {
     const profileId = String(formData.get('profile_id') ?? '')
-    const role = String(formData.get('role') ?? '')
+    const inviteRole = String(formData.get('role') ?? '')
     const rawEmail = String(formData.get('email') ?? '').trim()
     const email = normalizeEmail(rawEmail)
 
-    if (!profileId) return { error: 'Profile is required.' } satisfies ActionData
-    if (role !== 'guardian' && role !== 'student') return { error: 'Invalid role.' } satisfies ActionData
-    if (!email) return { error: 'Email is required.' } satisfies ActionData
-    if (!family.familyProfileIds.includes(profileId)) return { error: 'Profile is not in this family.' } satisfies ActionData
+    if (!profileId) {
+      outcome = 'resend_invite_missing_profile_id'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: 'Profile is required.' } satisfies ActionData
+    }
+    if (inviteRole !== 'guardian' && inviteRole !== 'student') {
+      outcome = 'resend_invite_invalid_role'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: 'Invalid role.' } satisfies ActionData
+    }
+    if (!email) {
+      outcome = 'resend_invite_missing_email'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: 'Email is required.' } satisfies ActionData
+    }
+    if (!family.familyProfileIds.includes(profileId)) {
+      outcome = 'resend_invite_profile_not_in_family'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: 'Profile is not in this family.' } satisfies ActionData
+    }
 
     const { data: profileRow } = await adminClient
       .from('profile')
@@ -652,10 +767,14 @@ export async function action({ request }: Route.ActionArgs) {
       .maybeSingle()
 
     if (!profileRow?.id) {
+      outcome = 'resend_invite_profile_missing'
+      profile.complete({ intent, outcome, role, emailHint })
       return { error: 'Profile not found.' } satisfies ActionData
     }
 
     if (profileRow.user_id) {
+      outcome = 'resend_invite_already_active'
+      profile.complete({ intent, outcome, role, emailHint })
       return { error: 'This account is already active and does not need a new invite.' } satisfies ActionData
     }
 
@@ -663,7 +782,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     const inviteResult = await sendInvite({
       email,
-      role,
+      role: inviteRole,
       origin: new URL(request.url).origin,
       inviterProfileId: family.profileId,
       inviterRole: 'guardian',
@@ -671,15 +790,23 @@ export async function action({ request }: Route.ActionArgs) {
       inviterUserId: auth.user.id,
     })
 
-    if (inviteResult.error) return { error: inviteResult.error } satisfies ActionData
+    if (inviteResult.error) {
+      outcome = 'resend_invite_send_error'
+      profile.complete({ intent, outcome, role, emailHint })
+      return { error: inviteResult.error } satisfies ActionData
+    }
 
     if (inviteResult.inviteeUserId) {
       await adminClient.from('profile').update({ user_id: inviteResult.inviteeUserId }).eq('id', profileId)
     }
 
+    outcome = 'resend_invite_success'
+    profile.complete({ intent, outcome, role, emailHint })
     return { ok: true, message: 'Invite sent.' } satisfies ActionData
   }
 
+  outcome = 'unknown_intent'
+  profile.complete({ intent, outcome, role, emailHint })
   return { error: 'Unknown action.' } satisfies ActionData
 }
 
@@ -700,6 +827,7 @@ export default function Home() {
   } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
   const navigation = useNavigation()
+  const formSubmitStartedAtRef = useRef<number | null>(null)
   const [searchParams] = useSearchParams()
   const mutationLocked =
     navigation.state !== 'idle' &&
@@ -714,6 +842,29 @@ export default function Home() {
     tab === 'manage-family'
       ? 'Add family members, set one primary child, and manage invitation access.'
       : 'Track enrollments and view upcoming or past class attendance.'
+
+  useEffect(() => {
+    const shouldLog = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+    if (!shouldLog) return
+    if (navigation.state === 'submitting' && navigation.formMethod?.toLowerCase() === 'post') {
+      formSubmitStartedAtRef.current = performance.now()
+      console.info('[home-instrumentation]', {
+        event: 'form_submit_start',
+        intent: navigation.formData?.get('intent') ?? null,
+      })
+      return
+    }
+    if (navigation.state === 'idle') {
+      const startedAt = formSubmitStartedAtRef.current
+      if (typeof startedAt === 'number') {
+        console.info('[home-instrumentation]', {
+          event: 'form_submit_end',
+          durationMs: Math.round(performance.now() - startedAt),
+        })
+        formSubmitStartedAtRef.current = null
+      }
+    }
+  }, [navigation.formData, navigation.formMethod, navigation.state])
 
   const inviteByEmail = new Map<string, InviteRow>()
   for (const invite of invites) {

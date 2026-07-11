@@ -11,8 +11,10 @@ import {
 } from '@/components/ui/card'
 import FormQuestion, { type FormQuestionData } from '@/components/forms/form-question'
 import type { Database, Json } from '@/lib/database.types'
-import { normalizeEmail } from '@/lib/email-domain'
+import { getMaskedEmailHint, normalizeEmail } from '@/lib/email-domain'
 import { loadSubmissionAnswerState } from '@/lib/form-submission-answers.server'
+import { createActionProfile } from '@/lib/action-profile.server'
+import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { getProfileSignUpCompletionWithContext } from '@/lib/onboarding.server'
 import { extractRequestMetadata } from '@/lib/request-metadata.server'
 import { ridingLookupProvider } from '@/lib/riding-lookup.server'
@@ -194,11 +196,20 @@ const parseFormValue = (question: FormQuestionData, formData: FormData) => {
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const loaderProfile = createLoaderProfile({
+    name: 'sign_up_details_loader',
+    request,
+  })
   const { supabase, headers } = createClient(request)
   const { data: userData } = await supabase.auth.getUser()
+  const emailHint = getMaskedEmailHint(userData.user?.email)
+  loaderProfile.mark('load_session_user', {
+    emailHint,
+  })
   if (!userData.user) throw redirect('/sign-up', { headers })
 
   await supabase.rpc('sync_auto_assigned_forms_for_user', { p_user_id: userData.user.id })
+  loaderProfile.mark('sync_auto_assigned_forms')
 
   const url = new URL(request.url)
   const requestedFormId = url.searchParams.get('form_id')
@@ -217,26 +228,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
   if (!pid) throw redirect('/sign-up', { headers })
 
-  const { data: profile } = await (supabase.from('profile') as any)
+  const { data: profileRow } = await (supabase.from('profile') as any)
     .select(
       'role, email, firstname, surname, phone, street_address, city, province, postcode, household_size, household_children_count, partner_program, federal_electoral_district_name, date_of_birth'
     )
     .eq('id', pid)
     .single()
-  if (!profile?.role) throw redirect('/sign-up', { headers })
+  if (!profileRow?.role) throw redirect('/sign-up', { headers })
+  loaderProfile.mark('resolve_profile_context', {
+    role: profileRow?.role ?? null,
+  })
 
-  const resolvedRole = (roleParam ?? (profile.role as 'guardian' | 'student')) as 'guardian' | 'student'
+  const resolvedRole = (roleParam ?? (profileRow.role as 'guardian' | 'student')) as 'guardian' | 'student'
 
   const signUpFlowContext = await getSignUpFlowContext(supabase, {
-    email: profile.email,
+    email: profileRow.email,
     role: resolvedRole,
   })
 
   const submissionData = await loadSubmissionAnswerState(supabase, pid)
   const mealKitFlag = await districtMealKitFlag(
-    typeof profile.federal_electoral_district_name === 'string' ? profile.federal_electoral_district_name : null
+    typeof profileRow.federal_electoral_district_name === 'string' ? profileRow.federal_electoral_district_name : null
   )
   submissionData.answers[MEAL_KIT_DERIVED_KEY] = resolveMealKitEligibility(mealKitFlag)
+  loaderProfile.mark('load_submission_state')
 
   const { data: flowEntries } = await supabase
     .from('sign_up_flow')
@@ -270,6 +285,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     position: entry.step_order,
     status: (assignmentMap.get(entry.form_id) ?? 'pending') as Database['public']['Enums']['form_assignment_status'],
   }))
+  loaderProfile.mark('build_form_steps', {
+    stepCount: formSteps.length,
+  })
 
   const firstPending = formSteps.find(step => step.status !== 'submitted') ?? null
   const requestedForm = requestedFormId
@@ -349,7 +367,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       const sourceProfile =
         metadata.role === 'self'
-          ? (profile as Record<string, unknown>)
+          ? (profileRow as Record<string, unknown>)
           : metadata.role === 'child'
             ? primaryChildProfile
             : null
@@ -398,6 +416,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
     return redirect('/home', { headers })
   }
+
+  loaderProfile.complete({
+    emailHint,
+    role: resolvedRole,
+    pid,
+    currentFormId: currentForm?.formId ?? null,
+    totalFormSteps: formSteps.length,
+  })
 
   return {
     role: resolvedRole,
@@ -514,27 +540,63 @@ const sendInvite = async ({
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { supabase, headers } = createClient(request)
-  const url = new URL(request.url)
-  const origin = url.origin
+  const profile = createActionProfile({
+    name: 'sign_up_details_action',
+    request,
+  })
+  let outcome = 'unknown'
+  let intent: string | null = null
+  let role: 'guardian' | 'student' | null = null
+  let pid: string | null = null
+  let currentSlug: string | null = null
+  let emailHint: string | null = null
 
-  const { data: currentUser } = await supabase.auth.getUser()
-  if (!currentUser.user) {
-    return { error: 'Session unavailable' }
-  }
+  const run = async () => {
+    const { supabase, headers } = createClient(request)
+    const url = new URL(request.url)
+    const origin = url.origin
 
-  const formData = await request.formData()
-  const role = formData.get('role') as 'guardian' | 'student'
-  const pid = formData.get('pid') as string
-  const formId = formData.get('form_id') as string
-  const clientTimezone = typeof formData.get('client_timezone') === 'string' ? String(formData.get('client_timezone')) : null
-  const clientOffsetMinutes = typeof formData.get('client_offset_minutes') === 'string' ? String(formData.get('client_offset_minutes')) : null
-  const clientLocale = typeof formData.get('client_locale') === 'string' ? String(formData.get('client_locale')) : null
-  if (!formId) {
-    return { error: 'Form is missing' }
-  }
+    const { data: currentUser } = await supabase.auth.getUser()
+    emailHint = getMaskedEmailHint(currentUser.user?.email)
+    profile.mark('load_session_user', {
+      emailHint,
+    })
+    if (!currentUser.user) {
+      outcome = 'session_unavailable'
+      return { error: 'Session unavailable' }
+    }
+
+    const formData = await request.formData()
+    intent = String(formData.get('intent') ?? 'save_and_continue')
+    const roleValue = formData.get('role') as 'guardian' | 'student' | null
+    role = roleValue
+    pid = formData.get('pid') as string
+    const formId = formData.get('form_id') as string
+    profile.mark('parse_form_data', {
+      intent,
+      role,
+      pid,
+      formId,
+    })
+    const clientTimezone = typeof formData.get('client_timezone') === 'string' ? String(formData.get('client_timezone')) : null
+    const clientOffsetMinutes = typeof formData.get('client_offset_minutes') === 'string' ? String(formData.get('client_offset_minutes')) : null
+    const clientLocale = typeof formData.get('client_locale') === 'string' ? String(formData.get('client_locale')) : null
+    if (roleValue !== 'guardian' && roleValue !== 'student') {
+      outcome = 'invalid_role'
+      return { error: 'Role is missing' }
+    }
+    if (!pid) {
+      outcome = 'missing_pid'
+      return { error: 'Profile is missing' }
+    }
+    const pidValue = pid
+    if (!formId) {
+      outcome = 'missing_form_id'
+      return { error: 'Form is missing' }
+    }
 
   await supabase.rpc('sync_auto_assigned_forms_for_user', { p_user_id: currentUser.user.id })
+  profile.mark('sync_auto_assigned_forms')
 
   const { data: assignment } = await supabase
     .from('form_assignment')
@@ -560,25 +622,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .select('slug')
     .eq('form_id', formId)
     .maybeSingle()
-  const currentSlug = flowEntry?.slug ?? ''
+  const currentSlugValue = flowEntry?.slug ?? ''
+  currentSlug = currentSlugValue
   const wantsAdditionalGuardian =
-    currentSlug === 'additional_guardians'
+    currentSlugValue === 'additional_guardians'
       ? (formData.get('additional_guardian_choice') as string | null) === 'yes'
       : true
 
-  const { data: profile } = await (supabase.from('profile') as any)
+  const { data: profileRow } = await (supabase.from('profile') as any)
     .select('email, federal_electoral_district_name')
-    .eq('id', pid)
+    .eq('id', pidValue)
     .single()
 
   const invitedStudent =
-    role === 'student' &&
+    roleValue === 'student' &&
     Boolean(
-      profile?.email &&
+      profileRow?.email &&
         (await supabase
           .from('invites')
           .select('id')
-          .eq('invitee_email', profile.email)
+          .eq('invitee_email', profileRow.email)
           .eq('role', 'student')
           .limit(1)
           .maybeSingle())?.data?.id
@@ -621,8 +684,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   })
 
   if (!questions.length) {
+    outcome = 'form_not_configured'
     return { error: 'Form is not configured' }
   }
+  profile.mark('load_form_questions', {
+    questionCount: questions.length,
+    currentSlug: currentSlugValue,
+  })
 
   const submissionData = await loadSubmissionAnswerState(supabase, pid)
 
@@ -636,7 +704,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const combinedAnswers = mergeAnswerMaps(submissionData.answers, submittedAnswers)
   const currentMealKitFlag = await districtMealKitFlag(
-    typeof profile?.federal_electoral_district_name === 'string' ? profile.federal_electoral_district_name : null
+    typeof profileRow?.federal_electoral_district_name === 'string' ? profileRow.federal_electoral_district_name : null
   )
   combinedAnswers[MEAL_KIT_DERIVED_KEY] = resolveMealKitEligibility(currentMealKitFlag)
   const answersToSave: { questionCode: string; value: Json }[] = []
@@ -644,14 +712,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const additionalGuardianQuestionCodes: string[] = []
 
   for (const question of questions) {
-    const isVisible = !isQuestionHiddenForRole(role, question.question_code) && isConditionMet(question.visibility_condition as Json, combinedAnswers)
+    const isVisible = !isQuestionHiddenForRole(roleValue, question.question_code) && isConditionMet(question.visibility_condition as Json, combinedAnswers)
     if (!isVisible) {
       hiddenQuestionCodes.push(question.question_code)
       continue
     }
 
     const metadata = (question.metadata ?? {}) as Record<string, Json>
-    if (currentSlug === 'additional_guardians' && metadata.target === 'additional_guardian' && !wantsAdditionalGuardian) {
+    if (currentSlugValue === 'additional_guardians' && metadata.target === 'additional_guardian' && !wantsAdditionalGuardian) {
       additionalGuardianQuestionCodes.push(question.question_code)
       hiddenQuestionCodes.push(question.question_code)
       continue
@@ -706,7 +774,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  if (currentSlug === 'additional_guardians') {
+  if (currentSlugValue === 'additional_guardians') {
     const guardianFirstname = normalizeString(additionalGuardian.firstname)
     const guardianSurname = normalizeString(additionalGuardian.surname)
     const guardianEmail = normalizeString(additionalGuardian.email)
@@ -722,7 +790,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const { data: existingSubmissions } = await supabase
         .from('form_submission')
         .select('id')
-        .eq('profile_id', pid)
+        .eq('profile_id', pidValue)
         .eq('form_id', formId)
 
       const submissionIds = (existingSubmissions ?? []).map(entry => entry.id).filter(Boolean)
@@ -773,6 +841,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .select('id')
     .single()
   if (submissionError || !submission?.id) {
+    outcome = 'submission_insert_error'
     console.error('form submission failed', submissionError?.message, { pid, formId })
     return { error: submissionError?.message ?? 'Unable to save responses' }
   }
@@ -787,10 +856,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       .from('form_answer')
       .upsert(answerRows, { onConflict: 'submission_id,question_code' })
     if (answerError) {
+      outcome = 'answer_upsert_error'
       console.error('form answers failed', answerError.message, { pid, formId })
       return { error: answerError.message ?? 'Unable to save responses' }
     }
   }
+  profile.mark('save_submission_and_answers', {
+    answerCount: answersToSave.length,
+  })
 
   if (hiddenQuestionCodes.length) {
     await supabase
@@ -800,7 +873,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       .eq('submission_id', submission.id)
   }
 
-  const { guardianPid, childPid } = await resolveRelationship(supabase, role, pid)
+  const { guardianPid, childPid } = await resolveRelationship(supabase, roleValue, pidValue)
   const inviterEmail = currentUser.user.email ?? ''
   const inviterUserId = currentUser.user.id
 
@@ -812,7 +885,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   let guardianInviteEmail: string | null = null
 
   for (const question of questions) {
-    const isVisible = !isQuestionHiddenForRole(role, question.question_code) && isConditionMet(question.visibility_condition as Json, combinedAnswers)
+    const isVisible = !isQuestionHiddenForRole(roleValue, question.question_code) && isConditionMet(question.visibility_condition as Json, combinedAnswers)
     if (!isVisible) continue
 
     const metadata = (question.metadata ?? {}) as Record<string, Json>
@@ -919,7 +992,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const updateProfile = async (targetPid: string, updates: Record<string, Json>) => {
-    const client = targetPid === pid ? supabase : adminClient
+    const client = targetPid === pidValue ? supabase : adminClient
     await client.from('profile').update(updates).eq('id', targetPid)
   }
 
@@ -953,9 +1026,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await updateProfile(resolvedChildPid, profileUpdates.child)
   }
 
-  if (currentSlug === 'guardian_details' && role === 'student') {
+  if (currentSlugValue === 'guardian_details' && roleValue === 'student') {
     if (invitedStudent) {
-      return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}`, { headers })
+      return redirect(`/auth/sign-up-details?role=${roleValue}&pid=${pidValue}`, { headers })
     }
     if (!guardianInviteEmail) {
       return { error: 'Guardian email is required' }
@@ -981,7 +1054,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       email: guardianInviteEmail,
       role: 'guardian',
       origin,
-      inviterPid: pid,
+      inviterPid: pidValue,
       inviterRole: 'student',
       inviterEmail,
       inviterUserId,
@@ -998,7 +1071,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  if (currentSlug === 'child_email' && role === 'guardian') {
+  if (currentSlugValue === 'child_email' && roleValue === 'guardian') {
     const childHasEmail = normalizeString(combinedAnswers.child_has_email) === 'Yes'
     const childEmail = normalizeString(combinedAnswers.child_email)
 
@@ -1048,7 +1121,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  if (currentSlug === 'additional_guardians') {
+  if (currentSlugValue === 'additional_guardians') {
     const guardianFirstname = normalizeString(additionalGuardian.firstname)
     const guardianSurname = normalizeString(additionalGuardian.surname)
     const guardianEmail = normalizeString(additionalGuardian.email)
@@ -1076,8 +1149,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           email: guardianEmail,
           role: 'guardian',
           origin,
-          inviterPid: pid,
-          inviterRole: role,
+          inviterPid: pidValue,
+          inviterRole: roleValue,
           inviterEmail,
           inviterUserId,
         })
@@ -1114,19 +1187,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  if (pid) {
+  if (pidValue) {
     setTimeout(() => {
-      void refreshSuspiciousSignalsForProfile(pid).catch(error => {
+      void refreshSuspiciousSignalsForProfile(pidValue).catch(error => {
         console.error('[suspicious-signal] refresh failed', error)
       })
     }, 0)
   }
 
-  return redirect(`/auth/sign-up-details?role=${role}&pid=${pid}&form_id=${formId}`, { headers })
+  outcome = 'success_redirect'
+  return redirect(`/auth/sign-up-details?role=${roleValue}&pid=${pidValue}&form_id=${formId}`, { headers })
+  }
+
+  try {
+    return await run()
+  } finally {
+    profile.complete({
+      outcome,
+      intent,
+      role,
+      pid,
+      currentSlug,
+      emailHint,
+    })
+  }
 }
 
 export default function SignUpDetails() {
   const fetcher = useFetcher<typeof action>()
+  const submitStartedAtRef = useRef<number | null>(null)
   const data = useLoaderData() as LoaderData
   const {
     role,
@@ -1249,6 +1338,33 @@ export default function SignUpDetails() {
       setSubmitLocked(false)
     }
   }, [fetcher.data?.error, fetcher.state])
+
+  useEffect(() => {
+    const shouldLog = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+    if (!shouldLog) return
+    if (fetcher.state === 'submitting') {
+      submitStartedAtRef.current = performance.now()
+      console.info('[sign-up-details-instrumentation]', {
+        event: 'form_submit_start',
+        formId: currentForm?.formId ?? null,
+        role,
+        pid,
+      })
+      return
+    }
+    if (fetcher.state === 'idle') {
+      const startedAt = submitStartedAtRef.current
+      if (typeof startedAt === 'number') {
+        console.info('[sign-up-details-instrumentation]', {
+          event: 'form_submit_end',
+          formId: currentForm?.formId ?? null,
+          durationMs: Math.round(performance.now() - startedAt),
+          hasError: Boolean(fetcher.data?.error),
+        })
+        submitStartedAtRef.current = null
+      }
+    }
+  }, [currentForm?.formId, fetcher.data, fetcher.state, pid, role])
 
   useEffect(() => {
     if (!isAdditionalGuardianStep) return

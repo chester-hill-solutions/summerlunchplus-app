@@ -1,10 +1,12 @@
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from 'react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { Route } from './+types/enroll'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
+import { createActionProfile } from '@/lib/action-profile.server'
+import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { requireAuth } from '@/lib/auth.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
@@ -122,7 +124,15 @@ const toDisplayName = (profile: Pick<FamilyProfileEmailRow, 'firstname' | 'surna
 const isLikelyEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const profile = createLoaderProfile({
+    name: 'enroll_loader',
+    request,
+  })
   const auth = await requireAuth(request)
+  profile.mark('require_auth', {
+    role: auth.claims.role,
+    emailHint: auth.emailHint,
+  })
   const { supabase, headers } = createClient(request)
 
   let family
@@ -132,6 +142,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     const message = error instanceof Error ? error.message : 'Profile not found'
     throw new Response(message, { status: 404, headers })
   }
+  profile.mark('resolve_family_graph', {
+    familyProfileIds: family.familyProfileIds.length,
+  })
 
   const url = new URL(request.url)
   const enrollPathMatch = url.pathname.match(/^\/enroll\/([^/]+)$/)
@@ -155,6 +168,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       .in('profile_id', family.familyProfileIds)
       .order('requested_at', { ascending: false }),
   ])
+  profile.mark('fetch_semesters_and_enrollments')
 
   const semesters: SemesterRow[] = (semesterData ?? [])
     .map((s: any) => ({
@@ -208,6 +222,9 @@ export async function loader({ request }: Route.LoaderArgs) {
           .order('starts_at', { ascending: true })
       : Promise.resolve({ data: [] as Array<{ workshop_id: string | null; starts_at: string }> }),
   ])
+  profile.mark('fetch_workshop_capacity_and_next_classes', {
+    workshopCount: workshopIds.length,
+  })
 
   const workshopEnrollmentRows = workshopEnrollmentResult.data ?? []
   const upcomingClasses = upcomingClassesResult.data ?? []
@@ -237,6 +254,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       preSurveyFormBySemester.set(semesterId, await resolveSemesterSurveyForm(semesterId, 'pre_program_survey'))
     })
   )
+  profile.mark('resolve_pre_survey_forms', {
+    semesterCount: semesterIds.length,
+  })
 
   const preSurveyFormIds = Array.from(preSurveyFormBySemester.values())
     .map(entry => entry.formId)
@@ -278,6 +298,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     status: String(e.status),
   }))
 
+  profile.complete({
+    role: auth.claims.role,
+    emailHint: auth.emailHint,
+    semesterCount: semesters.length,
+    enrollmentCount: enrollments.length,
+    selectedSemesterId,
+  })
+
   return {
     semesters,
     enrollments,
@@ -289,31 +317,52 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
+  const profile = createActionProfile({
+    name: 'enroll_action',
+    request,
+  })
+  let outcome = 'unknown'
+  let intent: string | null = null
+  let emailHint: string | null = null
+  let role: string | null = null
   const formData = await request.formData()
-  const intent = String(formData.get('intent') ?? 'request-enrollment')
+  intent = String(formData.get('intent') ?? 'request-enrollment')
   const status = String(formData.get('status') ?? '')
   const workshop_id = String(formData.get('workshop_id') ?? '')
 
-  const auth = await requireAuth(request)
-  const { supabase } = createClient(request)
-
-  let family
   try {
-    family = await resolveFamilyGraph(supabase, auth.user.id)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Profile not found'
-    return { error: message } satisfies ActionData
-  }
+    const auth = await requireAuth(request)
+    emailHint = auth.emailHint
+    role = auth.claims.role
+    profile.mark('require_auth', {
+      role: auth.claims.role,
+      emailHint: auth.emailHint,
+      intent,
+    })
+    const { supabase } = createClient(request)
 
-  if (intent === 'update-status') {
+    let family
+    try {
+      family = await resolveFamilyGraph(supabase, auth.user.id)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Profile not found'
+      outcome = 'family_missing'
+      return { error: message } satisfies ActionData
+    }
+    profile.mark('resolve_family_graph', {
+      familyProfileIds: family.familyProfileIds.length,
+    })
+
+    if (intent === 'update-status') {
     const enrollmentId = String(formData.get('enrollment_id') ?? '')
     const semesterId = String(formData.get('semester_id') ?? '')
 
-    if (!enrollmentId || !semesterId || status !== 'revoked') {
-      return { error: 'Missing enrollment data for status update.' } satisfies ActionData
-    }
+      if (!enrollmentId || !semesterId || status !== 'revoked') {
+        outcome = 'update_status_invalid_payload'
+        return { error: 'Missing enrollment data for status update.' } satisfies ActionData
+      }
 
-    const transitionResult = await transitionWorkshopEnrollmentStatus({
+      const transitionResult = await transitionWorkshopEnrollmentStatus({
       enrollmentId,
       nextStatus: 'revoked',
       actorUserId: auth.user.id,
@@ -322,12 +371,18 @@ export async function action({ request }: Route.ActionArgs) {
       familyProfileIds: family.familyProfileIds,
     })
 
-    if (!transitionResult.ok) {
-      return { error: transitionResult.error ?? 'Unable to update enrollment status.' } satisfies ActionData
-    }
+      profile.mark('transition_workshop_enrollment_status', {
+        ok: transitionResult.ok,
+      })
 
-    return redirect(`/enroll/${semesterId}`)
-  }
+      if (!transitionResult.ok) {
+        outcome = 'update_status_transition_failed'
+        return { error: transitionResult.error ?? 'Unable to update enrollment status.' } satisfies ActionData
+      }
+
+      outcome = 'update_status_success'
+      return redirect(`/enroll/${semesterId}`)
+    }
 
   const { data: workshopRow, error: workshopError } = await supabase
     .from('workshop')
@@ -335,20 +390,23 @@ export async function action({ request }: Route.ActionArgs) {
     .eq('id', workshop_id)
     .single()
 
-  if (workshopError || !workshopRow?.semester_id) {
-    return { error: 'Workshop not found' } satisfies ActionData
-  }
+    if (workshopError || !workshopRow?.semester_id) {
+      outcome = 'workshop_not_found'
+      return { error: 'Workshop not found' } satisfies ActionData
+    }
 
-  const targetProfileId = getFamilyEnrollmentProfileId(family)
-  if (!targetProfileId) {
-    return { error: 'Family enrollment profile not found.' } satisfies ActionData
-  }
+    const targetProfileId = getFamilyEnrollmentProfileId(family)
+    if (!targetProfileId) {
+      outcome = 'target_profile_missing'
+      return { error: 'Family enrollment profile not found.' } satisfies ActionData
+    }
 
   const preSurveyForm = await resolveSemesterSurveyForm(workshopRow.semester_id, 'pre_program_survey')
 
-  if (!preSurveyForm.formId) {
-    return { error: 'Pre-program survey is not configured for this semester.' } satisfies ActionData
-  }
+    if (!preSurveyForm.formId) {
+      outcome = 'pre_survey_not_configured'
+      return { error: 'Pre-program survey is not configured for this semester.' } satisfies ActionData
+    }
 
   const { data: preSurveySubmission } = preSurveyForm.required
     ? await adminClient
@@ -361,9 +419,10 @@ export async function action({ request }: Route.ActionArgs) {
         .maybeSingle()
     : { data: { id: 'not-required' } }
 
-  if (preSurveyForm.required && !preSurveySubmission?.id) {
-    return { error: 'Please complete the pre-program survey before enrolling.' } satisfies ActionData
-  }
+    if (preSurveyForm.required && !preSurveySubmission?.id) {
+      outcome = 'pre_survey_required'
+      return { error: 'Please complete the pre-program survey before enrolling.' } satisfies ActionData
+    }
 
   const { data: enrollmentResult, error: enrollmentRequestError } = await adminClient
     .rpc('request_family_workshop_enrollment', {
@@ -375,15 +434,17 @@ export async function action({ request }: Route.ActionArgs) {
 
   const enrollmentRequest = enrollmentResult as EnrollmentRequestResult | null
 
-  if (enrollmentRequestError) {
-    return { error: enrollmentRequestError.message ?? 'Unable to create enrollment' } satisfies ActionData
-  }
+    if (enrollmentRequestError) {
+      outcome = 'enrollment_request_error'
+      return { error: enrollmentRequestError.message ?? 'Unable to create enrollment' } satisfies ActionData
+    }
 
-  if (!enrollmentRequest?.ok || !enrollmentRequest.enrollment_id) {
-    return {
-      error: enrollmentRequest?.error_message ?? 'Unable to create enrollment',
-    } satisfies ActionData
-  }
+    if (!enrollmentRequest?.ok || !enrollmentRequest.enrollment_id) {
+      outcome = 'enrollment_request_not_ok'
+      return {
+        error: enrollmentRequest?.error_message ?? 'Unable to create enrollment',
+      } satisfies ActionData
+    }
 
   const enrollmentId = enrollmentRequest.enrollment_id
 
@@ -422,8 +483,8 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
-  const notificationEventKey = `workshop_enrollment:${enrollmentId}:family_requested:v1`
-  setTimeout(() => {
+    const notificationEventKey = `workshop_enrollment:${enrollmentId}:family_requested:v1`
+    setTimeout(() => {
     void Promise.all(
       Array.from(emailByLowercase.entries()).map(async ([normalizedEmail, recipient]) => {
         return sendTemplateEmail({
@@ -458,9 +519,19 @@ export async function action({ request }: Route.ActionArgs) {
           error,
         })
       })
-  }, 0)
+    }, 0)
 
-  return redirectWithEnrollmentMessage('success', ENROLLMENT_SUCCESS_MESSAGE)
+    outcome = 'request_enrollment_success'
+    return redirectWithEnrollmentMessage('success', ENROLLMENT_SUCCESS_MESSAGE)
+  } finally {
+    profile.complete({
+      intent,
+      outcome,
+      emailHint,
+      role,
+      workshopId: workshop_id || null,
+    })
+  }
 }
 
 export default function EnrollPage() {
@@ -468,6 +539,32 @@ export default function EnrollPage() {
   const actionData = useActionData<ActionData>()
   const navigation = useNavigation()
   const [submitLocked, setSubmitLocked] = useState(false)
+  const navigationStartedAtRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const shouldLog = import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+    if (!shouldLog) return
+    if (navigation.state === 'submitting' && navigation.formMethod?.toLowerCase() === 'post') {
+      navigationStartedAtRef.current = performance.now()
+      console.info('[enroll-instrumentation]', {
+        event: 'form_submit_start',
+        intent: navigation.formData?.get('intent') ?? 'request-enrollment',
+        workshopId: navigation.formData?.get('workshop_id') ?? null,
+        enrollmentId: navigation.formData?.get('enrollment_id') ?? null,
+      })
+      return
+    }
+    if (navigation.state === 'idle') {
+      const startedAt = navigationStartedAtRef.current
+      if (typeof startedAt === 'number') {
+        console.info('[enroll-instrumentation]', {
+          event: 'form_submit_end',
+          durationMs: Math.round(performance.now() - startedAt),
+        })
+        navigationStartedAtRef.current = null
+      }
+    }
+  }, [navigation.formData, navigation.formMethod, navigation.state])
 
   useEffect(() => {
     if (navigation.state === 'idle' && actionData?.error) {

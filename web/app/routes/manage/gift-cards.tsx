@@ -2,6 +2,7 @@ import { Link, useLoaderData } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
+import { loadGiftCardInventorySnapshot } from '@/lib/gift-cards/inventory.server'
 import { isEligibilityTimingEnabled } from '@/lib/gift-cards/release.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
@@ -134,10 +135,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const assignedProfileCount = rows.filter(row => row.profile_id).length
   const totalAssetCount = rows.length
-  const statusTotals = GIFT_CARD_STATUS_ORDER.map(status => ({
-    status,
-    count: rows.filter(row => row.status === status).length,
-  }))
+  const inventorySnapshot = await loadGiftCardInventorySnapshot()
+  const statusTotals = GIFT_CARD_STATUS_ORDER.map(status => ({ status, count: inventorySnapshot.statusTotals[status] }))
 
   return {
     label: 'Gift card assets',
@@ -148,6 +147,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       reminder: `Mon/Fri ${formatTorontoClock(REMINDER_HOUR_TORONTO, REMINDER_MINUTE_TORONTO)}`,
     },
     eligibilityTimingEnabled: isEligibilityTimingEnabled(),
+    inventorySnapshot,
     statusTotals,
     totalAssetCount,
     columns: ['provider', 'account_number', 'pin', 'value', 'status', 'asset_url', 'profile_display', 'upload_id', 'created_at'],
@@ -181,6 +181,21 @@ export default function GiftCardsPage() {
                 {item.status}: {item.count}
               </span>
             ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Inventory watch</span>
+            {(['PC', 'Sobeys'] as const).map(provider => {
+              const summary = data.inventorySnapshot.providers[provider]
+              return (
+                <span
+                  key={provider}
+                  className={`rounded border bg-background px-2 py-1 text-foreground ${summary.isLow ? 'border-red-300 text-red-700' : ''}`}
+                >
+                  {provider} avail: {summary.available} / threshold {summary.threshold} | demand N/U: {summary.nearTermDemand}/
+                  {summary.upcomingDemand}
+                </span>
+              )
+            })}
           </div>
           <div className="rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
             {data.eligibilityTimingEnabled ? (
