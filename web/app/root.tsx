@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { Route } from "./+types/root";
 import { Navbar } from "./components/navbar";
 import { enforceOnboardingGuard } from "./lib/auth.server";
+import { getMaskedEmailHint } from "./lib/email-domain";
 import { useRouterInstrumentation } from "./lib/router-instrumentation";
 import { createClient } from "./lib/supabase/server";
 import { createClient as createBrowserClient } from "./lib/supabase/client";
@@ -12,6 +13,8 @@ import "./app.css";
 export async function loader({ request }: Route.LoaderArgs) {
   const startedAt = Date.now()
   const requestPath = new URL(request.url).pathname
+  let requestEmailHint: string | null = null
+  let requestRole: string | null = null
 
   try {
   const supabaseUrl = process.env.VITE_SUPABASE_URL ?? '';
@@ -54,6 +57,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { data: userData, error: userError } = await supabase.auth.getUser();
 
   const user = userData?.user ?? null;
+  requestEmailHint = getMaskedEmailHint(user?.email)
 
   if (userError || !user) {
     return { user: null, role: null, supabaseUrl, supabaseAnonKey };
@@ -79,6 +83,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { data: claimsData } = await supabase.auth.getClaims();
   const claims = claimsData?.claims as { user_role?: string } | null | undefined;
   const role = typeof claims?.user_role === "string" ? claims.user_role : null;
+  requestRole = role
 
   return { user, role, supabaseUrl, supabaseAnonKey };
   } finally {
@@ -91,6 +96,8 @@ export async function loader({ request }: Route.LoaderArgs) {
         event: 'root_loader',
         method: request.method,
         pathname: requestPath,
+        emailHint: requestEmailHint,
+        role: requestRole,
         durationMs: Date.now() - startedAt,
       })
     }

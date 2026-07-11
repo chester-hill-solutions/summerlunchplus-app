@@ -95,6 +95,8 @@ export async function loader(args: Route.LoaderArgs) {
     profile.complete({
       deferredShell: true,
       columnCount: shell.columns.length,
+      emailHint: auth.emailHint,
+      role: auth.claims.role,
     })
     return shell
   }
@@ -160,11 +162,16 @@ export async function action({ request }: Route.ActionArgs) {
   let intent: string | null = null
   let outcome = 'unknown'
   let errorMessage: string | null = null
+  let emailHint: string | null = null
+  let role: string | null = null
 
   try {
     const auth = await requireAuth(request)
+    emailHint = auth.emailHint
+    role = auth.claims.role
     profile.mark('require_auth', {
       role: auth.claims.role,
+      emailHint: auth.emailHint,
     })
 
     const formData = await request.formData()
@@ -529,6 +536,8 @@ export async function action({ request }: Route.ActionArgs) {
       intent,
       outcome,
       error: errorMessage,
+      emailHint,
+      role,
     })
   }
 }

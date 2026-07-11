@@ -204,6 +204,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const deferTable = url.searchParams.get('_deferTable') === '1'
   profile.mark('require_auth', {
     role: auth.claims.role,
+    emailHint: auth.emailHint,
     deferTable,
   })
 
@@ -237,6 +238,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     profile.complete({
       deferredShell: true,
       columnCount: shell.columns.length,
+      emailHint: auth.emailHint,
+      role: auth.claims.role,
     })
     return shell
   }
@@ -743,6 +746,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   profile.complete({
     classIdCount: classIds.length,
     profileIdCount: profileIds.length,
+    emailHint: auth.emailHint,
+    role: auth.claims.role,
   })
 
   return {
@@ -907,11 +912,16 @@ export async function action({ request }: Route.ActionArgs) {
   let intent: string | null = null
   let outcome = 'unknown'
   let errorMessage: string | null = null
+  let emailHint: string | null = null
+  let role: string | null = null
 
   try {
     const auth = await requireAuth(request)
+    emailHint = auth.emailHint
+    role = auth.claims.role
     profile.mark('require_auth', {
       role: auth.claims.role,
+      emailHint: auth.emailHint,
     })
     if (!isRoleAtLeast(auth.claims.role, 'staff')) {
       outcome = 'unauthorized'
@@ -1660,6 +1670,8 @@ export async function action({ request }: Route.ActionArgs) {
       intent,
       outcome,
       error: errorMessage,
+      emailHint,
+      role,
     })
   }
 }

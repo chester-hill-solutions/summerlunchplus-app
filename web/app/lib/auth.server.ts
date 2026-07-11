@@ -131,7 +131,6 @@ const getCachedSignUpDetailsStatus = (
 }
 
 export async function requireAuth(request: Request) {
-  const startedAt = Date.now()
   const { supabase, headers } = createClient(request);
   const { data: userData, error: userError } = await supabase.auth.getUser();
   const user = userData?.user;
@@ -184,20 +183,10 @@ export async function requireAuth(request: Request) {
 
   const onboardingComplete = Boolean(claims?.onboarding_complete);
 
-  if (shouldLogAuthInstrumentation) {
-    console.info('[auth-instrumentation]', {
-      event: 'require_auth',
-      emailHint,
-      role,
-      durationMs: Date.now() - startedAt,
-      claimsPermissionCount: claimPermissions.length,
-      rolePermissionCount: rolePermissions.length,
-    })
-  }
-
   return {
     user,
     headers,
+    emailHint,
     claims: { role, permissions, onboardingComplete },
   };
 }
