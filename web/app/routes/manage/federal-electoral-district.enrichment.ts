@@ -11,13 +11,34 @@ type FamilyEdgeRow = {
 
 type ProfileRidingRow = {
   id: string
+  user_id: string | null
   role: Database['public']['Enums']['app_role'] | null
   federal_electoral_district_name: string | null
 }
 
+type FormSubmissionRow = {
+  id: string
+  profile_id: string | null
+  user_id: string | null
+  submitted_at: string | null
+}
+
+type FormAnswerRow = {
+  submission_id: string
+  question_code: string
+  value: unknown
+}
+
+type GiftCardBucket = 'pc' | 'sobeys' | 'other'
+
 const PROFILE_IN_BATCH_SIZE = 80
 const FAMILY_EDGE_IN_BATCH_SIZE = 40
 const RELATED_PROFILE_IN_BATCH_SIZE = 80
+const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
+const HOUSEHOLD_TOTAL_PEOPLE_QUESTION_CODE = 'household_total_people'
+const HOUSEHOLD_TOTAL_CHILDREN_QUESTION_CODE = 'household_total_children'
+const MAX_REASONABLE_HOUSEHOLD_PEOPLE = 30
+const MAX_REASONABLE_HOUSEHOLD_CHILDREN = 30
 
 const statusBucketFor = (status: Database['public']['Enums']['workshop_enrollment_status']) => {
   if (status === 'approved') return 'accepted'
@@ -34,6 +55,54 @@ const canonicalRiding = (value: string) =>
     .replace(/[—–−]/g, '-')
     .replace(/\s+/g, ' ')
     .toLowerCase()
+
+const normalizeGiftCardBucket = (value: unknown): GiftCardBucket | null => {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return null
+  if (
+    normalized.includes('president') ||
+    normalized.includes('pc') ||
+    normalized.includes('loblaw') ||
+    normalized.includes('superstore') ||
+    normalized.includes('no frills') ||
+    normalized.includes('fortinos') ||
+    normalized.includes('t&t')
+  ) {
+    return 'pc'
+  }
+  if (
+    normalized.includes('sobeys') ||
+    normalized.includes('freshco') ||
+    normalized.includes('safeway') ||
+    normalized.includes('foodland') ||
+    normalized.includes('iga') ||
+    normalized.includes('thrifty')
+  ) {
+    return 'sobeys'
+  }
+  return 'other'
+}
+
+const normalizeNumericAnswer = ({
+  value,
+  min,
+  max,
+}: {
+  value: unknown
+  min: number
+  max: number
+}): number | null => {
+  const parsed =
+    typeof value === 'number' && Number.isFinite(value)
+      ? value
+      : typeof value === 'string'
+        ? Number(value.trim())
+        : Number.NaN
+  if (!Number.isFinite(parsed)) return null
+  if (parsed < min || parsed > max) return null
+  return parsed
+}
 
 const chunk = <T,>(items: T[], size: number) => {
   if (!items.length || size <= 0) return [] as T[][]
@@ -90,9 +159,31 @@ export async function loader({ request }: { request: Request }) {
     return Response.json({ byRiding: {} }, { headers: auth.headers })
   }
 
-  const byRiding = ridingNames.reduce<Record<string, { total: number; accepted: number; pending: number; waitlisted: number; declined: number }>>(
+  const byRiding = ridingNames.reduce<Record<string, {
+    total: number
+    accepted: number
+    pending: number
+    waitlisted: number
+    declined: number
+    giftcard_pc: number
+    giftcard_sobeys: number
+    giftcard_meal_kit: number
+    household_count: number
+    household_child_count: number
+  }>>(
     (acc, riding) => {
-      acc[riding] = { total: 0, accepted: 0, pending: 0, waitlisted: 0, declined: 0 }
+      acc[riding] = {
+        total: 0,
+        accepted: 0,
+        pending: 0,
+        waitlisted: 0,
+        declined: 0,
+        giftcard_pc: 0,
+        giftcard_sobeys: 0,
+        giftcard_meal_kit: 0,
+        household_count: 0,
+        household_child_count: 0,
+      }
       return acc
     },
     {}
@@ -100,6 +191,22 @@ export async function loader({ request }: { request: Request }) {
 
   const requestedRidingByCanonical = new Map(
     ridingNames.map(riding => [canonicalRiding(riding), riding])
+  )
+
+  const { data: requestedDistrictRows, error: districtError } = await supabase
+    .from('federal_electoral_district')
+    .select('name, meal_kit')
+    .in('name', ridingNames)
+
+  if (districtError) {
+    console.error('[federal-electoral-district] failed to load requested district rows', districtError)
+    return Response.json({ byRiding }, { headers: auth.headers })
+  }
+
+  const mealKitByRequestedRiding = new Map(
+    (requestedDistrictRows ?? [])
+      .map(row => [row.name, row.meal_kit === true] as const)
+      .filter((entry): entry is [string, boolean] => typeof entry[0] === 'string')
   )
 
   const { data: enrollmentRows, error: enrollmentError } = await supabase
@@ -128,7 +235,7 @@ export async function loader({ request }: { request: Request }) {
   for (const profileChunk of chunk(profileIds, PROFILE_IN_BATCH_SIZE)) {
     const { data, error } = await supabase
       .from('profile')
-      .select('id, role, federal_electoral_district_name')
+      .select('id, user_id, role, federal_electoral_district_name')
       .in('id', profileChunk)
 
     if (error) {
@@ -140,6 +247,16 @@ export async function loader({ request }: { request: Request }) {
   }
 
   const profileById = new Map(profileRows.map(row => [row.id, row]))
+  const profileIdsByUserId = new Map<string, string[]>()
+  for (const row of profileRows) {
+    const userId = typeof row.user_id === 'string' ? row.user_id : ''
+    if (!userId) continue
+    const existing = profileIdsByUserId.get(userId) ?? []
+    if (!existing.includes(row.id)) {
+      existing.push(row.id)
+      profileIdsByUserId.set(userId, existing)
+    }
+  }
   const ridingByProfileId = new Map(
     profileRows
       .map(row => [row.id, typeof row.federal_electoral_district_name === 'string' ? row.federal_electoral_district_name.trim() : ''] as const)
@@ -196,7 +313,7 @@ export async function loader({ request }: { request: Request }) {
   for (const relatedChunk of chunk(missingRelatedProfileIds, RELATED_PROFILE_IN_BATCH_SIZE)) {
     const { data: relatedProfiles, error: relatedProfilesError } = await supabase
       .from('profile')
-      .select('id, federal_electoral_district_name')
+      .select('id, user_id, role, federal_electoral_district_name')
       .in('id', relatedChunk)
 
     if (relatedProfilesError) {
@@ -212,8 +329,223 @@ export async function loader({ request }: { request: Request }) {
           : ''
       if (!relatedId || !relatedRiding) continue
       ridingByProfileId.set(relatedId, relatedRiding)
+      if (!profileById.has(relatedId)) {
+        profileById.set(relatedId, {
+          id: relatedId,
+          user_id: typeof related.user_id === 'string' ? related.user_id : null,
+          role: (related.role ?? null) as Database['public']['Enums']['app_role'] | null,
+          federal_electoral_district_name: relatedRiding,
+        })
+      }
+      if (typeof related.user_id === 'string' && related.user_id) {
+        const existing = profileIdsByUserId.get(related.user_id) ?? []
+        if (!existing.includes(relatedId)) {
+          existing.push(relatedId)
+          profileIdsByUserId.set(related.user_id, existing)
+        }
+      }
     }
   }
+
+  const familyAdjacency = new Map<string, Set<string>>()
+  for (const profileId of profileById.keys()) {
+    familyAdjacency.set(profileId, new Set())
+  }
+  for (const edgeKey of familyEdgeKeys) {
+    const [guardianId, childId] = edgeKey.split(':')
+    if (!guardianId || !childId) continue
+    if (!familyAdjacency.has(guardianId)) {
+      familyAdjacency.set(guardianId, new Set())
+    }
+    if (!familyAdjacency.has(childId)) {
+      familyAdjacency.set(childId, new Set())
+    }
+    familyAdjacency.get(guardianId)?.add(childId)
+    familyAdjacency.get(childId)?.add(guardianId)
+  }
+
+  const householdKeyByProfileId = new Map<string, string>()
+  const householdMembersByKey = new Map<string, string[]>()
+  const visitedProfiles = new Set<string>()
+
+  for (const startProfileId of familyAdjacency.keys()) {
+    if (visitedProfiles.has(startProfileId)) continue
+    const queue = [startProfileId]
+    const members: string[] = []
+    visitedProfiles.add(startProfileId)
+
+    while (queue.length) {
+      const current = queue.shift()
+      if (!current) continue
+      members.push(current)
+      for (const neighbor of familyAdjacency.get(current) ?? []) {
+        if (visitedProfiles.has(neighbor)) continue
+        visitedProfiles.add(neighbor)
+        queue.push(neighbor)
+      }
+    }
+
+    members.sort((left, right) => left.localeCompare(right))
+    const householdKey = members[0] ?? startProfileId
+    householdMembersByKey.set(householdKey, members)
+    for (const memberId of members) {
+      householdKeyByProfileId.set(memberId, householdKey)
+    }
+  }
+
+  const submissionRowsById = new Map<string, FormSubmissionRow>()
+  for (const profileChunk of chunk(Array.from(profileById.keys()), PROFILE_IN_BATCH_SIZE)) {
+    const { data: submissions, error } = await supabase
+      .from('form_submission')
+      .select('id, profile_id, user_id, submitted_at')
+      .in('profile_id', profileChunk)
+
+    if (error) {
+      console.error('[federal-electoral-district] failed to load form submissions by profile', error)
+      continue
+    }
+
+    for (const row of (submissions ?? []) as FormSubmissionRow[]) {
+      submissionRowsById.set(row.id, row)
+    }
+  }
+
+  for (const userChunk of chunk(Array.from(profileIdsByUserId.keys()), PROFILE_IN_BATCH_SIZE)) {
+    const { data: submissions, error } = await supabase
+      .from('form_submission')
+      .select('id, profile_id, user_id, submitted_at')
+      .in('user_id', userChunk)
+
+    if (error) {
+      console.error('[federal-electoral-district] failed to load form submissions by user', error)
+      continue
+    }
+
+    for (const row of (submissions ?? []) as FormSubmissionRow[]) {
+      submissionRowsById.set(row.id, row)
+    }
+  }
+
+  const latestGiftCardByProfileId = new Map<string, { bucket: GiftCardBucket; submittedAt: number }>()
+  const latestHouseholdPeopleByProfileId = new Map<string, { value: number; submittedAt: number }>()
+  const latestHouseholdChildrenByProfileId = new Map<string, { value: number; submittedAt: number }>()
+  const submissionIds = Array.from(submissionRowsById.keys())
+  for (const submissionChunk of chunk(submissionIds, PROFILE_IN_BATCH_SIZE)) {
+    const { data: answers, error } = await supabase
+      .from('form_answer')
+      .select('submission_id, question_code, value')
+      .in('question_code', [
+        GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
+        HOUSEHOLD_TOTAL_PEOPLE_QUESTION_CODE,
+        HOUSEHOLD_TOTAL_CHILDREN_QUESTION_CODE,
+      ])
+      .in('submission_id', submissionChunk)
+
+    if (error) {
+      console.error('[federal-electoral-district] failed to load gift card answers', error)
+      continue
+    }
+
+    for (const answer of (answers ?? []) as FormAnswerRow[]) {
+      const submission = submissionRowsById.get(answer.submission_id)
+      if (!submission) continue
+
+      const submittedAt = Date.parse(submission.submitted_at ?? '')
+      const submittedAtTime = Number.isNaN(submittedAt) ? 0 : submittedAt
+      const submissionProfileId =
+        typeof submission.profile_id === 'string' && submission.profile_id ? submission.profile_id : null
+      const submissionUserId = typeof submission.user_id === 'string' && submission.user_id ? submission.user_id : null
+
+      const associatedProfileIds = new Set<string>()
+      if (submissionProfileId) {
+        associatedProfileIds.add(submissionProfileId)
+      }
+      if (submissionUserId) {
+        for (const profileId of profileIdsByUserId.get(submissionUserId) ?? []) {
+          associatedProfileIds.add(profileId)
+        }
+      }
+
+      const householdAssociatedProfileIds = new Set<string>()
+      if (submissionProfileId) {
+        householdAssociatedProfileIds.add(submissionProfileId)
+      } else if (submissionUserId) {
+        for (const profileId of profileIdsByUserId.get(submissionUserId) ?? []) {
+          householdAssociatedProfileIds.add(profileId)
+        }
+      }
+
+      if (answer.question_code === GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE) {
+        const bucket = normalizeGiftCardBucket(answer.value)
+        if (!bucket) continue
+        for (const profileId of associatedProfileIds) {
+          const existing = latestGiftCardByProfileId.get(profileId)
+          if (!existing || submittedAtTime > existing.submittedAt) {
+            latestGiftCardByProfileId.set(profileId, { bucket, submittedAt: submittedAtTime })
+          }
+        }
+        continue
+      }
+
+      if (answer.question_code === HOUSEHOLD_TOTAL_PEOPLE_QUESTION_CODE) {
+        const value = normalizeNumericAnswer({
+          value: answer.value,
+          min: 1,
+          max: MAX_REASONABLE_HOUSEHOLD_PEOPLE,
+        })
+        if (value === null) continue
+        for (const profileId of householdAssociatedProfileIds) {
+          const existing = latestHouseholdPeopleByProfileId.get(profileId)
+          if (!existing || submittedAtTime > existing.submittedAt) {
+            latestHouseholdPeopleByProfileId.set(profileId, { value, submittedAt: submittedAtTime })
+          }
+        }
+        continue
+      }
+
+      if (answer.question_code === HOUSEHOLD_TOTAL_CHILDREN_QUESTION_CODE) {
+        const value = normalizeNumericAnswer({
+          value: answer.value,
+          min: 0,
+          max: MAX_REASONABLE_HOUSEHOLD_CHILDREN,
+        })
+        if (value === null) continue
+        for (const profileId of householdAssociatedProfileIds) {
+          const existing = latestHouseholdChildrenByProfileId.get(profileId)
+          if (!existing || submittedAtTime > existing.submittedAt) {
+            latestHouseholdChildrenByProfileId.set(profileId, { value, submittedAt: submittedAtTime })
+          }
+        }
+      }
+    }
+  }
+
+  const householdPeopleByKey = new Map<string, number>()
+  const householdChildrenByKey = new Map<string, number>()
+  for (const [householdKey, householdMembers] of householdMembersByKey.entries()) {
+    let resolvedPeople = 0
+    let resolvedPeopleSubmittedAt = -1
+    let resolvedChildren = 0
+    let resolvedChildrenSubmittedAt = -1
+    for (const candidateProfileId of householdMembers) {
+      const people = latestHouseholdPeopleByProfileId.get(candidateProfileId)
+      if (people && people.submittedAt > resolvedPeopleSubmittedAt) {
+        resolvedPeople = people.value
+        resolvedPeopleSubmittedAt = people.submittedAt
+      }
+
+      const children = latestHouseholdChildrenByProfileId.get(candidateProfileId)
+      if (children && children.submittedAt > resolvedChildrenSubmittedAt) {
+        resolvedChildren = children.value
+        resolvedChildrenSubmittedAt = children.submittedAt
+      }
+    }
+
+    householdPeopleByKey.set(householdKey, resolvedPeople)
+    householdChildrenByKey.set(householdKey, resolvedChildren)
+  }
+
+  const seenHouseholdsByRiding = new Map<string, Set<string>>()
 
   for (const enrollment of enrollmentRows ?? []) {
     const profileId = typeof enrollment.profile_id === 'string' ? enrollment.profile_id : ''
@@ -248,6 +580,48 @@ export async function loader({ request }: { request: Request }) {
 
     byRiding[requestedRiding].total += 1
     byRiding[requestedRiding][bucket] += 1
+
+    const householdId = householdKeyByProfileId.get(profileId) ?? profileId
+
+    const seenHouseholds = seenHouseholdsByRiding.get(requestedRiding) ?? new Set<string>()
+    if (seenHouseholds.has(householdId)) continue
+    seenHouseholds.add(householdId)
+    seenHouseholdsByRiding.set(requestedRiding, seenHouseholds)
+
+    const householdPeople = Number(householdPeopleByKey.get(householdId) ?? 0)
+    if (Number.isFinite(householdPeople) && householdPeople >= 0) {
+      byRiding[requestedRiding].household_count += householdPeople
+    }
+
+    const householdChildren = Number(householdChildrenByKey.get(householdId) ?? 0)
+    if (Number.isFinite(householdChildren) && householdChildren >= 0) {
+      byRiding[requestedRiding].household_child_count += householdChildren
+    }
+
+    if (mealKitByRequestedRiding.get(requestedRiding) === true) {
+      byRiding[requestedRiding].giftcard_meal_kit += 1
+      continue
+    }
+
+    const giftCardCandidates = new Set<string>(householdMembersByKey.get(householdId) ?? [profileId])
+    giftCardCandidates.add(profileId)
+
+    let resolvedGiftCardBucket: GiftCardBucket | null = null
+    let resolvedGiftCardSubmittedAt = -1
+    for (const candidateProfileId of giftCardCandidates) {
+      const giftCard = latestGiftCardByProfileId.get(candidateProfileId)
+      if (!giftCard) continue
+      if (giftCard.submittedAt > resolvedGiftCardSubmittedAt) {
+        resolvedGiftCardBucket = giftCard.bucket
+        resolvedGiftCardSubmittedAt = giftCard.submittedAt
+      }
+    }
+
+    if (resolvedGiftCardBucket === 'pc') {
+      byRiding[requestedRiding].giftcard_pc += 1
+    } else if (resolvedGiftCardBucket === 'sobeys') {
+      byRiding[requestedRiding].giftcard_sobeys += 1
+    }
   }
 
   return Response.json({ byRiding }, { headers: auth.headers })

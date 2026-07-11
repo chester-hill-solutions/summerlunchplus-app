@@ -2,12 +2,19 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'react-router'
-import { Filter } from 'lucide-react'
+import { Filter, Plus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { Constants, type Database } from '@/lib/database.types'
 import { getOffsetMinutesForLocalDateTime, toLocalDateTimeInputValue } from '@/lib/datetime'
+import {
+  filterClauseSignature,
+  matchesFilterClause,
+  parseFilterClausesFromSearchParams,
+  serializeFilterClause,
+  type FilterClause,
+} from '@/lib/table-filter-params'
 
 type TimestampLabelValue = {
   timestamp: unknown
@@ -121,6 +128,11 @@ type FederalDistrictCounts = {
   pending: number
   waitlisted: number
   declined: number
+  giftcard_pc: number
+  giftcard_sobeys: number
+  giftcard_meal_kit: number
+  household_count: number
+  household_child_count: number
 }
 
 type FederalDistrictEnrichmentResponse = {
@@ -181,7 +193,6 @@ type AttendancePhotoResponse = {
 
 const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500, 1000, 1500] as const
-const FILTER_EMPTY_TOKEN = '__none__'
 const FILTER_POPOVER_WIDTH = 256
 const FILTER_POPOVER_MARGIN = 8
 const FILTER_POPOVER_ESTIMATED_HEIGHT = 340
@@ -411,6 +422,55 @@ const TABLE_SELECT_CLASS_NAME =
 const normalizeFilterValues = (values: string[]) =>
   Array.from(new Set(values.filter(value => value !== undefined)))
 
+const toFilterClauseForSelectedValues = ({
+  selectedValues,
+  allOptions,
+}: {
+  selectedValues: string[]
+  allOptions: string[]
+}): FilterClause | null => {
+  const normalizedSelected = normalizeFilterValues(selectedValues)
+  const normalizedAll = normalizeFilterValues(allOptions)
+  const allSet = new Set(normalizedAll)
+  const uniqueSelected = normalizedSelected.filter(value => allSet.has(value))
+
+  if (uniqueSelected.length === normalizedAll.length) {
+    return null
+  }
+
+  const isEmptyOnly = uniqueSelected.length === 1 && uniqueSelected[0] === ''
+  if (isEmptyOnly) {
+    return { op: 'is_empty' }
+  }
+
+  const nonEmptyOptions = normalizedAll.filter(option => option !== '')
+  const nonEmptySelected = uniqueSelected.filter(option => option !== '')
+  if (nonEmptyOptions.length > 0 && nonEmptySelected.length === nonEmptyOptions.length && !uniqueSelected.includes('')) {
+    return { op: 'is_not_empty' }
+  }
+
+  const deselected = normalizedAll.filter(option => !uniqueSelected.includes(option))
+  if (deselected.length > 0 && deselected.length < uniqueSelected.length) {
+    return { op: 'not_in', values: deselected }
+  }
+
+  return { op: 'in', values: uniqueSelected }
+}
+
+const selectedValuesForClause = ({
+  clause,
+  allOptions,
+}: {
+  clause: FilterClause | undefined
+  allOptions: string[]
+}) => {
+  if (!clause) return allOptions
+  if (clause.op === 'is_empty') return allOptions.filter(option => option === '')
+  if (clause.op === 'is_not_empty') return allOptions.filter(option => option !== '')
+  if (clause.op === 'in') return clause.values
+  return allOptions.filter(option => !clause.values.includes(option))
+}
+
 const displayFilterOption = (value: string) =>
   value === '' ? FILTER_EMPTY_LABEL : value
 
@@ -432,12 +492,12 @@ const sortFilterOptions = (values: string[]) => {
   return deduped
 }
 
-const filterKeySignature = (input: Record<string, string[]>, excludedColumn: string) => {
+const filterKeySignature = (input: Record<string, FilterClause>, excludedColumn: string) => {
   const keys = Object.keys(input)
     .filter(key => key !== excludedColumn)
     .sort((left, right) => left.localeCompare(right))
   return keys
-    .map(key => `${key}:${(input[key] ?? []).slice().sort((a, b) => a.localeCompare(b)).join('|')}`)
+    .map(key => `${key}:${filterClauseSignature(input[key])}`)
     .join(';')
 }
 
@@ -581,6 +641,7 @@ type TableDisplayProps = {
   headerActions?: ReactNode
   paginationActions?: ReactNode
   data?: LoaderData
+  filterOptionsMode?: 'auto' | 'client' | 'server'
 }
 
 type ResizeState = {
@@ -738,7 +799,12 @@ const buildAutoColumnWidths = ({
   }
 }
 
-export default function TableDisplay({ headerActions, paginationActions, data }: TableDisplayProps = {}) {
+export default function TableDisplay({
+  headerActions,
+  paginationActions,
+  data,
+  filterOptionsMode = 'auto',
+}: TableDisplayProps = {}) {
   const routeData = useLoaderData() as LoaderData | undefined
   const source = data ?? routeData
   const {
@@ -764,7 +830,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   const [searchParams, setSearchParams] = useSearchParams()
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortStage, setSortStage] = useState<0 | 1 | 2>(0)
-  const [filters, setFilters] = useState<Record<string, string[]>>({})
+  const [filters, setFilters] = useState<Record<string, FilterClause>>({})
   const [filterDraftByColumn, setFilterDraftByColumn] = useState<Record<string, string[]>>({})
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(50)
@@ -870,6 +936,11 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
             pending: '...',
             waitlisted: '...',
             declined: '...',
+            giftcard_pc: '...',
+            giftcard_sobeys: '...',
+            giftcard_meal_kit: '...',
+            household_count: '...',
+            household_child_count: '...',
           }
         }
       }
@@ -884,23 +955,17 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     supportsFamilyContextHover,
   ])
 
+  const canUseClientFilterOptions =
+    !serverSideQuery ||
+    (typeof source?.totalRows === 'number' && source.totalRows > 0 && rowsWithEnrichment.length >= source.totalRows)
+  const shouldUseServerFilterOptions =
+    filterOptionsMode === 'server' ||
+    (filterOptionsMode === 'auto' && serverSideQuery && !canUseClientFilterOptions)
+
   useEffect(() => {
     const nextSort = searchParams.get('sort')
     const nextDir = searchParams.get('dir')
-    const nextFilters = columns.reduce<Record<string, string[]>>((acc, column) => {
-      const values = normalizeFilterValues(searchParams.getAll(`f_${column}`))
-      if (!values.length) {
-        return acc
-      }
-      const explicitValues = values.filter(value => value !== FILTER_EMPTY_TOKEN)
-      const hasEmptySelection = values.includes(FILTER_EMPTY_TOKEN)
-      if (hasEmptySelection && !explicitValues.length) {
-        acc[column] = []
-      } else if (explicitValues.length) {
-        acc[column] = explicitValues
-      }
-      return acc
-    }, {})
+    const nextFilters = parseFilterClausesFromSearchParams(searchParams, columns)
     const nextPageRaw = Number(searchParams.get('page') ?? '1')
     const nextPage = Number.isFinite(nextPageRaw) && nextPageRaw > 0 ? Math.floor(nextPageRaw) : 1
     const nextPageSizeRaw = Number(searchParams.get('pageSize') ?? '50')
@@ -1112,7 +1177,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   }, [activeHoverCard, visibleHoverCardCellId])
 
   const syncSearch = (
-    nextFilters: Record<string, string[]>,
+    nextFilters: Record<string, FilterClause>,
     nextSortColumn: string | null,
     nextSortStage: 0 | 1 | 2,
     nextPage: number,
@@ -1125,14 +1190,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     }
     for (const column of columns) {
       if (!hasOwn(nextFilters, column)) continue
-      const values = nextFilters[column] ?? []
-      if (!values.length) {
-        next.append(`f_${column}`, FILTER_EMPTY_TOKEN)
-        continue
-      }
-      for (const value of values) {
-        next.append(`f_${column}`, value)
-      }
+      next.set(`f_${column}`, serializeFilterClause(nextFilters[column]))
     }
     if (nextPage > 1) {
       next.set('page', String(nextPage))
@@ -1145,16 +1203,15 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
 
   const rowMatchesFilters = (
     row: Record<string, unknown>,
-    nextFilters: Record<string, string[]>,
+    nextFilters: Record<string, FilterClause>,
     excludedColumn?: string
   ) =>
     columns.every(column => {
       if (column === excludedColumn) return true
       if (!hasOwn(nextFilters, column)) return true
-      const selectedValues = nextFilters[column] ?? []
-      if (!selectedValues.length) return false
+      const clause = nextFilters[column]
       const cellValue = getCellValue(column, row, tableName)
-      return selectedValues.includes(cellValue)
+      return matchesFilterClause(cellValue, clause)
     })
 
   const filterDataRevision = useMemo(
@@ -1213,7 +1270,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     return cached
   }
 
-  const computeAllOptionsForColumn = (column: string, nextFilters: Record<string, string[]>) => {
+  const computeAllOptionsForColumn = (column: string, nextFilters: Record<string, FilterClause>) => {
     const nextOptions = new Set<string>()
     for (const row of rowsWithEnrichment) {
       if (!rowMatchesFilters(row, nextFilters, column)) continue
@@ -1246,7 +1303,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     }
     setOpenFilterCacheEntry(loadingEntry)
 
-    if (serverSideQuery) {
+    if (shouldUseServerFilterOptions) {
       void (async () => {
         const activeRequestId = filterActiveRequestRef.current.get(openFilterCacheKey)
         if (activeRequestId !== requestId) return
@@ -1256,14 +1313,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         query.set('column', openFilterColumn)
         for (const column of columns) {
           if (!hasOwn(filters, column)) continue
-          const values = filters[column] ?? []
-          if (!values.length) {
-            query.append(`f_${column}`, FILTER_EMPTY_TOKEN)
-            continue
-          }
-          for (const value of values) {
-            query.append(`f_${column}`, value)
-          }
+          query.set(`f_${column}`, serializeFilterClause(filters[column]))
         }
 
         try {
@@ -1282,7 +1332,14 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           if (activeAfterFetch !== requestId) return
 
           if (payload.status === 'loaded') {
-            const allOptions = sortFilterOptions(payload.allOptions ?? [])
+            const serverOptions = sortFilterOptions(payload.allOptions ?? [])
+            const localOptions = computeAllOptionsForColumn(openFilterColumn, filters)
+            const serverOnlyEmpty = serverOptions.length === 1 && serverOptions[0] === ''
+            const localHasNonEmpty = localOptions.some(option => option !== '')
+            const allOptions =
+              (serverOptions.length === 0 || serverOnlyEmpty) && localHasNonEmpty
+                ? localOptions
+                : serverOptions
             const loadedEntry: FilterOptionsCacheEntry = {
               status: 'loaded',
               allOptions,
@@ -1426,7 +1483,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         }
       }
 
-      const rowsWithFullEnrichment = rows.map(row => {
+      const rowsWithFullEnrichment = rowsWithEnrichment.map(row => {
         if (!isWorkshopEnrollmentTable && !isClassAttendance) return row
         const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
         if (!profileId) return row
@@ -1476,6 +1533,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       }
     }
   }, [
+    shouldUseServerFilterOptions,
     columns,
     filters,
     isClassAttendance,
@@ -1500,12 +1558,96 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         return aValue.localeCompare(bValue) * order
       })
     }
-    return adjustedRows
-  }, [rowsWithEnrichment, serverSideQuery, columns, filters, sortColumn, sortStage, tableName])
 
-  const totalRows = serverSideQuery ? Number(source?.totalRows ?? rowsWithEnrichment.length) : derivedRows.length
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
-  const effectivePage = Math.min(page, totalPages)
+    if (isFederalDistrictTable) {
+      const districtRows = adjustedRows.filter(row => row.__is_total_row !== true)
+      const unresolvedCountColumns = districtRows.some(
+        row =>
+          typeof row.total !== 'number' ||
+          typeof row.accepted !== 'number' ||
+          typeof row.pending !== 'number' ||
+          typeof row.waitlisted !== 'number' ||
+          typeof row.declined !== 'number' ||
+          typeof row.giftcard_pc !== 'number' ||
+          typeof row.giftcard_sobeys !== 'number' ||
+          typeof row.giftcard_meal_kit !== 'number' ||
+          typeof row.household_count !== 'number' ||
+          typeof row.household_child_count !== 'number'
+      )
+
+      const totals = unresolvedCountColumns
+        ? {
+            total: '...',
+            accepted: '...',
+            pending: '...',
+            waitlisted: '...',
+            declined: '...',
+            giftcard_pc: '...',
+            giftcard_sobeys: '...',
+            giftcard_meal_kit: '...',
+            household_count: '...',
+            household_child_count: '...',
+          }
+        : districtRows.reduce<FederalDistrictCounts>(
+            (acc, row) => {
+              acc.total += Number(row.total)
+              acc.accepted += Number(row.accepted)
+              acc.pending += Number(row.pending)
+              acc.waitlisted += Number(row.waitlisted)
+              acc.declined += Number(row.declined)
+              acc.giftcard_pc += Number(row.giftcard_pc)
+              acc.giftcard_sobeys += Number(row.giftcard_sobeys)
+              acc.giftcard_meal_kit += Number(row.giftcard_meal_kit)
+              acc.household_count += Number(row.household_count)
+              acc.household_child_count += Number(row.household_child_count)
+              return acc
+            },
+            {
+              total: 0,
+              accepted: 0,
+              pending: 0,
+              waitlisted: 0,
+              declined: 0,
+              giftcard_pc: 0,
+              giftcard_sobeys: 0,
+              giftcard_meal_kit: 0,
+              household_count: 0,
+              household_child_count: 0,
+            }
+          )
+
+      adjustedRows = [
+        {
+          __is_total_row: true,
+          _row_class: 'sticky top-0 z-20 bg-muted font-semibold',
+          code: '',
+          name: 'Total',
+          ...totals,
+        },
+        ...districtRows,
+      ]
+    }
+
+    return adjustedRows
+  }, [
+    rowsWithEnrichment,
+    serverSideQuery,
+    columns,
+    filters,
+    sortColumn,
+    sortStage,
+    tableName,
+    isFederalDistrictTable,
+  ])
+
+  const disablePaginationForTable = isFederalDistrictTable
+  const totalRows = isFederalDistrictTable
+    ? Math.max(0, derivedRows.length - 1)
+    : serverSideQuery
+      ? Number(source?.totalRows ?? rowsWithEnrichment.length)
+      : derivedRows.length
+  const totalPages = disablePaginationForTable ? 1 : Math.max(1, Math.ceil(totalRows / pageSize))
+  const effectivePage = disablePaginationForTable ? 1 : Math.min(page, totalPages)
   const hasActiveEnrichmentBackedFilters = useMemo(
     () =>
       Object.keys(filters).some(column =>
@@ -1522,30 +1664,32 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     [filters]
   )
   const baseFiltersForEnrichmentFetch = useMemo(() => {
-    const next: Record<string, string[]> = {}
-    for (const [column, values] of Object.entries(filters)) {
+    const next: Record<string, FilterClause> = {}
+    for (const [column, clause] of Object.entries(filters)) {
       if (
         WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column) ||
         CLASS_ATTENDANCE_FILTER_ENRICHMENT_COLUMNS.has(column)
       ) {
         continue
       }
-      next[column] = values
+      next[column] = clause
     }
     return next
   }, [filters])
 
   useEffect(() => {
+    if (disablePaginationForTable) return
     if (effectivePage === page) return
     setPage(effectivePage)
     syncSearch(filters, sortColumn, sortStage, effectivePage, pageSize)
-  }, [effectivePage, page, filters, sortColumn, sortStage, pageSize])
+  }, [disablePaginationForTable, effectivePage, page, filters, sortColumn, sortStage, pageSize])
 
   const paginatedRows = useMemo(() => {
+    if (disablePaginationForTable) return derivedRows
     if (serverSideQuery) return derivedRows
     const start = (effectivePage - 1) * pageSize
     return derivedRows.slice(start, start + pageSize)
-  }, [serverSideQuery, derivedRows, effectivePage, pageSize])
+  }, [disablePaginationForTable, serverSideQuery, derivedRows, effectivePage, pageSize])
 
   useEffect(() => {
     if (!isWorkshopEnrollmentTable && !isClassAttendance) return
@@ -1700,6 +1844,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           .filter(
             riding =>
               Boolean(riding) &&
+              riding !== 'Total' &&
               !districtCountsByRiding[riding] &&
               !loadingDistrictRidingsRef.current.has(riding)
           )
@@ -1729,6 +1874,11 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
             pending: 0,
             waitlisted: 0,
             declined: 0,
+            giftcard_pc: 0,
+            giftcard_sobeys: 0,
+            giftcard_meal_kit: 0,
+            household_count: 0,
+            household_child_count: 0,
           }
           return acc
         }, {})
@@ -1780,18 +1930,19 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     setFilters(prev => {
       const next = { ...prev }
       const normalized = normalizeFilterValues(values)
-      const isAllSelected = allOptionsForColumn.length > 0 && normalized.length === allOptionsForColumn.length
 
-      if (!normalized.length) {
-        if (emptyBehavior === 'all') {
-          delete next[column]
-        } else {
-          next[column] = []
-        }
-      } else if (isAllSelected) {
+      if (!normalized.length && emptyBehavior === 'all') {
         delete next[column]
       } else {
-        next[column] = normalized
+        const clause = toFilterClauseForSelectedValues({
+          selectedValues: normalized,
+          allOptions: allOptionsForColumn,
+        })
+        if (!clause) {
+          delete next[column]
+        } else {
+          next[column] = clause
+        }
       }
       setPage(1)
       syncSearch(next, sortColumn, sortStage, 1, pageSize)
@@ -1803,9 +1954,12 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     const value = serverSideQuery
       ? getFilterQueryValue(column, row, tableName)
       : getCellValue(column, row, tableName)
-    const current = filters[column] ?? []
-    if (current.includes(value)) return
     const allOptionsForColumn = computeAllOptionsForColumn(column, filters)
+    const current = selectedValuesForClause({
+      clause: filters[column],
+      allOptions: allOptionsForColumn,
+    })
+    if (current.includes(value)) return
     updateFilterValues(column, [...current, value], allOptionsForColumn)
   }
 
@@ -1884,10 +2038,10 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
   }
 
   const effectiveSelectedValuesForColumn = (column: string, allOptionsForColumn: string[]) => {
-    if (hasOwn(filters, column)) {
-      return filters[column] ?? []
-    }
-    return allOptionsForColumn
+    return selectedValuesForClause({
+      clause: hasOwn(filters, column) ? filters[column] : undefined,
+      allOptions: allOptionsForColumn,
+    })
   }
 
   const openFilterOptions = openFilterCacheEntry?.allOptions ?? []
@@ -2562,39 +2716,27 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         {headerActions ? <div className="ml-auto">{headerActions}</div> : null}
       </div>
 
-      {canInlineInsert ? (
+      {canInlineInsert && showCreate ? (
         <section className="relative z-30 mx-6 overflow-visible rounded-lg border bg-card p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Add row</h2>
-            <button
-              type="button"
-              onClick={() => setShowCreate(prev => !prev)}
-              className="rounded border border-input px-2 py-1 text-xs"
-            >
-              {showCreate ? 'Hide' : 'New row'}
-            </button>
-          </div>
-          {showCreate ? (
-            <div className="mt-3 space-y-3">
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {fieldKeys.map(fieldName =>
-                  editorConfig
-                    ? renderField(fieldName, editorConfig.fields[fieldName], createValues, setCreateValues)
-                    : null
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={submitCreate}
-                  disabled={editorFetcher.state === 'submitting'}
-                  className="rounded bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
-                >
-                  {editorFetcher.state === 'submitting' ? 'Saving...' : 'Create'}
-                </button>
-              </div>
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {fieldKeys.map(fieldName =>
+                editorConfig
+                  ? renderField(fieldName, editorConfig.fields[fieldName], createValues, setCreateValues)
+                  : null
+              )}
             </div>
-          ) : null}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={submitCreate}
+                disabled={editorFetcher.state === 'submitting'}
+                className="rounded bg-primary px-3 py-2 text-xs font-medium text-primary-foreground"
+              >
+                {editorFetcher.state === 'submitting' ? 'Saving...' : 'Create'}
+              </button>
+            </div>
+          </div>
         </section>
       ) : null}
 
@@ -2610,41 +2752,57 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         <p className="text-xs text-muted-foreground">Page {effectivePage} of {totalPages} ({totalRows} rows)</p>
         <div className="flex items-center gap-2 text-xs">
           {paginationActions ? <div className="mr-1">{paginationActions}</div> : null}
-          <label className="text-muted-foreground" htmlFor="page-size">
-            Rows per page
-          </label>
-          <select
-            id="page-size"
-            value={pageSize}
-            onChange={event => {
-              const nextPageSize = Number(event.target.value)
-              if (!PAGE_SIZE_OPTIONS.includes(nextPageSize as (typeof PAGE_SIZE_OPTIONS)[number])) return
-              setPageAndSync(1, nextPageSize)
-            }}
-            className="h-8 rounded border border-input bg-background px-2 pr-8"
-          >
-            {PAGE_SIZE_OPTIONS.map(option => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => setPageAndSync(effectivePage - 1)}
-            disabled={effectivePage <= 1}
-            className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Prev
-          </button>
-          <button
-            type="button"
-            onClick={() => setPageAndSync(effectivePage + 1)}
-            disabled={effectivePage >= totalPages}
-            className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Next
-          </button>
+          {canInlineInsert ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label={showCreate ? 'Hide new row form' : 'New row'}
+              title={showCreate ? 'Hide new row form' : 'New row'}
+              onClick={() => setShowCreate(prev => !prev)}
+            >
+              <Plus className="size-4" />
+            </Button>
+          ) : null}
+          {disablePaginationForTable ? null : (
+            <>
+              <label className="text-muted-foreground" htmlFor="page-size">
+                Rows per page
+              </label>
+              <select
+                id="page-size"
+                value={pageSize}
+                onChange={event => {
+                  const nextPageSize = Number(event.target.value)
+                  if (!PAGE_SIZE_OPTIONS.includes(nextPageSize as (typeof PAGE_SIZE_OPTIONS)[number])) return
+                  setPageAndSync(1, nextPageSize)
+                }}
+                className="h-8 rounded border border-input bg-background px-2 pr-8"
+              >
+                {PAGE_SIZE_OPTIONS.map(option => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setPageAndSync(effectivePage - 1)}
+                disabled={effectivePage <= 1}
+                className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageAndSync(effectivePage + 1)}
+                disabled={effectivePage >= totalPages}
+                className="rounded border border-input px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </>
+          )}
         </div>
       </div>
 

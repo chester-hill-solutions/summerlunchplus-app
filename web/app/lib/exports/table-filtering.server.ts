@@ -1,10 +1,14 @@
+import {
+  matchesFilterClause,
+  parseFilterClausesFromSearchParams,
+  type FilterClause,
+} from '@/lib/table-filter-params'
+
 type TimestampLabelValue = {
   timestamp: unknown
   label: unknown
   order?: unknown
 }
-
-export const FILTER_EMPTY_TOKEN = '__none__'
 
 const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
 
@@ -61,24 +65,8 @@ export const getCellValue = (column: string, row: Record<string, unknown>, table
   return (value ?? '').toString()
 }
 
-const normalizeFilterValues = (values: string[]) =>
-  Array.from(new Set(values.filter(value => value !== undefined)))
-
 export const parseFiltersFromSearchParams = (searchParams: URLSearchParams, columns: string[]) => {
-  return columns.reduce<Record<string, string[]>>((acc, column) => {
-    const values = normalizeFilterValues(searchParams.getAll(`f_${column}`))
-    if (!values.length) {
-      return acc
-    }
-    const explicitValues = values.filter(value => value !== FILTER_EMPTY_TOKEN)
-    const hasEmptySelection = values.includes(FILTER_EMPTY_TOKEN)
-    if (hasEmptySelection && !explicitValues.length) {
-      acc[column] = []
-    } else if (explicitValues.length) {
-      acc[column] = explicitValues
-    }
-    return acc
-  }, {})
+  return parseFilterClausesFromSearchParams(searchParams, columns)
 }
 
 const hasOwn = (obj: object, key: string) => Object.prototype.hasOwnProperty.call(obj, key)
@@ -86,15 +74,14 @@ const hasOwn = (obj: object, key: string) => Object.prototype.hasOwnProperty.cal
 const rowMatchesFilters = (
   row: Record<string, unknown>,
   columns: string[],
-  filters: Record<string, string[]>,
+  filters: Record<string, FilterClause>,
   tableName?: string
 ) =>
   columns.every(column => {
     if (!hasOwn(filters, column)) return true
-    const selectedValues = filters[column] ?? []
-    if (!selectedValues.length) return false
+    const clause = filters[column]
     const cellValue = getCellValue(column, row, tableName)
-    return selectedValues.includes(cellValue)
+    return matchesFilterClause(cellValue, clause)
   })
 
 export const applyFiltersAndSort = ({
@@ -107,7 +94,7 @@ export const applyFiltersAndSort = ({
 }: {
   rows: Record<string, unknown>[]
   columns: string[]
-  filters: Record<string, string[]>
+  filters: Record<string, FilterClause>
   sortColumn: string | null
   sortDir: 'asc' | 'desc' | null
   tableName?: string

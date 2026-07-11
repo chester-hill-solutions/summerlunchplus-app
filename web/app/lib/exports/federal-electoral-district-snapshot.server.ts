@@ -5,7 +5,23 @@ import { parseFiltersFromSearchParams } from './table-filtering.server'
 import { EXPORT_MAX_ROWS } from './types'
 
 const EXPORT_PAGE_SIZE = 1500
-const EXPORT_COLUMNS = ['code', 'name', 'meal_kit', 'total', 'accepted', 'pending', 'waitlisted', 'declined']
+const ENRICHMENT_RIDING_BATCH_SIZE = 30
+const EXPORT_COLUMNS = [
+  'code',
+  'name',
+  'whitelist',
+  'meal_kit',
+  'total',
+  'accepted',
+  'pending',
+  'waitlisted',
+  'declined',
+  'giftcard_pc',
+  'giftcard_sobeys',
+  'giftcard_meal_kit',
+  'household_count',
+  'household_child_count',
+]
 
 type DistrictCounts = {
   total: number
@@ -13,6 +29,11 @@ type DistrictCounts = {
   pending: number
   waitlisted: number
   declined: number
+  giftcard_pc: number
+  giftcard_sobeys: number
+  giftcard_meal_kit: number
+  household_count: number
+  household_child_count: number
 }
 
 const buildPagedRequest = ({ request, page }: { request: Request; page: number }) => {
@@ -20,6 +41,15 @@ const buildPagedRequest = ({ request, page }: { request: Request; page: number }
   url.searchParams.set('page', String(page))
   url.searchParams.set('pageSize', String(EXPORT_PAGE_SIZE))
   return new Request(url.toString(), request)
+}
+
+const chunkArray = <T,>(items: T[], size: number) => {
+  if (!items.length || size <= 0) return [] as T[][]
+  const chunks: T[][] = []
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size))
+  }
+  return chunks
 }
 
 const loadCountsByRiding = async ({
@@ -33,27 +63,32 @@ const loadCountsByRiding = async ({
     return {} as Record<string, DistrictCounts>
   }
 
-  const url = new URL('/manage/federal-electoral-district/enrichment', request.url)
-  for (const ridingName of ridingNames) {
-    url.searchParams.append('riding', ridingName)
+  const byRiding: Record<string, DistrictCounts> = {}
+  for (const ridingChunk of chunkArray(ridingNames, ENRICHMENT_RIDING_BATCH_SIZE)) {
+    const url = new URL('/manage/federal-electoral-district/enrichment', request.url)
+    for (const ridingName of ridingChunk) {
+      url.searchParams.append('riding', ridingName)
+    }
+
+    const enrichmentRequest = new Request(url.toString(), {
+      method: 'GET',
+      headers: request.headers,
+    })
+    const enrichmentResponse = await federalElectoralDistrictEnrichmentLoader({
+      request: enrichmentRequest,
+    } as Parameters<typeof federalElectoralDistrictEnrichmentLoader>[0])
+
+    if (!(enrichmentResponse instanceof Response) || !enrichmentResponse.ok) {
+      return {} as Record<string, DistrictCounts>
+    }
+
+    const payload = (await enrichmentResponse.json()) as {
+      byRiding?: Record<string, DistrictCounts>
+    }
+    Object.assign(byRiding, payload.byRiding ?? {})
   }
 
-  const enrichmentRequest = new Request(url.toString(), {
-    method: 'GET',
-    headers: request.headers,
-  })
-  const enrichmentResponse = await federalElectoralDistrictEnrichmentLoader({
-    request: enrichmentRequest,
-  } as Parameters<typeof federalElectoralDistrictEnrichmentLoader>[0])
-
-  if (!(enrichmentResponse instanceof Response) || !enrichmentResponse.ok) {
-    return {} as Record<string, DistrictCounts>
-  }
-
-  const payload = (await enrichmentResponse.json()) as {
-    byRiding?: Record<string, DistrictCounts>
-  }
-  return payload.byRiding ?? {}
+  return byRiding
 }
 
 export const buildFederalElectoralDistrictSnapshot = async ({ request }: { request: Request }) => {
@@ -92,16 +127,33 @@ export const buildFederalElectoralDistrictSnapshot = async ({ request }: { reque
 
   const exportRows = rows.map(row => {
     const name = typeof row.name === 'string' ? row.name : ''
-    const counts = countsByRiding[name] ?? { total: 0, accepted: 0, pending: 0, waitlisted: 0, declined: 0 }
+    const counts = countsByRiding[name] ?? {
+      total: 0,
+      accepted: 0,
+      pending: 0,
+      waitlisted: 0,
+      declined: 0,
+      giftcard_pc: 0,
+      giftcard_sobeys: 0,
+      giftcard_meal_kit: 0,
+      household_count: 0,
+      household_child_count: 0,
+    }
     return {
       code: row.code,
       name,
+      whitelist: row.whitelist,
       meal_kit: row.meal_kit,
       total: counts.total,
       accepted: counts.accepted,
       pending: counts.pending,
       waitlisted: counts.waitlisted,
       declined: counts.declined,
+      giftcard_pc: counts.giftcard_pc,
+      giftcard_sobeys: counts.giftcard_sobeys,
+      giftcard_meal_kit: counts.giftcard_meal_kit,
+      household_count: counts.household_count,
+      household_child_count: counts.household_child_count,
     }
   })
 

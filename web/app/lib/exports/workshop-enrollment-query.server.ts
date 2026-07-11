@@ -18,6 +18,7 @@ export async function loadWorkshopEnrollmentData(request: Request) {
   const auth = await requireAuth(request)
   profile.mark('require_auth', {
     role: auth.claims.role,
+    emailHint: auth.emailHint,
   })
 
   const canManageEnrollments = isRoleAtLeast(auth.claims.role, 'admin')
@@ -332,6 +333,8 @@ export async function loadWorkshopEnrollmentData(request: Request) {
     rowCount: result.rows.length,
     profileIdCount: profileIds.length,
     workshopIdCount: workshopIds.length,
+    emailHint: auth.emailHint,
+    role: auth.claims.role,
   })
 
   return result

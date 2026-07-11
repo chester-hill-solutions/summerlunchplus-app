@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createLoaderProfile } from '@/lib/loader-profile.server'
+import { parseFilterClausesFromSearchParams, type FilterClause } from '@/lib/table-filter-params'
 import { TABLE_DEFINITIONS } from './table-definitions'
 import type { LoaderFunctionArgs } from 'react-router'
 
@@ -12,13 +13,6 @@ const IN_CLAUSE_BATCH_SIZE = 150
 const FETCH_BATCH_SIZE = 1000
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500, 1000, 1500] as const
 const DEFAULT_PAGE_SIZE = 50
-const FILTER_EMPTY_TOKEN = '__none__'
-
-type ParsedFilter = {
-  values: string[]
-  includeEmpty: boolean
-}
-
 const chunkArray = <T,>(items: T[], size: number) => {
   if (size <= 0 || !items.length) return [] as T[][]
   const chunks: T[][] = []
@@ -78,19 +72,28 @@ const parsePaginationState = (request: Request) => {
   return { page, pageSize, searchParams }
 }
 
-const parseFiltersFromSearch = (columns: string[], searchParams: URLSearchParams): Record<string, ParsedFilter> => {
-  return columns.reduce<Record<string, ParsedFilter>>((acc, column) => {
-    const values = Array.from(new Set(searchParams.getAll(`f_${column}`)))
-    if (!values.length) return acc
+const toPostgrestInList = (values: string[]) => {
+  const encoded = values.map(value => `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
+  return `(${encoded.join(',')})`
+}
 
-    const includeEmpty = values.includes(FILTER_EMPTY_TOKEN)
-    const explicitValues = values.filter(value => value !== FILTER_EMPTY_TOKEN)
-    acc[column] = {
-      values: explicitValues,
-      includeEmpty,
-    }
-    return acc
-  }, {})
+const applyClauseToSupabaseQuery = ({
+  query,
+  column,
+  clause,
+}: {
+  query: any
+  column: string
+  clause: FilterClause
+}) => {
+  if (clause.op === 'is_empty') return query.is(column, null)
+  if (clause.op === 'is_not_empty') return query.not(column, 'is', null)
+  if (clause.op === 'in') {
+    if (clause.values.length === 1) return query.eq(column, clause.values[0])
+    return query.in(column, clause.values)
+  }
+  if (!clause.values.length) return query
+  return query.not(column, 'in', toPostgrestInList(clause.values))
 }
 
 const fetchAllRowsInBatches = async ({
@@ -615,14 +618,11 @@ export function createTableLoader(tableName: string) {
       const requestedSortAscending = requestedSortDirection === 'asc'
       const orderAscending = definition.orderAscending ?? true
       const selectableColumns = new Set(parseTopLevelSelectColumns(definition.select))
-      const parsedFilters = parseFiltersFromSearch(definition.columns, searchParams)
+      const parsedFilters = parseFilterClausesFromSearchParams(searchParams, definition.columns)
 
       const hasUnsupportedFilter = Object.keys(parsedFilters).some(column => !selectableColumns.has(column))
       const hasUnsupportedSort = requestedSortColumn.length > 0 && !selectableColumns.has(requestedSortColumn)
-      const hasMixedEmptyAndExplicit = Object.values(parsedFilters).some(
-        filter => filter.includeEmpty && filter.values.length > 0
-      )
-      const useServerSideQuery = !(hasUnsupportedFilter || hasUnsupportedSort || hasMixedEmptyAndExplicit)
+      const useServerSideQuery = !(hasUnsupportedFilter || hasUnsupportedSort)
       profile.mark('parse_request', {
         page,
         pageSize,
@@ -638,21 +638,27 @@ export function createTableLoader(tableName: string) {
       if (useServerSideQuery) {
         let query = fromQualifiedTable(supabase, definition.table)
           .select(definition.select, { count: 'exact' })
+        let matchesNone = false
 
         for (const [column, filter] of Object.entries(parsedFilters)) {
           if (!selectableColumns.has(column)) continue
-          if (filter.includeEmpty && filter.values.length === 0) {
-            query = query.is(column, null)
-            continue
+          if (filter.op === 'in' && filter.values.length === 0) {
+            matchesNone = true
+            break
           }
-          if (filter.values.length === 1) {
-            query = query.eq(column, filter.values[0])
-            continue
-          }
-          if (filter.values.length > 1) {
-            query = query.in(column, filter.values)
-          }
+          query = applyClauseToSupabaseQuery({ query, column, clause: filter })
         }
+
+        if (matchesNone) {
+          rows = []
+          totalRows = 0
+          profile.mark('fetch_rows_server_side', {
+            rowCount: 0,
+            totalRows: 0,
+            orderColumn: requestedSortColumn || definition.order,
+            ascending: requestedSortColumn ? requestedSortAscending : orderAscending,
+          })
+        } else {
 
         const orderColumn =
           requestedSortColumn && selectableColumns.has(requestedSortColumn)
@@ -679,6 +685,7 @@ export function createTableLoader(tableName: string) {
           orderColumn,
           ascending,
         })
+        }
       } else {
         rows = await fetchAllRowsInBatches({
           supabase,

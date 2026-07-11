@@ -1,12 +1,16 @@
 import { createClient } from '@/lib/supabase/server'
 import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
+import {
+  matchesFilterClause,
+  parseFilterClausesFromSearchParams,
+  type FilterClause,
+} from '@/lib/table-filter-params'
 import { TABLE_DEFINITIONS } from './table-definitions'
 import { createTableLoader } from './table-loader'
 import { loadWorkshopEnrollmentEnrichment } from './workshop-enrollment-enrichment.server'
 import type { LoaderFunctionArgs } from 'react-router'
 
 const FETCH_BATCH_SIZE = 1000
-const FILTER_EMPTY_TOKEN = '__none__'
 const CLASS_ENROLLMENT_WORKSHOP_ENRICHMENT_COLUMNS = new Set([
   'riding_display',
   'geo_locations_display',
@@ -28,11 +32,6 @@ const CLASS_ENROLLMENT_FAMILY_CONTEXT_COLUMNS = new Set([
   'profile_hover_student_submitted_address',
   'profile_hover_parent_address',
 ])
-
-type ParsedFilter = {
-  values: string[]
-  includeEmpty: boolean
-}
 
 const parseTopLevelSelectColumns = (select: string) => {
   const columns: string[] = []
@@ -72,19 +71,28 @@ const parseTopLevelSelectColumns = (select: string) => {
   return Array.from(new Set(columns))
 }
 
-const parseFiltersFromSearch = (columns: string[], searchParams: URLSearchParams): Record<string, ParsedFilter> => {
-  return columns.reduce<Record<string, ParsedFilter>>((acc, column) => {
-    const values = Array.from(new Set(searchParams.getAll(`f_${column}`)))
-    if (!values.length) return acc
+const toPostgrestInList = (values: string[]) => {
+  const encoded = values.map(value => `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
+  return `(${encoded.join(',')})`
+}
 
-    const includeEmpty = values.includes(FILTER_EMPTY_TOKEN)
-    const explicitValues = values.filter(value => value !== FILTER_EMPTY_TOKEN)
-    acc[column] = {
-      values: explicitValues,
-      includeEmpty,
-    }
-    return acc
-  }, {})
+const applyClauseToSupabaseQuery = ({
+  query,
+  column,
+  clause,
+}: {
+  query: any
+  column: string
+  clause: FilterClause
+}) => {
+  if (clause.op === 'is_empty') return query.is(column, null)
+  if (clause.op === 'is_not_empty') return query.not(column, 'is', null)
+  if (clause.op === 'in') {
+    if (clause.values.length === 1) return query.eq(column, clause.values[0])
+    return query.in(column, clause.values)
+  }
+  if (!clause.values.length) return query
+  return query.not(column, 'in', toPostgrestInList(clause.values))
 }
 
 const fromQualifiedTable = (supabase: ReturnType<typeof createClient>['supabase'], qualifiedTable: string) => {
@@ -123,17 +131,13 @@ const sortFilterOptions = (values: string[]) => {
 
 const rowMatchesFilters = (
   row: Record<string, unknown>,
-  parsedFilters: Record<string, ParsedFilter>,
+  parsedFilters: Record<string, FilterClause>,
   excludedColumn: string
 ) => {
   for (const [filterColumn, filter] of Object.entries(parsedFilters)) {
     if (filterColumn === excludedColumn) continue
     const rowValue = toOptionValue(row[filterColumn])
-    if (filter.includeEmpty && filter.values.length === 0) {
-      if (rowValue !== '') return false
-      continue
-    }
-    if (filter.values.length > 0 && !filter.values.includes(rowValue)) {
+    if (!matchesFilterClause(rowValue, filter)) {
       return false
     }
   }
@@ -237,17 +241,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const { supabase, headers } = createClient(request)
   const selectableColumns = new Set(parseTopLevelSelectColumns(definition.select))
-  const parsedFilters = parseFiltersFromSearch(definition.columns, url.searchParams)
+  const parsedFilters = parseFilterClausesFromSearchParams(url.searchParams, definition.columns)
 
   const hasUnsupportedFilter = Object.keys(parsedFilters).some(
     filterColumn => filterColumn !== column && !selectableColumns.has(filterColumn)
   )
-  const hasMixedEmptyAndExplicit = Object.values(parsedFilters).some(
-    filter => filter.includeEmpty && filter.values.length > 0
-  )
   const isSelectableColumn = selectableColumns.has(column)
 
-  if (hasUnsupportedFilter || hasMixedEmptyAndExplicit || !isSelectableColumn) {
+  if (hasUnsupportedFilter || !isSelectableColumn) {
     try {
       let rows = await loadAllRowsViaTableLoader(request, tableName)
       if (tableName === 'class-enrollment') {
@@ -285,6 +286,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const unique = new Set<string>()
+  const hasImpossibleFilter = Object.values(parsedFilters).some(
+    filter => filter.op === 'in' && filter.values.length === 0
+  )
+
+  if (hasImpossibleFilter) {
+    return Response.json(
+      {
+        status: 'loaded',
+        allOptions: [],
+        totalCount: 0,
+      },
+      { headers }
+    )
+  }
 
   for (let offset = 0; ; offset += FETCH_BATCH_SIZE) {
     let query = fromQualifiedTable(supabase, definition.table)
@@ -295,17 +310,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     for (const [filterColumn, filter] of Object.entries(parsedFilters)) {
       if (filterColumn === column) continue
       if (!selectableColumns.has(filterColumn)) continue
-      if (filter.includeEmpty && filter.values.length === 0) {
-        query = query.is(filterColumn, null)
-        continue
-      }
-      if (filter.values.length === 1) {
-        query = query.eq(filterColumn, filter.values[0])
-        continue
-      }
-      if (filter.values.length > 1) {
-        query = query.in(filterColumn, filter.values)
-      }
+      query = applyClauseToSupabaseQuery({ query, column: filterColumn, clause: filter })
     }
 
     const { data, error } = await query
