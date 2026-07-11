@@ -5,7 +5,22 @@ import { parseFiltersFromSearchParams } from './table-filtering.server'
 import { EXPORT_MAX_ROWS } from './types'
 
 const EXPORT_PAGE_SIZE = 1500
-const EXPORT_COLUMNS = ['code', 'name', 'meal_kit', 'total', 'accepted', 'pending', 'waitlisted', 'declined']
+const EXPORT_COLUMNS = [
+  'code',
+  'name',
+  'whitelist',
+  'meal_kit',
+  'total',
+  'accepted',
+  'pending',
+  'waitlisted',
+  'declined',
+  'giftcard_pc',
+  'giftcard_sobeys',
+  'giftcard_meal_kit',
+  'household_count',
+  'household_child_count',
+]
 
 type DistrictCounts = {
   total: number
@@ -13,6 +28,11 @@ type DistrictCounts = {
   pending: number
   waitlisted: number
   declined: number
+  giftcard_pc: number
+  giftcard_sobeys: number
+  giftcard_meal_kit: number
+  household_count: number
+  household_child_count: number
 }
 
 const buildPagedRequest = ({ request, page }: { request: Request; page: number }) => {
@@ -92,16 +112,33 @@ export const buildFederalElectoralDistrictSnapshot = async ({ request }: { reque
 
   const exportRows = rows.map(row => {
     const name = typeof row.name === 'string' ? row.name : ''
-    const counts = countsByRiding[name] ?? { total: 0, accepted: 0, pending: 0, waitlisted: 0, declined: 0 }
+    const counts = countsByRiding[name] ?? {
+      total: 0,
+      accepted: 0,
+      pending: 0,
+      waitlisted: 0,
+      declined: 0,
+      giftcard_pc: 0,
+      giftcard_sobeys: 0,
+      giftcard_meal_kit: 0,
+      household_count: 0,
+      household_child_count: 0,
+    }
     return {
       code: row.code,
       name,
+      whitelist: row.whitelist,
       meal_kit: row.meal_kit,
       total: counts.total,
       accepted: counts.accepted,
       pending: counts.pending,
       waitlisted: counts.waitlisted,
       declined: counts.declined,
+      giftcard_pc: counts.giftcard_pc,
+      giftcard_sobeys: counts.giftcard_sobeys,
+      giftcard_meal_kit: counts.giftcard_meal_kit,
+      household_count: counts.household_count,
+      household_child_count: counts.household_child_count,
     }
   })
 
