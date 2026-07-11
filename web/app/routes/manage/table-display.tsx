@@ -8,6 +8,13 @@ import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { Constants, type Database } from '@/lib/database.types'
 import { getOffsetMinutesForLocalDateTime, toLocalDateTimeInputValue } from '@/lib/datetime'
+import {
+  filterClauseSignature,
+  matchesFilterClause,
+  parseFilterClausesFromSearchParams,
+  serializeFilterClause,
+  type FilterClause,
+} from '@/lib/table-filter-params'
 
 type TimestampLabelValue = {
   timestamp: unknown
@@ -186,7 +193,6 @@ type AttendancePhotoResponse = {
 
 const timestampColumns = new Set(['starts_at', 'ends_at', 'submitted_at'])
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500, 1000, 1500] as const
-const FILTER_EMPTY_TOKEN = '__none__'
 const FILTER_POPOVER_WIDTH = 256
 const FILTER_POPOVER_MARGIN = 8
 const FILTER_POPOVER_ESTIMATED_HEIGHT = 340
@@ -416,6 +422,55 @@ const TABLE_SELECT_CLASS_NAME =
 const normalizeFilterValues = (values: string[]) =>
   Array.from(new Set(values.filter(value => value !== undefined)))
 
+const toFilterClauseForSelectedValues = ({
+  selectedValues,
+  allOptions,
+}: {
+  selectedValues: string[]
+  allOptions: string[]
+}): FilterClause | null => {
+  const normalizedSelected = normalizeFilterValues(selectedValues)
+  const normalizedAll = normalizeFilterValues(allOptions)
+  const allSet = new Set(normalizedAll)
+  const uniqueSelected = normalizedSelected.filter(value => allSet.has(value))
+
+  if (uniqueSelected.length === normalizedAll.length) {
+    return null
+  }
+
+  const isEmptyOnly = uniqueSelected.length === 1 && uniqueSelected[0] === ''
+  if (isEmptyOnly) {
+    return { op: 'is_empty' }
+  }
+
+  const nonEmptyOptions = normalizedAll.filter(option => option !== '')
+  const nonEmptySelected = uniqueSelected.filter(option => option !== '')
+  if (nonEmptyOptions.length > 0 && nonEmptySelected.length === nonEmptyOptions.length && !uniqueSelected.includes('')) {
+    return { op: 'is_not_empty' }
+  }
+
+  const deselected = normalizedAll.filter(option => !uniqueSelected.includes(option))
+  if (deselected.length > 0 && deselected.length < uniqueSelected.length) {
+    return { op: 'not_in', values: deselected }
+  }
+
+  return { op: 'in', values: uniqueSelected }
+}
+
+const selectedValuesForClause = ({
+  clause,
+  allOptions,
+}: {
+  clause: FilterClause | undefined
+  allOptions: string[]
+}) => {
+  if (!clause) return allOptions
+  if (clause.op === 'is_empty') return allOptions.filter(option => option === '')
+  if (clause.op === 'is_not_empty') return allOptions.filter(option => option !== '')
+  if (clause.op === 'in') return clause.values
+  return allOptions.filter(option => !clause.values.includes(option))
+}
+
 const displayFilterOption = (value: string) =>
   value === '' ? FILTER_EMPTY_LABEL : value
 
@@ -437,12 +492,12 @@ const sortFilterOptions = (values: string[]) => {
   return deduped
 }
 
-const filterKeySignature = (input: Record<string, string[]>, excludedColumn: string) => {
+const filterKeySignature = (input: Record<string, FilterClause>, excludedColumn: string) => {
   const keys = Object.keys(input)
     .filter(key => key !== excludedColumn)
     .sort((left, right) => left.localeCompare(right))
   return keys
-    .map(key => `${key}:${(input[key] ?? []).slice().sort((a, b) => a.localeCompare(b)).join('|')}`)
+    .map(key => `${key}:${filterClauseSignature(input[key])}`)
     .join(';')
 }
 
@@ -775,7 +830,7 @@ export default function TableDisplay({
   const [searchParams, setSearchParams] = useSearchParams()
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortStage, setSortStage] = useState<0 | 1 | 2>(0)
-  const [filters, setFilters] = useState<Record<string, string[]>>({})
+  const [filters, setFilters] = useState<Record<string, FilterClause>>({})
   const [filterDraftByColumn, setFilterDraftByColumn] = useState<Record<string, string[]>>({})
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(50)
@@ -910,20 +965,7 @@ export default function TableDisplay({
   useEffect(() => {
     const nextSort = searchParams.get('sort')
     const nextDir = searchParams.get('dir')
-    const nextFilters = columns.reduce<Record<string, string[]>>((acc, column) => {
-      const values = normalizeFilterValues(searchParams.getAll(`f_${column}`))
-      if (!values.length) {
-        return acc
-      }
-      const explicitValues = values.filter(value => value !== FILTER_EMPTY_TOKEN)
-      const hasEmptySelection = values.includes(FILTER_EMPTY_TOKEN)
-      if (hasEmptySelection && !explicitValues.length) {
-        acc[column] = []
-      } else if (explicitValues.length) {
-        acc[column] = explicitValues
-      }
-      return acc
-    }, {})
+    const nextFilters = parseFilterClausesFromSearchParams(searchParams, columns)
     const nextPageRaw = Number(searchParams.get('page') ?? '1')
     const nextPage = Number.isFinite(nextPageRaw) && nextPageRaw > 0 ? Math.floor(nextPageRaw) : 1
     const nextPageSizeRaw = Number(searchParams.get('pageSize') ?? '50')
@@ -1135,7 +1177,7 @@ export default function TableDisplay({
   }, [activeHoverCard, visibleHoverCardCellId])
 
   const syncSearch = (
-    nextFilters: Record<string, string[]>,
+    nextFilters: Record<string, FilterClause>,
     nextSortColumn: string | null,
     nextSortStage: 0 | 1 | 2,
     nextPage: number,
@@ -1148,14 +1190,7 @@ export default function TableDisplay({
     }
     for (const column of columns) {
       if (!hasOwn(nextFilters, column)) continue
-      const values = nextFilters[column] ?? []
-      if (!values.length) {
-        next.append(`f_${column}`, FILTER_EMPTY_TOKEN)
-        continue
-      }
-      for (const value of values) {
-        next.append(`f_${column}`, value)
-      }
+      next.set(`f_${column}`, serializeFilterClause(nextFilters[column]))
     }
     if (nextPage > 1) {
       next.set('page', String(nextPage))
@@ -1168,16 +1203,15 @@ export default function TableDisplay({
 
   const rowMatchesFilters = (
     row: Record<string, unknown>,
-    nextFilters: Record<string, string[]>,
+    nextFilters: Record<string, FilterClause>,
     excludedColumn?: string
   ) =>
     columns.every(column => {
       if (column === excludedColumn) return true
       if (!hasOwn(nextFilters, column)) return true
-      const selectedValues = nextFilters[column] ?? []
-      if (!selectedValues.length) return false
+      const clause = nextFilters[column]
       const cellValue = getCellValue(column, row, tableName)
-      return selectedValues.includes(cellValue)
+      return matchesFilterClause(cellValue, clause)
     })
 
   const filterDataRevision = useMemo(
@@ -1236,7 +1270,7 @@ export default function TableDisplay({
     return cached
   }
 
-  const computeAllOptionsForColumn = (column: string, nextFilters: Record<string, string[]>) => {
+  const computeAllOptionsForColumn = (column: string, nextFilters: Record<string, FilterClause>) => {
     const nextOptions = new Set<string>()
     for (const row of rowsWithEnrichment) {
       if (!rowMatchesFilters(row, nextFilters, column)) continue
@@ -1279,14 +1313,7 @@ export default function TableDisplay({
         query.set('column', openFilterColumn)
         for (const column of columns) {
           if (!hasOwn(filters, column)) continue
-          const values = filters[column] ?? []
-          if (!values.length) {
-            query.append(`f_${column}`, FILTER_EMPTY_TOKEN)
-            continue
-          }
-          for (const value of values) {
-            query.append(`f_${column}`, value)
-          }
+          query.set(`f_${column}`, serializeFilterClause(filters[column]))
         }
 
         try {
@@ -1637,15 +1664,15 @@ export default function TableDisplay({
     [filters]
   )
   const baseFiltersForEnrichmentFetch = useMemo(() => {
-    const next: Record<string, string[]> = {}
-    for (const [column, values] of Object.entries(filters)) {
+    const next: Record<string, FilterClause> = {}
+    for (const [column, clause] of Object.entries(filters)) {
       if (
         WORKSHOP_FILTER_ENRICHMENT_COLUMNS.has(column) ||
         CLASS_ATTENDANCE_FILTER_ENRICHMENT_COLUMNS.has(column)
       ) {
         continue
       }
-      next[column] = values
+      next[column] = clause
     }
     return next
   }, [filters])
@@ -1903,18 +1930,19 @@ export default function TableDisplay({
     setFilters(prev => {
       const next = { ...prev }
       const normalized = normalizeFilterValues(values)
-      const isAllSelected = allOptionsForColumn.length > 0 && normalized.length === allOptionsForColumn.length
 
-      if (!normalized.length) {
-        if (emptyBehavior === 'all') {
-          delete next[column]
-        } else {
-          next[column] = []
-        }
-      } else if (isAllSelected) {
+      if (!normalized.length && emptyBehavior === 'all') {
         delete next[column]
       } else {
-        next[column] = normalized
+        const clause = toFilterClauseForSelectedValues({
+          selectedValues: normalized,
+          allOptions: allOptionsForColumn,
+        })
+        if (!clause) {
+          delete next[column]
+        } else {
+          next[column] = clause
+        }
       }
       setPage(1)
       syncSearch(next, sortColumn, sortStage, 1, pageSize)
@@ -1926,9 +1954,12 @@ export default function TableDisplay({
     const value = serverSideQuery
       ? getFilterQueryValue(column, row, tableName)
       : getCellValue(column, row, tableName)
-    const current = filters[column] ?? []
-    if (current.includes(value)) return
     const allOptionsForColumn = computeAllOptionsForColumn(column, filters)
+    const current = selectedValuesForClause({
+      clause: filters[column],
+      allOptions: allOptionsForColumn,
+    })
+    if (current.includes(value)) return
     updateFilterValues(column, [...current, value], allOptionsForColumn)
   }
 
@@ -2007,10 +2038,10 @@ export default function TableDisplay({
   }
 
   const effectiveSelectedValuesForColumn = (column: string, allOptionsForColumn: string[]) => {
-    if (hasOwn(filters, column)) {
-      return filters[column] ?? []
-    }
-    return allOptionsForColumn
+    return selectedValuesForClause({
+      clause: hasOwn(filters, column) ? filters[column] : undefined,
+      allOptions: allOptionsForColumn,
+    })
   }
 
   const openFilterOptions = openFilterCacheEntry?.allOptions ?? []
