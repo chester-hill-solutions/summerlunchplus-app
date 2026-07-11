@@ -586,6 +586,7 @@ type TableDisplayProps = {
   headerActions?: ReactNode
   paginationActions?: ReactNode
   data?: LoaderData
+  filterOptionsMode?: 'auto' | 'client' | 'server'
 }
 
 type ResizeState = {
@@ -743,7 +744,12 @@ const buildAutoColumnWidths = ({
   }
 }
 
-export default function TableDisplay({ headerActions, paginationActions, data }: TableDisplayProps = {}) {
+export default function TableDisplay({
+  headerActions,
+  paginationActions,
+  data,
+  filterOptionsMode = 'auto',
+}: TableDisplayProps = {}) {
   const routeData = useLoaderData() as LoaderData | undefined
   const source = data ?? routeData
   const {
@@ -893,6 +899,13 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     rows,
     supportsFamilyContextHover,
   ])
+
+  const canUseClientFilterOptions =
+    !serverSideQuery ||
+    (typeof source?.totalRows === 'number' && source.totalRows > 0 && rowsWithEnrichment.length >= source.totalRows)
+  const shouldUseServerFilterOptions =
+    filterOptionsMode === 'server' ||
+    (filterOptionsMode === 'auto' && serverSideQuery && !canUseClientFilterOptions)
 
   useEffect(() => {
     const nextSort = searchParams.get('sort')
@@ -1256,7 +1269,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
     }
     setOpenFilterCacheEntry(loadingEntry)
 
-    if (serverSideQuery) {
+    if (shouldUseServerFilterOptions) {
       void (async () => {
         const activeRequestId = filterActiveRequestRef.current.get(openFilterCacheKey)
         if (activeRequestId !== requestId) return
@@ -1292,7 +1305,14 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
           if (activeAfterFetch !== requestId) return
 
           if (payload.status === 'loaded') {
-            const allOptions = sortFilterOptions(payload.allOptions ?? [])
+            const serverOptions = sortFilterOptions(payload.allOptions ?? [])
+            const localOptions = computeAllOptionsForColumn(openFilterColumn, filters)
+            const serverOnlyEmpty = serverOptions.length === 1 && serverOptions[0] === ''
+            const localHasNonEmpty = localOptions.some(option => option !== '')
+            const allOptions =
+              (serverOptions.length === 0 || serverOnlyEmpty) && localHasNonEmpty
+                ? localOptions
+                : serverOptions
             const loadedEntry: FilterOptionsCacheEntry = {
               status: 'loaded',
               allOptions,
@@ -1436,7 +1456,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
         }
       }
 
-      const rowsWithFullEnrichment = rows.map(row => {
+      const rowsWithFullEnrichment = rowsWithEnrichment.map(row => {
         if (!isWorkshopEnrollmentTable && !isClassAttendance) return row
         const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
         if (!profileId) return row
@@ -1486,6 +1506,7 @@ export default function TableDisplay({ headerActions, paginationActions, data }:
       }
     }
   }, [
+    shouldUseServerFilterOptions,
     columns,
     filters,
     isClassAttendance,

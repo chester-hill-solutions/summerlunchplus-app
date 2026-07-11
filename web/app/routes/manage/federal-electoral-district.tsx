@@ -97,6 +97,7 @@ export default function FederalElectoralDistrictTablePage() {
 
   return (
     <TableDisplay
+      filterOptionsMode="client"
       paginationActions={
         <Form method="post" action="/manage/exports" className="flex items-center gap-2">
           <input type="hidden" name="intent" value="create-export" />
