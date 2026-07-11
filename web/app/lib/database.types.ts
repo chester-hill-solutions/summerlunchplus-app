@@ -1214,6 +1214,39 @@ export type Database = {
           },
         ]
       }
+      gift_card_inventory_alert_state: {
+        Row: {
+          created_at: string
+          is_low: boolean
+          last_alerted_at: string | null
+          last_inventory_count: number
+          last_recovered_at: string | null
+          last_threshold: number
+          provider: Database["public"]["Enums"]["gift_card_provider"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          is_low?: boolean
+          last_alerted_at?: string | null
+          last_inventory_count?: number
+          last_recovered_at?: string | null
+          last_threshold?: number
+          provider: Database["public"]["Enums"]["gift_card_provider"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          is_low?: boolean
+          last_alerted_at?: string | null
+          last_inventory_count?: number
+          last_recovered_at?: string | null
+          last_threshold?: number
+          provider?: Database["public"]["Enums"]["gift_card_provider"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       gift_card_upload: {
         Row: {
           created_at: string

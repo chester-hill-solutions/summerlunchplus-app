@@ -15,6 +15,10 @@ import {
   type FamilyEnrollmentRequestedTemplateData,
 } from '@/lib/email/templates/family-enrollment-requested'
 import {
+  renderGiftCardInventoryLowEmail,
+  type GiftCardInventoryLowTemplateData,
+} from '@/lib/email/templates/gift-card-inventory-low'
+import {
   renderGiftCardReminderEmail,
   type GiftCardReminderTemplateData,
 } from '@/lib/email/templates/gift-card-reminder'
@@ -28,6 +32,7 @@ export type EmailTemplateMap = {
   family_enrollment_accepted_v1: FamilyEnrollmentAcceptedTemplateData
   class_reminder_login_v1: ClassReminderLoginTemplateData
   class_camera_or_photo_followup_v1: ClassCameraOrPhotoFollowupTemplateData
+  gift_card_inventory_low_v1: GiftCardInventoryLowTemplateData
   gift_card_reminder_v1: GiftCardReminderTemplateData
   meal_kit_pickup_reminder_v1: MealKitPickupReminderTemplateData
 }
@@ -50,6 +55,9 @@ export const emailTemplates: {
   },
   class_camera_or_photo_followup_v1: {
     render: renderClassCameraOrPhotoFollowupEmail,
+  },
+  gift_card_inventory_low_v1: {
+    render: renderGiftCardInventoryLowEmail,
   },
   gift_card_reminder_v1: {
     render: renderGiftCardReminderEmail,
