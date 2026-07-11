@@ -7,6 +7,7 @@ import {
   resolveGiftCardRelease,
   resolveGiftCardReleaseFromTiming,
 } from '@/lib/gift-cards/release.server'
+import { scanByIdKeyset } from '@/lib/supabase/keyset-pagination.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
 
@@ -22,7 +23,29 @@ type GiftCardJobResult = {
   mealKitRemindersSent: number
   mealKitRemindersSkipped: number
   mealKitReminderFailures: number
+  allocationScan: GiftCardScanCounters
+  reminderScan: GiftCardScanCounters
   errors: string[]
+}
+
+type GiftCardScanCounters = {
+  pagesRead: number
+  rowsScanned: number
+  rowsProcessed: number
+  rowsSkipped: number
+}
+
+type AllocationSummary = {
+  allocated: number
+  scan: GiftCardScanCounters
+}
+
+type ReminderSummary = {
+  remindersSent: number
+  remindersSkipped: number
+  reminderFailures: number
+  errors: string[]
+  scan: GiftCardScanCounters
 }
 
 const allocationKey = (classId: string, profileId: string) => `${classId}::${profileId}`
@@ -460,7 +483,14 @@ const requestedProviderFromDisplay = (value: string | null | undefined) => {
   return null
 }
 
-const allocateGiftCards = async () => {
+const emptyScanCounters = (): GiftCardScanCounters => ({
+  pagesRead: 0,
+  rowsScanned: 0,
+  rowsProcessed: 0,
+  rowsSkipped: 0,
+})
+
+const allocateGiftCards = async (): Promise<AllocationSummary> => {
   const nowIso = new Date().toISOString()
   const eligibilityTimingEnabled = isEligibilityTimingEnabled()
   const requestedProviderByProfileId = new Map<string, 'PC' | 'Sobeys' | 'meal_kit' | null>()
@@ -487,42 +517,48 @@ const allocateGiftCards = async () => {
     }
   }
   let allocated = 0
+  let rowsProcessed = 0
+  let rowsSkipped = 0
 
-  let lastAttendanceId = ''
-  let pagesRead = 0
-  let rowsScanned = 0
+  const scan = await scanByIdKeyset<{
+    id: string
+    class_id: string
+    profile_id: string
+    camera_on: boolean | null
+    photo_status: 'uploaded' | 'accepted' | 'rejected' | null
+    gift_card_blocked: boolean | null
+    class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
+    profile: { email: string | null } | Array<{ email: string | null }> | null
+  }>({
+    batchSize: PAGE_SIZE,
+    fetchPage: async afterId => {
+      const attendanceQuery = adminClient
+        .from('class_attendance')
+        .select('id, class_id, profile_id, camera_on, photo_status, gift_card_blocked, class:class_id(starts_at, ends_at), profile:profile_id(email)')
+        .or('camera_on.eq.true,photo_status.eq.accepted,photo_status.eq.uploaded')
+        .order('id', { ascending: true })
+        .limit(PAGE_SIZE)
 
-  while (true) {
-    const attendanceQuery = adminClient
-      .from('class_attendance')
-      .select('id, class_id, profile_id, camera_on, photo_status, gift_card_blocked, class:class_id(starts_at, ends_at), profile:profile_id(email)')
-      .or('camera_on.eq.true,photo_status.eq.accepted,photo_status.eq.uploaded')
-      .order('id', { ascending: true })
-      .limit(PAGE_SIZE)
+      const { data: attendanceRows, error: attendanceError } = afterId
+        ? await attendanceQuery.gt('id', afterId)
+        : await attendanceQuery
 
-    const { data: attendanceRows, error: attendanceError } = lastAttendanceId
-      ? await attendanceQuery.gt('id', lastAttendanceId)
-      : await attendanceQuery
+      if (attendanceError) {
+        throw new Error(`Failed to load attendance rows: ${attendanceError.message}`)
+      }
 
-    if (attendanceError) {
-      throw new Error(`Failed to load attendance rows: ${attendanceError.message}`)
-    }
-
-    const typedRows = (attendanceRows ?? []) as Array<{
-      id: string
-      class_id: string
-      profile_id: string
-      camera_on: boolean | null
-      photo_status: 'uploaded' | 'accepted' | 'rejected' | null
-      gift_card_blocked: boolean | null
-      class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
-      profile: { email: string | null } | Array<{ email: string | null }> | null
-    }>
-
-    if (!typedRows.length) break
-
-    pagesRead += 1
-    rowsScanned += typedRows.length
+      return (attendanceRows ?? []) as Array<{
+        id: string
+        class_id: string
+        profile_id: string
+        camera_on: boolean | null
+        photo_status: 'uploaded' | 'accepted' | 'rejected' | null
+        gift_card_blocked: boolean | null
+        class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
+        profile: { email: string | null } | Array<{ email: string | null }> | null
+      }>
+    },
+    onPage: async typedRows => {
 
     const classIds = Array.from(new Set(typedRows.map(row => row.class_id)))
     const profileIds = Array.from(new Set(typedRows.map(row => row.profile_id)))
@@ -560,28 +596,50 @@ const allocateGiftCards = async () => {
     }
 
     for (const row of typedRows) {
+      rowsProcessed += 1
       const hasAttendanceEvidence = row.camera_on === true || row.photo_status === 'accepted'
-      if (!hasAttendanceEvidence) continue
-      if (row.gift_card_blocked) continue
-      if (allocationByPair.has(allocationKey(row.class_id, row.profile_id))) continue
+      if (!hasAttendanceEvidence) {
+        rowsSkipped += 1
+        continue
+      }
+      if (row.gift_card_blocked) {
+        rowsSkipped += 1
+        continue
+      }
+      if (allocationByPair.has(allocationKey(row.class_id, row.profile_id))) {
+        rowsSkipped += 1
+        continue
+      }
 
       const requestedProvider = requestedProviderByProfileId.get(row.profile_id) ?? null
-      if (requestedProvider === 'meal_kit') continue
+      if (requestedProvider === 'meal_kit') {
+        rowsSkipped += 1
+        continue
+      }
       const providerForAllocation = requestedProvider === 'Sobeys' ? 'Sobeys' : 'PC'
 
       const providerBucket = availableByProvider[providerForAllocation]
-      if (!providerBucket.length) continue
+      if (!providerBucket.length) {
+        rowsSkipped += 1
+        continue
+      }
 
       const classRelation = Array.isArray(row.class) ? row.class[0] : row.class
       const classAt = classRelation?.starts_at ?? classRelation?.ends_at ?? null
       const releaseAt = nextReleaseAtIso(classRelation?.ends_at ?? null)
-      if (!releaseAt) continue
+      if (!releaseAt) {
+        rowsSkipped += 1
+        continue
+      }
 
       const qualificationSinceAt = eligibilityTimingEnabled ? nowIso : null
       const releaseReadyAt = eligibilityTimingEnabled
         ? releaseReadyAtIso({ classAtIso: classAt, qualificationSinceAtIso: qualificationSinceAt })
         : null
-      if (eligibilityTimingEnabled && !releaseReadyAt) continue
+      if (eligibilityTimingEnabled && !releaseReadyAt) {
+        rowsSkipped += 1
+        continue
+      }
 
       const assetId = providerBucket.shift() as string
       const { data: updatedAsset, error: claimError } = await adminClient
@@ -597,6 +655,7 @@ const allocateGiftCards = async () => {
         .maybeSingle()
 
       if (claimError || !updatedAsset?.id) {
+        rowsSkipped += 1
         continue
       }
 
@@ -638,28 +697,37 @@ const allocateGiftCards = async () => {
             allocated_at: null,
           })
           .eq('id', assetId)
+        rowsSkipped += 1
         continue
       }
 
       allocationByPair.set(allocationKey(row.class_id, row.profile_id), inserted.id)
       allocated += 1
     }
-
-    lastAttendanceId = typedRows[typedRows.length - 1]?.id ?? lastAttendanceId
-    if (typedRows.length < PAGE_SIZE) break
-  }
+    },
+  })
 
   console.info('[gift-cards][allocate]', {
     eligibilityTimingEnabled,
-    pagesRead,
-    rowsScanned,
+    pagesRead: scan.pagesRead,
+    rowsScanned: scan.rowsScanned,
+    rowsProcessed,
+    rowsSkipped,
     allocated,
   })
 
-  return allocated
+  return {
+    allocated,
+    scan: {
+      pagesRead: scan.pagesRead,
+      rowsScanned: scan.rowsScanned,
+      rowsProcessed,
+      rowsSkipped,
+    },
+  }
 }
 
-const sendDueReminders = async (appOrigin: string) => {
+const sendDueReminders = async (appOrigin: string): Promise<ReminderSummary> => {
   const now = new Date()
   const nowIso = now.toISOString()
   const publicHubOrigin = resolvePublicHubOrigin(appOrigin)
@@ -679,56 +747,75 @@ const sendDueReminders = async (appOrigin: string) => {
     unresolved: 0,
   }
 
-  let lastAllocationId = ''
-  let pagesRead = 0
-  let rowsScanned = 0
+  let rowsProcessed = 0
 
-  while (true) {
-    const allocationQuery = adminClient
-      .from('gift_card_allocation')
-      .select(
-        'id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, class:class_id(starts_at, ends_at), profile:profile_id(email), asset:gift_card_asset_id(provider, value, status, assigned_profile_id)'
-      )
-      .eq('status', 'allocated')
-      .is('reminder_sent_at', null)
-      .order('id', { ascending: true })
-      .limit(PAGE_SIZE)
+  const scan = await scanByIdKeyset<{
+    id: string
+    class_id: string
+    profile_id: string
+    gift_card_asset_id: string
+    status: 'allocated' | 'sent' | 'opened'
+    blocked: boolean
+    reminder_sent_at: string | null
+    metadata: {
+      release_at?: string | null
+      release_ready_at?: string | null
+      qualification_since_at?: string | null
+      availability_state?: string | null
+    } | null
+    class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
+    profile: { email: string | null } | Array<{ email: string | null }> | null
+    asset:
+      | { provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }
+      | Array<{ provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }>
+      | null
+  }>({
+    batchSize: PAGE_SIZE,
+    fetchPage: async afterId => {
+      const allocationQuery = adminClient
+        .from('gift_card_allocation')
+        .select(
+          'id, class_id, profile_id, gift_card_asset_id, status, blocked, reminder_sent_at, metadata, class:class_id(starts_at, ends_at), profile:profile_id(email), asset:gift_card_asset_id(provider, value, status, assigned_profile_id)'
+        )
+        .eq('status', 'allocated')
+        .is('reminder_sent_at', null)
+        .order('id', { ascending: true })
+        .limit(PAGE_SIZE)
 
-    const { data: allocations, error: allocationError } = lastAllocationId
-      ? await allocationQuery.gt('id', lastAllocationId)
-      : await allocationQuery
+      const { data: allocations, error: allocationError } = afterId
+        ? await allocationQuery.gt('id', afterId)
+        : await allocationQuery
 
-    if (allocationError) {
-      throw new Error(`Failed to load due reminders: ${allocationError.message}`)
-    }
+      if (allocationError) {
+        throw new Error(`Failed to load due reminders: ${allocationError.message}`)
+      }
 
-    const rows = (allocations ?? []) as Array<{
-      id: string
-      class_id: string
-      profile_id: string
-      gift_card_asset_id: string
-      status: 'allocated' | 'sent' | 'opened'
-      blocked: boolean
-      reminder_sent_at: string | null
-      metadata: {
-        release_at?: string | null
-        release_ready_at?: string | null
-        qualification_since_at?: string | null
-        availability_state?: string | null
-      } | null
-      class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
-      profile: { email: string | null } | Array<{ email: string | null }> | null
-      asset:
-        | { provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }
-        | Array<{ provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }>
-        | null
-    }>
-
-    if (!rows.length) break
-    pagesRead += 1
-    rowsScanned += rows.length
+      return (allocations ?? []) as Array<{
+        id: string
+        class_id: string
+        profile_id: string
+        gift_card_asset_id: string
+        status: 'allocated' | 'sent' | 'opened'
+        blocked: boolean
+        reminder_sent_at: string | null
+        metadata: {
+          release_at?: string | null
+          release_ready_at?: string | null
+          qualification_since_at?: string | null
+          availability_state?: string | null
+        } | null
+        class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
+        profile: { email: string | null } | Array<{ email: string | null }> | null
+        asset:
+          | { provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }
+          | Array<{ provider: 'PC' | 'Sobeys'; value: number; status: string; assigned_profile_id: string | null }>
+          | null
+      }>
+    },
+    onPage: async rows => {
 
     for (const row of rows) {
+    rowsProcessed += 1
     const allocationLockAcquired = await tryAcquireGiftCardAllocationLock(row.id)
     if (!allocationLockAcquired) {
       remindersSkipped += 1
@@ -885,15 +972,15 @@ const sendDueReminders = async (appOrigin: string) => {
       await releaseGiftCardAllocationLock(row.id)
     }
   }
-
-    lastAllocationId = rows[rows.length - 1]?.id ?? lastAllocationId
-    if (rows.length < PAGE_SIZE) break
-  }
+    },
+  })
 
   console.info('[gift-cards][reminders]', {
     eligibilityTimingEnabled: isEligibilityTimingEnabled(),
-    pagesRead,
-    rowsScanned,
+    pagesRead: scan.pagesRead,
+    rowsScanned: scan.rowsScanned,
+    rowsProcessed,
+    rowsSkipped: remindersSkipped,
     remindersSent,
     remindersSkipped,
     reminderFailures,
@@ -905,6 +992,12 @@ const sendDueReminders = async (appOrigin: string) => {
     remindersSkipped,
     reminderFailures,
     errors,
+    scan: {
+      pagesRead: scan.pagesRead,
+      rowsScanned: scan.rowsScanned,
+      rowsProcessed,
+      rowsSkipped: remindersSkipped,
+    },
   }
 }
 
@@ -1026,69 +1119,78 @@ export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string;
       mealKitRemindersSent: 0,
       mealKitRemindersSkipped: 0,
       mealKitReminderFailures: 0,
+      allocationScan: emptyScanCounters(),
+      reminderScan: emptyScanCounters(),
       errors: ['gift-card runner lock not acquired'],
     }
   }
 
   try {
-  const errors: string[] = []
+    const errors: string[] = []
 
-  let allocated = 0
-  try {
-    allocated = await allocateGiftCards()
-  } catch (error) {
-    errors.push(error instanceof Error ? error.message : 'allocate step failed')
-  }
-
-  let availabilityBackfilled = 0
-  try {
-    const availabilityBackfillResult = await backfillQualifiedAvailabilityStates()
-    availabilityBackfilled = availabilityBackfillResult.updated
-    if (availabilityBackfillResult.failures > 0) {
-      errors.push(`availability backfill failed for ${availabilityBackfillResult.failures} allocations`)
+    let allocated = 0
+    let allocationScan = emptyScanCounters()
+    try {
+      const allocationResult = await allocateGiftCards()
+      allocated = allocationResult.allocated
+      allocationScan = allocationResult.scan
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'allocate step failed')
     }
-  } catch (error) {
-    errors.push(error instanceof Error ? error.message : 'availability backfill step failed')
-  }
 
-  let remindersSent = 0
-  let remindersSkipped = 0
-  let reminderFailures = 0
-  try {
-    const reminderResult = await sendDueReminders(appOrigin)
-    remindersSent = reminderResult.remindersSent
-    remindersSkipped = reminderResult.remindersSkipped
-    reminderFailures = reminderResult.reminderFailures
-    errors.push(...reminderResult.errors)
-  } catch (error) {
-    errors.push(error instanceof Error ? error.message : 'reminder step failed')
-  }
+    let availabilityBackfilled = 0
+    try {
+      const availabilityBackfillResult = await backfillQualifiedAvailabilityStates()
+      availabilityBackfilled = availabilityBackfillResult.updated
+      if (availabilityBackfillResult.failures > 0) {
+        errors.push(`availability backfill failed for ${availabilityBackfillResult.failures} allocations`)
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'availability backfill step failed')
+    }
 
-  let mealKitRemindersSent = 0
-  let mealKitRemindersSkipped = 0
-  let mealKitReminderFailures = 0
-  try {
-    const mealKitReminderResult = await sendMealKitPickupReminders()
-    mealKitRemindersSent = mealKitReminderResult.remindersSent
-    mealKitRemindersSkipped = mealKitReminderResult.remindersSkipped
-    mealKitReminderFailures = mealKitReminderResult.reminderFailures
-    errors.push(...mealKitReminderResult.errors)
-  } catch (error) {
-    errors.push(error instanceof Error ? error.message : 'meal-kit reminder step failed')
-  }
+    let remindersSent = 0
+    let remindersSkipped = 0
+    let reminderFailures = 0
+    let reminderScan = emptyScanCounters()
+    try {
+      const reminderResult = await sendDueReminders(appOrigin)
+      remindersSent = reminderResult.remindersSent
+      remindersSkipped = reminderResult.remindersSkipped
+      reminderFailures = reminderResult.reminderFailures
+      reminderScan = reminderResult.scan
+      errors.push(...reminderResult.errors)
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'reminder step failed')
+    }
 
-  return {
-    runId,
-    allocated,
-    availabilityBackfilled,
-    remindersSent,
-    remindersSkipped,
-    reminderFailures,
-    mealKitRemindersSent,
-    mealKitRemindersSkipped,
-    mealKitReminderFailures,
-    errors,
-  }
+    let mealKitRemindersSent = 0
+    let mealKitRemindersSkipped = 0
+    let mealKitReminderFailures = 0
+    try {
+      const mealKitReminderResult = await sendMealKitPickupReminders()
+      mealKitRemindersSent = mealKitReminderResult.remindersSent
+      mealKitRemindersSkipped = mealKitReminderResult.remindersSkipped
+      mealKitReminderFailures = mealKitReminderResult.reminderFailures
+      errors.push(...mealKitReminderResult.errors)
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'meal-kit reminder step failed')
+    }
+
+    return {
+      runId,
+      allocated,
+      availabilityBackfilled,
+      remindersSent,
+      remindersSkipped,
+      reminderFailures,
+      mealKitRemindersSent,
+      mealKitRemindersSkipped,
+      mealKitReminderFailures,
+      allocationScan,
+      reminderScan,
+      errors,
+    }
   } finally {
     await releaseGiftCardRunnerLock()
   }
