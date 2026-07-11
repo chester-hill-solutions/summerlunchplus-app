@@ -16,8 +16,8 @@ import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import { runZoomRegistrantForStudent } from '@/lib/zoom-jobs/runner.server'
-import { Download } from 'lucide-react'
-import { Form, useLoaderData, useLocation } from 'react-router'
+import { Download, Loader2 } from 'lucide-react'
+import { Form, useLoaderData, useLocation, useNavigation } from 'react-router'
 import type { Route } from './+types/class-attendance'
 import DeferredTableDisplay from './deferred-table-display'
 
@@ -1679,7 +1679,9 @@ export async function action({ request }: Route.ActionArgs) {
 export default function ClassAttendancePage() {
   const data = useLoaderData<typeof loader>()
   const location = useLocation()
+  const navigation = useNavigation()
   const sourcePath = `/manage/class-attendance${location.search}`
+  const isCreatingExport = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'create-export'
 
   return (
     <DeferredTableDisplay
@@ -1690,8 +1692,15 @@ export default function ClassAttendancePage() {
           <input type="hidden" name="intent" value="create-export" />
           <input type="hidden" name="export_type" value={EXPORT_TYPE_CLASS_ATTENDANCE_CSV} />
           <input type="hidden" name="source_path" value={sourcePath} />
-          <Button type="submit" variant="outline" size="icon-sm" aria-label="Export CSV" title="Export CSV">
-            <Download className="size-4" />
+          <Button
+            type="submit"
+            variant="outline"
+            size="icon-sm"
+            disabled={isCreatingExport}
+            aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
+            title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
+          >
+            {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
           </Button>
         </Form>
       }

@@ -1,5 +1,5 @@
-import { Form, useLocation } from 'react-router'
-import { Download } from 'lucide-react'
+import { Form, useLocation, useNavigation } from 'react-router'
+import { Download, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { EXPORT_TYPE_FORM_ANSWER_CSV } from '@/lib/exports/types'
@@ -34,7 +34,9 @@ export const action = createTableAction('form-answer')
 
 export default function FormAnswersTablePage() {
   const location = useLocation()
+  const navigation = useNavigation()
   const sourcePath = `/manage/form-answer${location.search}`
+  const isCreatingExport = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'create-export'
 
   return (
     <TableDisplay
@@ -43,8 +45,15 @@ export default function FormAnswersTablePage() {
           <input type="hidden" name="intent" value="create-export" />
           <input type="hidden" name="export_type" value={EXPORT_TYPE_FORM_ANSWER_CSV} />
           <input type="hidden" name="source_path" value={sourcePath} />
-          <Button type="submit" variant="outline" size="icon-sm" aria-label="Export CSV" title="Export CSV">
-            <Download className="size-4" />
+          <Button
+            type="submit"
+            variant="outline"
+            size="icon-sm"
+            disabled={isCreatingExport}
+            aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
+            title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
+          >
+            {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
           </Button>
         </Form>
       }

@@ -5,6 +5,7 @@ import { parseFiltersFromSearchParams } from './table-filtering.server'
 import { EXPORT_MAX_ROWS } from './types'
 
 const EXPORT_PAGE_SIZE = 1500
+const ENRICHMENT_RIDING_BATCH_SIZE = 30
 const EXPORT_COLUMNS = [
   'code',
   'name',
@@ -42,6 +43,15 @@ const buildPagedRequest = ({ request, page }: { request: Request; page: number }
   return new Request(url.toString(), request)
 }
 
+const chunkArray = <T,>(items: T[], size: number) => {
+  if (!items.length || size <= 0) return [] as T[][]
+  const chunks: T[][] = []
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size))
+  }
+  return chunks
+}
+
 const loadCountsByRiding = async ({
   request,
   ridingNames,
@@ -53,27 +63,32 @@ const loadCountsByRiding = async ({
     return {} as Record<string, DistrictCounts>
   }
 
-  const url = new URL('/manage/federal-electoral-district/enrichment', request.url)
-  for (const ridingName of ridingNames) {
-    url.searchParams.append('riding', ridingName)
+  const byRiding: Record<string, DistrictCounts> = {}
+  for (const ridingChunk of chunkArray(ridingNames, ENRICHMENT_RIDING_BATCH_SIZE)) {
+    const url = new URL('/manage/federal-electoral-district/enrichment', request.url)
+    for (const ridingName of ridingChunk) {
+      url.searchParams.append('riding', ridingName)
+    }
+
+    const enrichmentRequest = new Request(url.toString(), {
+      method: 'GET',
+      headers: request.headers,
+    })
+    const enrichmentResponse = await federalElectoralDistrictEnrichmentLoader({
+      request: enrichmentRequest,
+    } as Parameters<typeof federalElectoralDistrictEnrichmentLoader>[0])
+
+    if (!(enrichmentResponse instanceof Response) || !enrichmentResponse.ok) {
+      return {} as Record<string, DistrictCounts>
+    }
+
+    const payload = (await enrichmentResponse.json()) as {
+      byRiding?: Record<string, DistrictCounts>
+    }
+    Object.assign(byRiding, payload.byRiding ?? {})
   }
 
-  const enrichmentRequest = new Request(url.toString(), {
-    method: 'GET',
-    headers: request.headers,
-  })
-  const enrichmentResponse = await federalElectoralDistrictEnrichmentLoader({
-    request: enrichmentRequest,
-  } as Parameters<typeof federalElectoralDistrictEnrichmentLoader>[0])
-
-  if (!(enrichmentResponse instanceof Response) || !enrichmentResponse.ok) {
-    return {} as Record<string, DistrictCounts>
-  }
-
-  const payload = (await enrichmentResponse.json()) as {
-    byRiding?: Record<string, DistrictCounts>
-  }
-  return payload.byRiding ?? {}
+  return byRiding
 }
 
 export const buildFederalElectoralDistrictSnapshot = async ({ request }: { request: Request }) => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download } from 'lucide-react'
+import { Download, Loader2 } from 'lucide-react'
 import { Form, useActionData, useFetcher, useLoaderData, useLocation, useNavigation } from 'react-router'
 
 import { Button } from '@/components/ui/button'
@@ -312,6 +312,7 @@ export default function EmailMessageTablePage() {
 
   const isSendingManualBatch =
     navigation.state !== 'idle' && navigation.formData?.get('intent') === 'send-manual-batch-email'
+  const isCreatingExport = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'create-export'
 
   const dataRequestUrl = useMemo(() => {
     const search = new URLSearchParams(location.search)
@@ -461,8 +462,15 @@ export default function EmailMessageTablePage() {
             <input type="hidden" name="intent" value="create-export" />
             <input type="hidden" name="export_type" value={EXPORT_TYPE_EMAIL_MESSAGE_CSV} />
             <input type="hidden" name="source_path" value={sourcePath} />
-            <Button type="submit" variant="outline" size="icon-sm" aria-label="Export CSV" title="Export CSV">
-              <Download className="size-4" />
+            <Button
+              type="submit"
+              variant="outline"
+              size="icon-sm"
+              disabled={isCreatingExport}
+              aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
+              title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
+            >
+              {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
             </Button>
           </Form>
         }

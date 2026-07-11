@@ -1,6 +1,6 @@
-import { Form, useLocation } from 'react-router'
+import { Form, useLocation, useNavigation } from 'react-router'
 
-import { Download } from 'lucide-react'
+import { Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV } from '@/lib/exports/types'
 import TableDisplay from './table-display'
@@ -93,7 +93,9 @@ export const action = createTableAction('federal-electoral-district')
 
 export default function FederalElectoralDistrictTablePage() {
   const location = useLocation()
+  const navigation = useNavigation()
   const sourcePath = `/manage/federal-electoral-district${location.search}`
+  const isCreatingExport = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'create-export'
 
   return (
     <TableDisplay
@@ -103,8 +105,15 @@ export default function FederalElectoralDistrictTablePage() {
           <input type="hidden" name="intent" value="create-export" />
           <input type="hidden" name="export_type" value={EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV} />
           <input type="hidden" name="source_path" value={sourcePath} />
-          <Button type="submit" variant="outline" size="icon-sm" aria-label="Export CSV" title="Export CSV">
-            <Download className="size-4" />
+          <Button
+            type="submit"
+            variant="outline"
+            size="icon-sm"
+            disabled={isCreatingExport}
+            aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
+            title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
+          >
+            {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
           </Button>
         </Form>
       }

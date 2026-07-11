@@ -3,7 +3,7 @@ import { createActionProfile } from '@/lib/action-profile.server'
 import { localDateTimeToUtcIso, parseOffsetMinutes } from '@/lib/datetime'
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
 import { Button } from '@/components/ui/button'
-import { Form, useLoaderData, useLocation } from 'react-router'
+import { Form, useLoaderData, useLocation, useNavigation } from 'react-router'
 import { resolveFamilyContactsByProfileId } from '@/lib/family.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { Constants, type Database } from '@/lib/database.types'
@@ -12,7 +12,7 @@ import { createClient } from '@/lib/supabase/server'
 import { loadWorkshopEnrollmentData } from '@/lib/exports/workshop-enrollment-query.server'
 import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { TABLE_DEFINITIONS } from './table-definitions'
-import { Download } from 'lucide-react'
+import { Download, Loader2 } from 'lucide-react'
 
 import type { Route } from './+types/workshop-enrollment'
 import DeferredTableDisplay from './deferred-table-display'
@@ -545,7 +545,9 @@ export async function action({ request }: Route.ActionArgs) {
 export default function WorkshopEnrollmentPage() {
   const data = useLoaderData<typeof loader>()
   const location = useLocation()
+  const navigation = useNavigation()
   const sourcePath = `/manage/workshop-enrollment${location.search}`
+  const isCreatingExport = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'create-export'
 
   return (
     <DeferredTableDisplay
@@ -556,8 +558,15 @@ export default function WorkshopEnrollmentPage() {
           <input type="hidden" name="intent" value="create-export" />
           <input type="hidden" name="export_type" value={EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV} />
           <input type="hidden" name="source_path" value={sourcePath} />
-          <Button type="submit" variant="outline" size="icon-sm" aria-label="Export CSV" title="Export CSV">
-            <Download className="size-4" />
+          <Button
+            type="submit"
+            variant="outline"
+            size="icon-sm"
+            disabled={isCreatingExport}
+            aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
+            title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
+          >
+            {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
           </Button>
         </Form>
       }
