@@ -6,6 +6,7 @@ import { Navbar } from "./components/navbar";
 import { enforceOnboardingGuard } from "./lib/auth.server";
 import { getMaskedEmailHint } from "./lib/email-domain";
 import { useRouterInstrumentation } from "./lib/router-instrumentation";
+import { formatSupabaseUnavailableMessage, isSupabaseUnavailableError } from "./lib/supabase-availability";
 import { createClient } from "./lib/supabase/server";
 import { createClient as createBrowserClient } from "./lib/supabase/client";
 import "./app.css";
@@ -86,6 +87,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   requestRole = role
 
   return { user, role, supabaseUrl, supabaseAnonKey };
+  } catch (error) {
+    if (isSupabaseUnavailableError(error)) {
+      throw new Response(formatSupabaseUnavailableMessage('loading your session'), {
+        status: 503,
+      })
+    }
+    throw error
   } finally {
     const shouldLog =
       process.env.NODE_ENV !== 'production' ||
@@ -201,8 +209,13 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       error.status === 404
         ? "The requested page could not be found."
         : error.status === 503
-          ? "We are having trouble loading your account right now. Please wait a minute and try again."
-        : error.statusText || details;
+          ? (typeof error.data === 'string' && error.data.trim()
+              ? error.data
+              : formatSupabaseUnavailableMessage('loading this page'))
+          : error.statusText || details;
+  } else if (isSupabaseUnavailableError(error)) {
+    message = "Service unavailable";
+    details = formatSupabaseUnavailableMessage('loading this page')
   } else if (import.meta.env.DEV && error && error instanceof Error) {
     details = error.message;
     stack = error.stack;
