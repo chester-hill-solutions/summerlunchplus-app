@@ -19,8 +19,23 @@ export async function loader(args: Route.LoaderArgs) {
 
   const { supabase } = createClient(args.request)
   const { data: meetingRows } = meetingIds.length
-    ? await supabase.from('class_zoom_meeting').select('id, class_id').in('id', meetingIds)
-    : { data: [] as Array<{ id: string; class_id: string }> }
+    ? await supabase
+        .from('class_zoom_meeting')
+        .select('id, class_id, zoom_meeting_id, topic, host_zoom_user_email, start_time, duration_minutes, status, join_url')
+        .in('id', meetingIds)
+    : {
+        data: [] as Array<{
+          id: string
+          class_id: string
+          zoom_meeting_id: string | null
+          topic: string | null
+          host_zoom_user_email: string | null
+          start_time: string | null
+          duration_minutes: number | null
+          status: string
+          join_url: string | null
+        }>,
+      }
 
   const classIds = Array.from(new Set((meetingRows ?? []).map(row => row.class_id).filter((id): id is string => Boolean(id))))
   const { data: classRows } = classIds.length
@@ -32,11 +47,14 @@ export async function loader(args: Route.LoaderArgs) {
 
   const classById = new Map((classRows ?? []).map(row => [row.id, row]))
   const classIdByMeetingId = new Map((meetingRows ?? []).map(row => [row.id, row.class_id]))
+  const meetingById = new Map((meetingRows ?? []).map(row => [row.id, row]))
 
   return {
     ...base,
     rows: rows.map(row => {
-      const classId = typeof row.class_zoom_meeting_id === 'string' ? classIdByMeetingId.get(row.class_zoom_meeting_id) : null
+      const meetingId = typeof row.class_zoom_meeting_id === 'string' ? row.class_zoom_meeting_id : ''
+      const classId = meetingId ? classIdByMeetingId.get(meetingId) : null
+      const meeting = meetingId ? meetingById.get(meetingId) : null
       const classRow = classId ? classById.get(classId) : null
       const workshopRelation = Array.isArray(classRow?.workshop) ? classRow.workshop[0] : classRow?.workshop
       return {
@@ -44,6 +62,12 @@ export async function loader(args: Route.LoaderArgs) {
         workshop_description: workshopRelation?.description ?? 'Workshop',
         class_starts_at: classRow?.starts_at ?? null,
         class_ends_at: classRow?.ends_at ?? null,
+        hover_zoom_topic: meeting?.topic ?? '',
+        hover_zoom_status: meeting?.status ?? '',
+        hover_zoom_host_email: meeting?.host_zoom_user_email ?? '',
+        hover_zoom_start_at: meeting?.start_time ?? '',
+        hover_zoom_duration_minutes: typeof meeting?.duration_minutes === 'number' ? String(meeting.duration_minutes) : '',
+        hover_zoom_join_url: meeting?.join_url ?? '',
       }
     }),
     columns: ['workshop_description', 'class_starts_at', 'class_ends_at', ...(base.columns ?? [])],
@@ -52,6 +76,22 @@ export async function loader(args: Route.LoaderArgs) {
       workshop_description: { label: 'Workshop', filterable: true },
       class_starts_at: { label: 'Class starts', filterable: true },
       class_ends_at: { label: 'Class ends', filterable: true },
+      class_zoom_meeting_display: {
+        label: 'Class zoom meeting',
+        filterable: true,
+        hoverCard: {
+          titleField: 'hover_zoom_topic',
+          titleFallback: 'Meeting details',
+          fields: [
+            { label: 'Meeting ID', field: 'class_zoom_meeting_display', fallback: 'Loading...' },
+            { label: 'Status', field: 'hover_zoom_status', fallback: 'Loading...' },
+            { label: 'Host', field: 'hover_zoom_host_email', fallback: 'Loading...' },
+            { label: 'Start', field: 'hover_zoom_start_at', fallback: 'Loading...' },
+            { label: 'Duration min', field: 'hover_zoom_duration_minutes', fallback: 'Loading...' },
+            { label: 'Join URL', field: 'hover_zoom_join_url', fallback: 'Loading...' },
+          ],
+        },
+      },
     },
   }
 }
