@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'react-router'
@@ -205,7 +205,7 @@ const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
 const FILTER_OPTION_MAX_VISIBLE_LIST = 1500
 const FILTER_EMPTY_LABEL = '(empty)'
-const ENABLE_PERSISTED_COLUMN_WIDTHS = false
+const ENABLE_PERSISTED_COLUMN_WIDTHS = true
 const WORKSHOP_ENRICHMENT_BATCH_SIZE = 40
 const WORKSHOP_ENRICHMENT_FILTER_BOOTSTRAP_BATCH_SIZE = 200
 const FALLBACK_TIMEZONES = ['America/New_York', 'America/Toronto', 'America/Vancouver', 'UTC'] as const
@@ -955,6 +955,26 @@ export default function TableDisplay({
     supportsFamilyContextHover,
   ])
 
+  const canPersistColumnWidths = ENABLE_PERSISTED_COLUMN_WIDTHS && Boolean(tableName)
+
+  const resetColumnWidths = useCallback(() => {
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440
+    const { widths: nextWidths, minWidths } = buildAutoColumnWidths({
+      columns,
+      rows,
+      tableName,
+      columnMeta,
+      viewportWidth,
+    })
+
+    setColumnMinWidths(minWidths)
+    setColumnWidths(nextWidths)
+
+    if (canPersistColumnWidths && typeof window !== 'undefined') {
+      window.localStorage.removeItem(columnWidthStorageKey(tableName))
+    }
+  }, [canPersistColumnWidths, columnMeta, columns, rows, tableName])
+
   const canUseClientFilterOptions =
     !serverSideQuery ||
     (typeof source?.totalRows === 'number' && source.totalRows > 0 && rowsWithEnrichment.length >= source.totalRows)
@@ -1010,7 +1030,7 @@ export default function TableDisplay({
       viewportWidth,
     })
 
-    if (ENABLE_PERSISTED_COLUMN_WIDTHS && typeof window !== 'undefined') {
+    if (canPersistColumnWidths && typeof window !== 'undefined') {
       try {
         const parsed = JSON.parse(window.localStorage.getItem(columnWidthStorageKey(tableName)) ?? '{}')
         if (parsed && typeof parsed === 'object') {
@@ -1029,12 +1049,12 @@ export default function TableDisplay({
 
     setColumnMinWidths(minWidths)
     setColumnWidths(nextWidths)
-  }, [columns, columnMeta, rows, tableName])
+  }, [canPersistColumnWidths, columns, columnMeta, rows, tableName])
 
   useEffect(() => {
-    if (!ENABLE_PERSISTED_COLUMN_WIDTHS || !tableName || !Object.keys(columnWidths).length || typeof window === 'undefined') return
+    if (!canPersistColumnWidths || !Object.keys(columnWidths).length || typeof window === 'undefined') return
     window.localStorage.setItem(columnWidthStorageKey(tableName), JSON.stringify(columnWidths))
-  }, [columnWidths, tableName])
+  }, [canPersistColumnWidths, columnWidths, tableName])
 
   useEffect(() => {
     const fitColumns = columns.filter(column => Boolean(columnMeta[column]?.fitContentOnLoad))
@@ -2752,6 +2772,17 @@ export default function TableDisplay({
         <p className="text-xs text-muted-foreground">Page {effectivePage} of {totalPages} ({totalRows} rows)</p>
         <div className="flex items-center gap-2 text-xs">
           {paginationActions ? <div className="mr-1">{paginationActions}</div> : null}
+          {canPersistColumnWidths ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={resetColumnWidths}
+              title="Reset saved column widths"
+            >
+              Reset widths
+            </Button>
+          ) : null}
           {canInlineInsert ? (
             <Button
               type="button"
