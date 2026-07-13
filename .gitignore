@@ -15,3 +15,4 @@ _**
 
 # Local production snapshot seed dumps (PII/sensitive)
 /supabase/seeds/prod-data/*.sql
+/supabase/seeds/prod-data/active/*.sql

@@ -1,0 +1,16 @@
+# Static/bootstrap tables that conflict with migrations/app-data seed flow
+
+public.form
+public.form_question
+public.form_question_map
+public.form_assignment
+public.sign_up_flow
+public.role_permission
+public.semester
+public.semester_form_requirement
+public.federal_electoral_district
+public.sign_up_terms
+public.user_roles
+public.email_draft
+public.email_draft_version
+storage.buckets
