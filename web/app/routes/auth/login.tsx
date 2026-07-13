@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { recordLoginEvent } from '@/lib/login-events.server'
+import { formatSupabaseUnavailableMessage, isSupabaseUnavailableError } from '@/lib/supabase-availability'
 import AuthStickerBackground from '@/components/auth/sticker-background'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,7 +24,16 @@ import {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { supabase, headers } = createClient(request)
 
-  const { data } = await supabase.auth.getUser()
+  let data
+  try {
+    const result = await supabase.auth.getUser()
+    data = result.data
+  } catch (error) {
+    if (isSupabaseUnavailableError(error)) {
+      throw new Response(formatSupabaseUnavailableMessage('loading the login page'), { status: 503 })
+    }
+    throw error
+  }
 
   if (data.user) {
     throw redirect('/home', { headers })
@@ -40,14 +50,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const email = formData.get('email') as string
   const password = formData.get('password') as string
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  })
+  let signInError: Error | null = null
+  try {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+    signInError = error
+  } catch (error) {
+    if (isSupabaseUnavailableError(error)) {
+      return { error: formatSupabaseUnavailableMessage('signing you in') }
+    }
+    throw error
+  }
 
-  if (error) {
+  if (signInError) {
+    if (isSupabaseUnavailableError(signInError)) {
+      return { error: formatSupabaseUnavailableMessage('signing you in') }
+    }
     return {
-      error: error instanceof Error ? error.message : 'An error occurred',
+      error: signInError.message,
     }
   }
 

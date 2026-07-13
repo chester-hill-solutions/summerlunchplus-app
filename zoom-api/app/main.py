@@ -12,6 +12,7 @@ from app.transforms import transform_meetings, transform_participants
 from app.zoom import MeetingInProgressError, ZoomClient
 
 app = FastAPI(title="Zoom API Service")
+_zoom_client: ZoomClient | None = None
 
 
 @app.on_event("startup")
@@ -20,11 +21,14 @@ def log_runtime_port() -> None:
 
 
 def _zoom() -> ZoomClient:
-    return ZoomClient(
-        account_id=settings.zoom_account_id,
-        client_id=settings.zoom_client_id,
-        client_secret=settings.zoom_client_secret,
-    )
+    global _zoom_client
+    if _zoom_client is None:
+        _zoom_client = ZoomClient(
+            account_id=settings.zoom_account_id,
+            client_id=settings.zoom_client_id,
+            client_secret=settings.zoom_client_secret,
+        )
+    return _zoom_client
 
 
 def _to_utc_z(start_time: str) -> str:
@@ -256,8 +260,9 @@ def list_past_meetings(
         result = _zoom().list_past_meetings(days=days)
     except httpx.HTTPStatusError as exc:
         raise _as_http_exception(exc) from exc
-    set_cached(_past_meetings_cache, cache_key, result)
-    return transform_meetings(result)
+    transformed = transform_meetings(result)
+    set_cached(_past_meetings_cache, cache_key, transformed)
+    return transformed
 
 
 @app.get("/meetings/{uuid}/participants", dependencies=[Depends(get_api_key)], response_model=ParticipantsResponse)
@@ -282,8 +287,9 @@ def get_participants(
         raise _as_http_exception(exc) from exc
     except MeetingInProgressError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    set_cached(_participants_cache, cache_key, result)
-    return transform_participants(result)
+    transformed = transform_participants(result)
+    set_cached(_participants_cache, cache_key, transformed)
+    return transformed
 
 
 @app.post("/meetings", dependencies=[Depends(get_api_key)])

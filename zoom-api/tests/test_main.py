@@ -86,6 +86,18 @@ def zoom_error(status_code: int):
     return m
 
 
+def zoom_error_with_payload(status_code: int, payload: dict):
+    request = Mock()
+    response = Mock()
+    response.status_code = status_code
+    response.json.return_value = payload
+    m = Mock()
+    m.raise_for_status.side_effect = httpx.HTTPStatusError(
+        f"{status_code} Error", request=request, response=response
+    )
+    return m
+
+
 # ── OpenAPI spec ─────────────────────────────────────────────────────────────
 
 def test_openapi_declares_security_scheme(client):
@@ -143,6 +155,27 @@ def test_list_hosts_missing_auth(client):
     assert client.get("/hosts").status_code == 401
 
 
+def test_list_hosts_paginates(client, headers):
+    page_one = {
+        "users": [
+            {"id": "host-1", "email": "host1@example.com"},
+        ],
+        "next_page_token": "next-page",
+    }
+    page_two = {
+        "users": [
+            {"id": "host-2", "email": "host2@example.com"},
+        ],
+    }
+    with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
+         patch("app.zoom.httpx.get", side_effect=[ok(page_one), ok(page_two)]):
+        resp = client.get("/hosts", headers=headers)
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert [user["email"] for user in payload["users"]] == ["host1@example.com", "host2@example.com"]
+
+
 # ── GET /meetings/past ────────────────────────────────────────────────────────
 
 def test_list_past_meetings_success(client, headers):
@@ -181,6 +214,41 @@ def test_list_past_meetings_missing_auth(client):
     assert client.get("/meetings/past").status_code == 401
 
 
+def test_list_past_meetings_paginates(client, headers):
+    page_one = {
+        "meetings": [{"id": "111", "topic": "Team Standup"}],
+        "next_page_token": "token-two",
+    }
+    page_two = {
+        "meetings": [{"id": "222", "topic": "Town Hall"}],
+    }
+
+    with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
+         patch("app.zoom.httpx.get", side_effect=[ok(page_one), ok(page_two)]):
+        resp = client.get("/meetings/past?days=7", headers=headers)
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert [meeting["id"] for meeting in payload["meetings"]] == ["111", "222"]
+
+
+def test_list_past_meetings_cache_stores_transformed_shape(client, headers):
+    with patch("app.main._zoom_client", None), \
+         patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)) as mock_post, \
+         patch("app.zoom.httpx.get", return_value=ok(MEETINGS_RESP)) as mock_get, \
+         patch("app.main.transform_meetings", return_value={"meetings": [{"id": "normalized"}]}) as transform:
+        first = client.get("/meetings/past", headers=headers)
+        second = client.get("/meetings/past", headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["meetings"][0]["id"] == "normalized"
+    assert second.json()["meetings"][0]["id"] == "normalized"
+    assert transform.call_count == 1
+    assert mock_post.call_count == 1
+    assert mock_get.call_count == 1
+
+
 # ── GET /meetings/{uuid}/participants ─────────────────────────────────────────
 
 def test_get_participants_success(client, headers):
@@ -213,10 +281,42 @@ def test_get_participants_missing_auth(client):
 
 def test_get_participants_meeting_in_progress(client, headers):
     with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
-         patch("app.zoom.httpx.get", return_value=zoom_error(400)):
+         patch("app.zoom.httpx.get", return_value=zoom_error_with_payload(400, {
+             "message": "This meeting is still in progress.",
+             "code": 3001,
+         })):
         resp = client.get("/meetings/abc123/participants", headers=headers)
     assert resp.status_code == 409
     assert "in progress" in resp.json()["detail"].lower()
+
+
+def test_get_participants_400_non_report_error_stays_400(client, headers):
+    with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
+         patch("app.zoom.httpx.get", return_value=zoom_error_with_payload(400, {
+             "message": "Invalid meeting UUID.",
+             "code": 300,
+         })):
+        resp = client.get("/meetings/abc123/participants", headers=headers)
+
+    assert resp.status_code == 400
+
+
+def test_get_participants_paginates(client, headers):
+    page_one = {
+        "participants": [{"name": "Alice"}],
+        "next_page_token": "next-page",
+    }
+    page_two = {
+        "participants": [{"name": "Bob"}],
+    }
+
+    with patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)), \
+         patch("app.zoom.httpx.get", side_effect=[ok(page_one), ok(page_two)]):
+        resp = client.get("/meetings/abc123/participants", headers=headers)
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert [row["name"] for row in payload["participants"]] == ["Alice", "Bob"]
 
 
 # ── POST /meetings ────────────────────────────────────────────────────────────
@@ -377,3 +477,17 @@ def test_remove_registrant_success(client, headers):
 
 def test_remove_registrant_missing_auth(client):
     assert client.delete("/meetings/99999/registrants/reg-abc").status_code == 401
+
+
+def test_zoom_client_retries_transient_network_errors(client, headers):
+    timeout = httpx.ConnectTimeout("timeout", request=httpx.Request("POST", "https://zoom.us/oauth/token"))
+
+    with patch("app.main._zoom_client", None), \
+         patch("app.zoom.httpx.post", side_effect=[timeout, ok(TOKEN_RESP)]) as mock_post, \
+         patch("app.zoom.httpx.get", return_value=ok(HOSTS_RESP)) as mock_get:
+        resp = client.get("/hosts", headers=headers)
+
+    assert resp.status_code == 200
+    assert resp.json()["users"][0]["email"] == "host1@example.com"
+    assert mock_post.call_count == 2
+    assert mock_get.call_count == 1

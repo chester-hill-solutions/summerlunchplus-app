@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
+import { provisionClassById } from '@/lib/zoom-jobs/provision.server'
 import { runZoomJobs, runZoomJobsForClass } from '@/lib/zoom-jobs/runner.server'
 import type { Route } from './+types/class'
 import DeferredTableDisplay from './deferred-table-display'
@@ -18,6 +19,8 @@ type ActionData = {
   zoomRunError?: string
   classSyncSuccess?: string
   classSyncError?: string
+  classMeetingSuccess?: string
+  classMeetingError?: string
 }
 
 type ClassRow = Record<string, unknown> & {
@@ -39,9 +42,9 @@ export async function loader(args: Route.LoaderArgs) {
       columns: [
         'workshop_description',
         'starts_at',
+        'step_attendance_rows',
         'step_meeting',
         'step_registrants',
-        'step_attendance_rows',
         'step_reminder',
         'step_attendance',
       ],
@@ -49,11 +52,26 @@ export async function loader(args: Route.LoaderArgs) {
       columnMeta: {
         workshop_description: { label: 'Workshop', filterable: true, fitContentOnLoad: true },
         starts_at: { label: 'Timestamp', filterable: true, fitContentOnLoad: true },
-        step_meeting: { label: 'Step 1: Meeting', filterable: true },
-        step_registrants: { label: 'Step 2: Zoom Registrants', filterable: true },
-        step_attendance_rows: { label: 'Step 3: Attendance Rows', filterable: true },
-        step_reminder: { label: 'Step 4: Reminder', filterable: true },
-        step_attendance: { label: 'Step 5: Attendance Sync', filterable: true },
+        step_meeting: {
+          label: 'Meeting',
+          filterable: true,
+          fitContentOnLoad: true,
+          hoverCard: {
+            titleField: 'zoom_topic',
+            titleFallback: 'Zoom meeting details',
+            fields: [
+              { label: 'Meeting ID', field: 'class_zoom_meeting_display', fallback: 'Missing' },
+              { label: 'Start (UTC)', field: 'zoom_start_at', fallback: 'Missing' },
+              { label: 'End (UTC)', field: 'zoom_end_at', fallback: 'Missing' },
+              { label: 'Time check', field: 'zoom_schedule_match', fallback: 'Missing' },
+              { label: 'Join URL', field: 'zoom_join_url', fallback: 'Missing' },
+            ],
+          },
+        },
+        step_registrants: { label: 'Zoom Registrants', filterable: true },
+        step_attendance_rows: { label: 'Attendance Rows', filterable: true },
+        step_reminder: { label: 'Reminder', filterable: true },
+        step_attendance: { label: 'Attendance Sync', filterable: true },
       },
     }
   }
@@ -173,12 +191,12 @@ export async function loader(args: Route.LoaderArgs) {
     registrantsByClassId.set(registrant.class_id, bucket)
   }
 
-  const statusLabel = ({ done, total }: { done: number; total: number }) => {
-    if (total <= 0) return 'N/A'
-    if (done >= total) return `Done (${done}/${total})`
-    if (done <= 0) return `Missing (0/${total})`
-    return `Partial (${done}/${total})`
-  }
+  const progressLabel = ({ done, total }: { done: number; total: number }) => `${done}/${total}`
+
+  const progressCellClass = ({ done, total }: { done: number; total: number }) =>
+    done >= total
+      ? 'font-semibold !text-[var(--brand-green)] visited:!text-[var(--brand-green)] hover:!text-[var(--brand-green)]'
+      : 'font-semibold !text-destructive visited:!text-destructive hover:!text-destructive'
 
   const zoomScheduleMatchLabel = ({
     classStartsAt,
@@ -245,6 +263,12 @@ export async function loader(args: Route.LoaderArgs) {
       attendanceStep = 'Failed'
     }
 
+    const registrantsProgress = { done: registrantsReady, total: expected }
+    const attendanceRowsProgress = { done: attendanceRowsReady, total: expected }
+    const remindersProgress = { done: remindersSent, total: expected }
+
+    const meetingComplete = Boolean(meeting && meeting.status === 'created' && meeting.join_url)
+
     return {
       ...row,
       class_zoom_meeting_id: meeting?.id ?? '',
@@ -261,11 +285,17 @@ export async function loader(args: Route.LoaderArgs) {
       sync_class: 'Sync class',
       zoom_host_email: meeting?.host_zoom_user_email ?? row.zoom_host_email ?? '',
       zoom_join_url: meeting?.join_url ?? row.zoom_join_url ?? '',
-      step_meeting: meeting && meeting.status === 'created' && meeting.join_url ? 'Done' : 'Missing',
-      step_registrants: statusLabel({ done: registrantsReady, total: expected }),
-      step_attendance_rows: statusLabel({ done: attendanceRowsReady, total: expected }),
-      step_reminder: statusLabel({ done: remindersSent, total: expected }),
+      step_meeting: meetingComplete ? meeting?.start_time ?? 'Generated' : 'Generate',
+      step_registrants: progressLabel(registrantsProgress),
+      step_attendance_rows: progressLabel(attendanceRowsProgress),
+      step_reminder: progressLabel(remindersProgress),
       step_attendance: attendanceStep,
+      _cell_class_by_column: {
+        ...(row._cell_class_by_column && typeof row._cell_class_by_column === 'object' ? row._cell_class_by_column : {}),
+        step_registrants: progressCellClass(registrantsProgress),
+        step_attendance_rows: progressCellClass(attendanceRowsProgress),
+        step_reminder: progressCellClass(remindersProgress),
+      },
     }
   })
 
@@ -277,15 +307,13 @@ export async function loader(args: Route.LoaderArgs) {
       column !== 'ends_at'
   )
 
-  const displayColumns: string[] = []
-  for (const column of baseDisplayColumns) {
-    displayColumns.push(column)
-    if (column === 'step_registrants') {
-      displayColumns.push('step_attendance_rows')
-    }
+  const displayColumns = [...baseDisplayColumns]
+  const meetingColumnIndex = displayColumns.indexOf('step_meeting')
+  if (meetingColumnIndex !== -1) {
+    displayColumns.splice(meetingColumnIndex, 0, 'step_attendance_rows')
   }
 
-  displayColumns.push('zoom_topic', 'zoom_start_at', 'zoom_end_at', 'zoom_schedule_match', 'ends_at', 'sync_class')
+  displayColumns.push('ends_at', 'sync_class')
 
   const fitAllColumnsMeta = Object.fromEntries(
     displayColumns.map(column => [
@@ -322,17 +350,28 @@ export async function loader(args: Route.LoaderArgs) {
         preferredWidth: 220,
         fitContentOnLoad: true,
       },
-      step_meeting: { label: 'Step 1: Meeting', filterable: true },
-      step_registrants: { label: 'Step 2: Zoom Registrants', filterable: true },
-      step_attendance_rows: { label: 'Step 3: Attendance Rows', filterable: true },
-      step_reminder: { label: 'Step 4: Reminder', filterable: true },
-      step_attendance: { label: 'Step 5: Attendance Sync', filterable: true },
-      zoom_topic: { label: 'Zoom Topic', truncate: true, minWidth: 170, preferredWidth: 240 },
-      zoom_start_at: { label: 'Zoom Start (UTC)' },
-      zoom_end_at: { label: 'Zoom End (UTC)' },
-      zoom_schedule_match: { label: 'Zoom Time Check', filterable: true },
+      step_meeting: {
+        label: 'Meeting',
+        filterable: true,
+        fitContentOnLoad: true,
+        hoverCard: {
+          titleField: 'zoom_topic',
+          titleFallback: 'Zoom meeting details',
+          fields: [
+            { label: 'Meeting ID', field: 'class_zoom_meeting_display', fallback: 'Missing' },
+            { label: 'Start (UTC)', field: 'zoom_start_at', fallback: 'Missing' },
+            { label: 'End (UTC)', field: 'zoom_end_at', fallback: 'Missing' },
+            { label: 'Time check', field: 'zoom_schedule_match', fallback: 'Missing' },
+            { label: 'Join URL', field: 'zoom_join_url', fallback: 'Missing' },
+          ],
+        },
+      },
+      step_registrants: { label: 'Zoom Registrants', filterable: true },
+      step_attendance_rows: { label: 'Attendance Rows', filterable: true },
+      step_reminder: { label: 'Reminder', filterable: true },
+      step_attendance: { label: 'Attendance Sync', filterable: true },
       sync_class: { label: 'Sync', filterable: false },
-      zoom_host_email: { label: 'Zoom Host', filterable: true },
+      zoom_host_email: { label: 'Zoom Host', filterable: true, fitContentOnLoad: true },
       zoom_join_url: { label: 'Zoom Join Link', truncate: true },
     },
   }
@@ -350,7 +389,14 @@ export async function action(args: Route.ActionArgs) {
 
     try {
       const appOrigin = new URL(args.request.url).origin
-      await runZoomJobs({ appOrigin, runId: `manual-ui-${Date.now().toString(36)}` })
+      await runZoomJobs({
+        appOrigin,
+        runId: `manual-ui-${Date.now().toString(36)}`,
+        triggerSource: 'ui',
+        triggerKind: 'zoom_jobs_run',
+        actorUserId: auth.user.id,
+        actorRole: auth.claims.role,
+      })
       return { zoomRunSuccess: 'Zoom provisioning sequence started and completed for this run.' } satisfies ActionData
     } catch (error) {
       return {
@@ -372,13 +418,62 @@ export async function action(args: Route.ActionArgs) {
 
     try {
       const appOrigin = new URL(args.request.url).origin
-      await runZoomJobsForClass({ classId, appOrigin, runId: `manual-class-${Date.now().toString(36)}` })
+      await runZoomJobsForClass({
+        classId,
+        appOrigin,
+        runId: `manual-class-${Date.now().toString(36)}`,
+        triggerSource: 'ui',
+        triggerKind: 'sync_button',
+        actorUserId: auth.user.id,
+        actorRole: auth.claims.role,
+      })
       return { classSyncSuccess: `Class sync completed for ${classId}.` } satisfies ActionData
     } catch (error) {
       return {
         classSyncError: error instanceof Error ? error.message : `Failed to sync class ${classId}.`,
       } satisfies ActionData
     }
+  }
+
+  if (intent === 'generate-meeting') {
+    const auth = await requireAuth(args.request)
+    if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    const classId = String(formData.get('class_id') ?? '')
+    if (!classId) {
+      return { classMeetingError: 'Missing class id.' } satisfies ActionData
+    }
+
+    const runId = `manual-generate-${Date.now().toString(36)}`
+    const result = await provisionClassById(classId, {
+      lockOwnerRunId: runId,
+      lockOwnerKind: 'generate_meeting',
+      auditContext: {
+        runId,
+        triggerSource: 'ui',
+        triggerKind: 'generate_meeting_button',
+        actorUserId: auth.user.id,
+        actorRole: auth.claims.role,
+      },
+    })
+
+    if (result.error) {
+      return {
+        classMeetingError: result.error,
+      } satisfies ActionData
+    }
+
+    if (result.skipped) {
+      return {
+        classMeetingError: `Meeting generation skipped (${result.skipReason ?? 'unknown'}).`,
+      } satisfies ActionData
+    }
+
+    return {
+      classMeetingSuccess: `Meeting generated for ${classId}.`,
+    } satisfies ActionData
   }
 
   return baseAction(args)
@@ -415,6 +510,12 @@ export default function ClassTablePage() {
           ) : null}
           {actionData?.classSyncError ? (
             <p className="text-sm text-destructive">{actionData.classSyncError}</p>
+          ) : null}
+          {actionData?.classMeetingSuccess ? (
+            <p className="text-sm text-emerald-700">{actionData.classMeetingSuccess}</p>
+          ) : null}
+          {actionData?.classMeetingError ? (
+            <p className="text-sm text-destructive">{actionData.classMeetingError}</p>
           ) : null}
         </div>
       }

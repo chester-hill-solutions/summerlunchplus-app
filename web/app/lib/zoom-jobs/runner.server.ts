@@ -1,6 +1,13 @@
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
 import { resolveFamilyContactsByProfileId } from '@/lib/family.server'
 import { adminClient } from '@/lib/supabase/adminClient'
+import {
+  finishZoomJobAttemptAudit,
+  finishZoomJobRunAudit,
+  startZoomJobAttemptAudit,
+  startZoomJobRunAudit,
+  type ZoomAuditContext,
+} from '@/lib/zoom-jobs/audit.server'
 import { getClassesInWindow, provisionClassById } from '@/lib/zoom-jobs/provision.server'
 import { ZoomApiError, zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
 
@@ -66,7 +73,7 @@ const releaseZoomRegistrantReminderLock = async (registrantId: string) => {
   return data === true
 }
 
-const REPROVISION_HORIZON_MINUTES = 36 * 60
+const REPROVISION_HORIZON_MINUTES = 7 * 24 * 60
 const REMINDER_WINDOW_MINUTES = 2 * 60
 const POST_CLASS_FOLLOWUP_DELAY_HOURS = 24
 const RUNNING_SYNC_TIMEOUT_MINUTES = 20
@@ -80,6 +87,68 @@ const chunkArray = <T,>(items: T[], size: number) => {
     chunks.push(items.slice(index, index + size))
   }
   return chunks
+}
+
+const runAuditedAction = async <T>({
+  audit,
+  actionType,
+  requestPayload,
+  classId,
+  profileId,
+  classZoomMeetingId,
+  task,
+}: {
+  audit: ZoomAuditContext
+  actionType: string
+  requestPayload?: Record<string, unknown>
+  classId?: string | null
+  profileId?: string | null
+  classZoomMeetingId?: string | null
+  task: () => Promise<T>
+}) => {
+  const attempt = await startZoomJobAttemptAudit({
+    runDbId: audit.runDbId,
+    runId: audit.runId,
+    actionType,
+    triggerSource: audit.triggerSource,
+    triggerKind: audit.triggerKind,
+    classId: classId ?? null,
+    profileId: profileId ?? null,
+    classZoomMeetingId: classZoomMeetingId ?? null,
+    requestPayload,
+  })
+
+  try {
+    const result = await task()
+    const status =
+      typeof result === 'object' && result !== null && 'skipped' in (result as Record<string, unknown>) && (result as Record<string, unknown>).skipped === true
+        ? 'skipped'
+        : typeof result === 'object' && result !== null && 'ok' in (result as Record<string, unknown>) && (result as Record<string, unknown>).ok === false
+          ? 'failed'
+          : 'succeeded'
+
+    await finishZoomJobAttemptAudit(attempt, {
+      id: attempt?.id ?? '',
+      status,
+      resultPayload: (result as Record<string, unknown>) ?? {},
+      errorMessage:
+        status === 'failed' && typeof result === 'object' && result !== null && 'error' in (result as Record<string, unknown>)
+          ? String((result as Record<string, unknown>).error ?? 'Unknown error')
+          : null,
+    })
+
+    return result
+  } catch (error) {
+    await finishZoomJobAttemptAudit(attempt, {
+      id: attempt?.id ?? '',
+      status: 'failed',
+      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      errorPayload: {
+        name: error instanceof Error ? error.name : 'UnknownError',
+      },
+    })
+    throw error
+  }
 }
 
 const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
@@ -185,7 +254,13 @@ const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
   }
 }
 
-const provisionWithin36h = async ({ now }: { now: Date }) => {
+const provisionWithin7d = async ({
+  now,
+  auditContext,
+}: {
+  now: Date
+  auditContext?: ZoomAuditContext
+}) => {
   const classIds = await getClassesInWindow({
     startsAt: toIso(now),
     endsAt: toIso(addMinutes(now, REPROVISION_HORIZON_MINUTES)),
@@ -193,7 +268,7 @@ const provisionWithin36h = async ({ now }: { now: Date }) => {
 
   const results = [] as Awaited<ReturnType<typeof provisionClassById>>[]
   for (const classId of classIds) {
-    results.push(await provisionClassById(classId))
+    results.push(await provisionClassById(classId, { auditContext }))
   }
 
   return {
@@ -987,12 +1062,55 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
   return { scanned, synced, failed, pendingRetry, skippedCooldown, absentMarked }
 }
 
-export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?: Date; appOrigin: string; runId?: string }) => {
+export const runZoomJobs = async ({
+  now = new Date(),
+  appOrigin,
+  runId,
+  triggerSource = 'internal',
+  triggerKind = 'zoom_jobs_run',
+  actorUserId,
+  actorRole,
+}: {
+  now?: Date
+  appOrigin: string
+  runId?: string
+  triggerSource?: ZoomAuditContext['triggerSource']
+  triggerKind?: ZoomAuditContext['triggerKind']
+  actorUserId?: string | null
+  actorRole?: string | null
+}) => {
+  const effectiveRunId = (runId ?? `zoom-run-${Date.now().toString(36)}`).trim()
+  const runDbId = await startZoomJobRunAudit({
+    runId: effectiveRunId,
+    triggerSource,
+    triggerKind,
+    actorUserId,
+    actorRole,
+    context: {
+      appOrigin,
+      now: now.toISOString(),
+    },
+  })
+
+  const auditContext: ZoomAuditContext = {
+    runId: effectiveRunId,
+    runDbId,
+    triggerSource,
+    triggerKind,
+    actorUserId,
+    actorRole,
+  }
+
   const lockAcquired = await tryAcquireZoomRunnerLock()
   if (!lockAcquired) {
+    await finishZoomJobRunAudit({
+      id: runDbId ?? '',
+      status: 'skipped',
+      summary: { reason: 'zoom runner lock not acquired' },
+    })
     return {
       ok: true,
-      runId: runId ?? null,
+      runId: effectiveRunId,
       ranAt: now.toISOString(),
       skipped: true,
       reason: 'zoom runner lock not acquired',
@@ -1000,44 +1118,85 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
   }
 
   try {
-  console.info('[zoom-jobs] run started', {
-    runId: runId ?? null,
-    now: now.toISOString(),
-  })
+    console.info('[zoom-jobs] run started', {
+      runId: effectiveRunId,
+      now: now.toISOString(),
+    })
 
-  const attendanceRowBackfill = await backfillAttendanceRowsCoverage({ now })
-  const within36h = await provisionWithin36h({ now })
-  const hostReconciliation = await reconcileHostOverlaps({ now })
-  const reminders = await sendReminderCoverage({ now, appOrigin })
-  const postClassCameraOrPhotoFollowup = await sendPostClassCameraOrPhotoFollowupCoverage({ now })
-  const attendanceSync = await syncPostClassAttendance({ now })
+    const attendanceRowBackfill = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'attendance_backfill',
+      requestPayload: { horizonMinutes: REPROVISION_HORIZON_MINUTES },
+      task: () => backfillAttendanceRowsCoverage({ now }),
+    })
+    const within7d = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'meeting_generate_window',
+      requestPayload: { horizonMinutes: REPROVISION_HORIZON_MINUTES },
+      task: () => provisionWithin7d({ now, auditContext }),
+    })
+    const hostReconciliation = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'host_reconcile',
+      task: () => reconcileHostOverlaps({ now }),
+    })
+    const reminders = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'reminder_send',
+      task: () => sendReminderCoverage({ now, appOrigin }),
+    })
+    const postClassCameraOrPhotoFollowup = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'post_class_followup_send',
+      task: () => sendPostClassCameraOrPhotoFollowupCoverage({ now }),
+    })
+    const attendanceSync = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'attendance_sync',
+      task: () => syncPostClassAttendance({ now }),
+    })
 
-  console.info('[zoom-jobs] run completed', {
-    runId: runId ?? null,
-    ranAt: now.toISOString(),
-    within36hScanned: within36h.scanned,
-    hostConflictsDetected: hostReconciliation.detected,
-    reminderScanned: reminders.scannedClasses,
-    postClassFollowupEligible: postClassCameraOrPhotoFollowup.eligible,
-    postClassFollowupSent: postClassCameraOrPhotoFollowup.sent,
-    attendanceScanned: attendanceSync.scanned,
-    attendanceFailed: attendanceSync.failed,
-    attendanceAbsentMarked: attendanceSync.absentMarked,
-    attendanceRowBackfillOk: attendanceRowBackfill.ok,
-    attendanceRowsBackfilled: attendanceRowBackfill.ok ? attendanceRowBackfill.inserted : 0,
-  })
+    console.info('[zoom-jobs] run completed', {
+      runId: effectiveRunId,
+      ranAt: now.toISOString(),
+      within7dScanned: within7d.scanned,
+      hostConflictsDetected: hostReconciliation.detected,
+      reminderScanned: reminders.scannedClasses,
+      postClassFollowupEligible: postClassCameraOrPhotoFollowup.eligible,
+      postClassFollowupSent: postClassCameraOrPhotoFollowup.sent,
+      attendanceScanned: attendanceSync.scanned,
+      attendanceFailed: attendanceSync.failed,
+      attendanceAbsentMarked: attendanceSync.absentMarked,
+      attendanceRowBackfillOk: attendanceRowBackfill.ok,
+      attendanceRowsBackfilled: attendanceRowBackfill.ok ? attendanceRowBackfill.inserted : 0,
+    })
 
-  return {
-    ok: true,
-    runId: runId ?? null,
-    ranAt: now.toISOString(),
-    provisionWithin36h: within36h,
-    hostOverlapReconciliation: hostReconciliation,
-    reminderCoverage: reminders,
-    postClassCameraOrPhotoFollowup,
-    attendanceRowBackfill,
-    attendanceSync,
-  }
+    const result = {
+      ok: true,
+      runId: effectiveRunId,
+      ranAt: now.toISOString(),
+      provisionWithin7d: within7d,
+      hostOverlapReconciliation: hostReconciliation,
+      reminderCoverage: reminders,
+      postClassCameraOrPhotoFollowup,
+      attendanceRowBackfill,
+      attendanceSync,
+    }
+
+    await finishZoomJobRunAudit({
+      id: runDbId ?? '',
+      status: 'succeeded',
+      summary: result as unknown as Record<string, unknown>,
+    })
+
+    return result
+  } catch (error) {
+    await finishZoomJobRunAudit({
+      id: runDbId ?? '',
+      status: 'failed',
+      errorMessage: error instanceof Error ? error.message : 'Unknown zoom jobs run error',
+    })
+    throw error
   } finally {
     await releaseZoomRunnerLock()
   }
@@ -1048,33 +1207,104 @@ export const runZoomJobsForClass = async ({
   now = new Date(),
   appOrigin,
   runId,
+  triggerSource = 'ui',
+  triggerKind = 'zoom_jobs_class',
+  actorUserId,
+  actorRole,
 }: {
   classId: string
   now?: Date
   appOrigin: string
   runId?: string
+  triggerSource?: ZoomAuditContext['triggerSource']
+  triggerKind?: ZoomAuditContext['triggerKind']
+  actorUserId?: string | null
+  actorRole?: string | null
 }) => {
-  const attendanceRowBackfill = await backfillAttendanceRowsCoverage({ now })
-  const provision = await provisionClassById(classId, {
-    lockOwnerRunId: runId,
-    lockOwnerKind: 'class_sync',
+  const effectiveRunId = (runId ?? `class-run-${Date.now().toString(36)}`).trim()
+  const runDbId = await startZoomJobRunAudit({
+    runId: effectiveRunId,
+    triggerSource,
+    triggerKind,
+    actorUserId,
+    actorRole,
+    context: { classId, appOrigin, now: now.toISOString() },
   })
-  const hostReconciliation = await reconcileHostOverlaps({ now, onlyClassIds: new Set([classId]) })
-  const reminderCoverage = await sendReminderCoverage({ now, appOrigin, onlyClassId: classId })
-  const postClassCameraOrPhotoFollowup = await sendPostClassCameraOrPhotoFollowupCoverage({ now, onlyClassId: classId })
-  const attendanceSync = await syncPostClassAttendance({ now, onlyClassId: classId })
 
-  return {
-    ok: true,
-    runId: runId ?? null,
-    ranAt: now.toISOString(),
-    classId,
-    attendanceRowBackfill,
-    provision,
-    hostOverlapReconciliation: hostReconciliation,
-    reminderCoverage,
-    postClassCameraOrPhotoFollowup,
-    attendanceSync,
+  const auditContext: ZoomAuditContext = {
+    runId: effectiveRunId,
+    runDbId,
+    triggerSource,
+    triggerKind,
+    actorUserId,
+    actorRole,
+  }
+
+  try {
+    const attendanceRowBackfill = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'attendance_backfill',
+      classId,
+      requestPayload: { classId },
+      task: () => backfillAttendanceRowsCoverage({ now }),
+    })
+    const provision = await provisionClassById(classId, {
+      lockOwnerRunId: effectiveRunId,
+      lockOwnerKind: 'class_sync',
+      auditContext,
+    })
+    const hostReconciliation = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'host_reconcile',
+      classId,
+      task: () => reconcileHostOverlaps({ now, onlyClassIds: new Set([classId]) }),
+    })
+    const reminderCoverage = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'reminder_send',
+      classId,
+      task: () => sendReminderCoverage({ now, appOrigin, onlyClassId: classId }),
+    })
+    const postClassCameraOrPhotoFollowup = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'post_class_followup_send',
+      classId,
+      task: () => sendPostClassCameraOrPhotoFollowupCoverage({ now, onlyClassId: classId }),
+    })
+    const attendanceSync = await runAuditedAction({
+      audit: auditContext,
+      actionType: 'attendance_sync',
+      classId,
+      task: () => syncPostClassAttendance({ now, onlyClassId: classId }),
+    })
+
+    const result = {
+      ok: true,
+      runId: effectiveRunId,
+      ranAt: now.toISOString(),
+      classId,
+      attendanceRowBackfill,
+      provision,
+      hostOverlapReconciliation: hostReconciliation,
+      reminderCoverage,
+      postClassCameraOrPhotoFollowup,
+      attendanceSync,
+    }
+
+    await finishZoomJobRunAudit({
+      id: runDbId ?? '',
+      status: 'succeeded',
+      summary: result as unknown as Record<string, unknown>,
+    })
+
+    return result
+  } catch (error) {
+    await finishZoomJobRunAudit({
+      id: runDbId ?? '',
+      status: 'failed',
+      errorMessage: error instanceof Error ? error.message : 'Unknown class zoom run error',
+    })
+    throw error
   }
 }
 
@@ -1083,25 +1313,71 @@ export const runZoomRegistrantForStudent = async ({
   profileId,
   now = new Date(),
   runId,
+  triggerSource = 'ui',
+  triggerKind = 'register_button',
+  actorUserId,
+  actorRole,
 }: {
   classId: string
   profileId: string
   now?: Date
   runId?: string
+  triggerSource?: ZoomAuditContext['triggerSource']
+  triggerKind?: ZoomAuditContext['triggerKind']
+  actorUserId?: string | null
+  actorRole?: string | null
 }) => {
-  const provision = await provisionClassById(classId, {
-    targetProfileId: profileId,
-    lockOwnerRunId: runId,
-    lockOwnerKind: 'row_register',
-    lockRetryMs: Number.parseInt(process.env.ZOOM_ROW_REGISTER_LOCK_WAIT_MS ?? '25000', 10),
+  const effectiveRunId = (runId ?? `registrant-run-${Date.now().toString(36)}`).trim()
+  const runDbId = await startZoomJobRunAudit({
+    runId: effectiveRunId,
+    triggerSource,
+    triggerKind,
+    actorUserId,
+    actorRole,
+    context: { classId, profileId, now: now.toISOString() },
   })
 
-  return {
-    ok: true,
-    runId: runId ?? null,
-    ranAt: now.toISOString(),
-    classId,
-    profileId,
-    provision,
+  const auditContext: ZoomAuditContext = {
+    runId: effectiveRunId,
+    runDbId,
+    triggerSource,
+    triggerKind,
+    actorUserId,
+    actorRole,
+  }
+
+  try {
+    const provision = await provisionClassById(classId, {
+      targetProfileId: profileId,
+      lockOwnerRunId: effectiveRunId,
+      lockOwnerKind: 'row_register',
+      lockRetryMs: Number.parseInt(process.env.ZOOM_ROW_REGISTER_LOCK_WAIT_MS ?? '25000', 10),
+      auditContext,
+    })
+
+    const result = {
+      ok: true,
+      runId: effectiveRunId,
+      ranAt: now.toISOString(),
+      classId,
+      profileId,
+      provision,
+    }
+
+    await finishZoomJobRunAudit({
+      id: runDbId ?? '',
+      status: provision.error ? 'failed' : provision.skipped ? 'skipped' : 'succeeded',
+      summary: result as unknown as Record<string, unknown>,
+      errorMessage: provision.error ?? null,
+    })
+
+    return result
+  } catch (error) {
+    await finishZoomJobRunAudit({
+      id: runDbId ?? '',
+      status: 'failed',
+      errorMessage: error instanceof Error ? error.message : 'Unknown registrant run error',
+    })
+    throw error
   }
 }

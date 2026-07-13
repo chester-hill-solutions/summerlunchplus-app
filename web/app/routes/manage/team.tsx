@@ -13,9 +13,11 @@ import { manageSections, overviewPage } from './nav'
 const STAFF_ALLOWED_MANAGE_PATHS = new Set([
   '/manage',
   '/manage/class-attendance',
+  '/manage/class-attendance-card-data',
   '/manage/class',
   '/manage/workshop',
   '/manage/workshop/setup',
+  '/manage/workshop-enrollment',
   '/manage/gift-cards',
   '/manage/gift-cards/upload',
   '/manage/families',

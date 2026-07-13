@@ -41,12 +41,11 @@ begin
     limit 1;
 
     if target_form_id is null then
-      raise notice 'Skipping remap for legacy form ID %: target form missing (% / %), rows=%',
+      raise exception 'Missing remap target for legacy form ID % (% / %), rows=%',
         remap.old_id,
         coalesce(remap.target_name, '<null>'),
         coalesce(remap.target_like, '<null>'),
         old_submission_count;
-      continue;
     end if;
 
     update public.form_submission

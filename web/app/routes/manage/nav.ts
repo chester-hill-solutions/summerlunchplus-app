@@ -68,7 +68,7 @@ export const manageSections: ManageNavSection[] = [
     key: 'email',
     label: 'Email',
     stickerSrc: '/stickers/envelope.png',
-    stickerScale: 1.35,
+    stickerScale: 1.3,
     defaultCollapsed: true,
     items: [
       { to: '/manage/email-message', label: 'Email messages', description: 'Outbound transactional email log with delivery status and template data.' },
@@ -78,7 +78,8 @@ export const manageSections: ManageNavSection[] = [
   {
     key: 'form-management',
     label: 'Form Management',
-    stickerSrc: '/stickers/stocks.png',
+    stickerSrc: '/stickers/checklist.png',
+    stickerScale: 1.3,
     defaultCollapsed: false,
     items: [
       { to: '/manage/form', label: 'Forms', description: 'Onboarding forms configuration.' },
@@ -93,6 +94,7 @@ export const manageSections: ManageNavSection[] = [
     key: 'zoom',
     label: 'Zoom',
     stickerSrc: '/stickers/camcorder.png',
+    stickerScale: 1.4,
     defaultCollapsed: true,
     items: [
       { to: '/manage/zoom-connect-test', label: 'Zoom connect test', description: 'Test the configured zoom-api /zoom/connect endpoint.' },
@@ -102,13 +104,16 @@ export const manageSections: ManageNavSection[] = [
       { to: '/manage/class-zoom-registrant', label: 'Class Zoom registrants', description: 'Per-student registrant records and join link metadata.' },
       { to: '/manage/class-zoom-participant-sync', label: 'Zoom participant sync runs', description: 'Sync job history for meeting participant ingestion.' },
       { to: '/manage/class-zoom-participant', label: 'Zoom participants', description: 'Participant snapshots captured from Zoom reports.' },
+      { to: '/manage/zoom-job-run', label: 'Zoom job runs', description: 'Top-level scheduler/UI zoom run audit records.' },
+      { to: '/manage/zoom-job-attempt', label: 'Zoom job attempts', description: 'Per-action audit trail for meeting, registrant, and sync attempts.' },
       { to: '/manage/zlr-click-event', label: 'ZLR click events', description: 'Redirect click audit events for /zlr links.' },
     ],
   },
   {
     key: 'system',
     label: 'System',
-    stickerSrc: '/stickers/radish.png',
+    stickerSrc: '/stickers/gear.png',
+    stickerScale: 1.45,
     defaultCollapsed: true,
     items: [
       { to: '/manage/login-event', label: 'Login events', description: 'Successful sign-in metadata and source context.' },

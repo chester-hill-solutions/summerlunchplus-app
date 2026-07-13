@@ -301,6 +301,19 @@ const formatDateOnly = (value: string) => {
   return new Intl.DateTimeFormat(TABLE_DISPLAY_LOCALE, { dateStyle: 'medium' }).format(date)
 }
 
+const formatCompactLocalDateTime = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  return new Intl.DateTimeFormat(TABLE_DISPLAY_LOCALE, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date)
+}
+
 const isTimestampLabelValue = (value: unknown): value is TimestampLabelValue => {
   if (!value || typeof value !== 'object') return false
   return 'timestamp' in value && 'label' in value
@@ -329,6 +342,9 @@ const getCellValue = (column: string, row: Record<string, unknown>, tableName?: 
       return formatDateOnly(value)
     }
     return formatTimestamp(value)
+  }
+  if (tableName === 'class' && column === 'step_meeting' && typeof value === 'string' && value) {
+    return formatCompactLocalDateTime(value)
   }
   return (value ?? '').toString()
 }
@@ -542,27 +558,15 @@ const personLinkForCell = (
   if (tableName === 'class-attendance' && column === 'class_display' && typeof row.class_id === 'string' && row.class_id) {
     return withReturnTo('/manage/class', { f_id: row.class_id })
   }
-  if (
-    tableName === 'class' &&
-    ['workshop_description', 'starts_at', 'ends_at', 'zoom_host_email'].includes(column)
-  ) {
+  if (tableName === 'class' && column === 'workshop_description') {
     const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
-    const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''
-    const endsAt = typeof row.ends_at === 'string' ? row.ends_at : ''
-    return withReturnTo('/manage/class-attendance', {
-      ...(workshopDescription ? { f_workshop_description: workshopDescription } : {}),
-      ...(startsAt ? { f_class_starts_at: formatTimestamp(startsAt) } : {}),
-      ...(endsAt ? { f_class_ends_at: formatTimestamp(endsAt) } : {}),
+    return withReturnTo('/manage/workshop', {
+      ...(workshopDescription ? { f_description: workshopDescription } : {}),
     })
   }
   if (tableName === 'class' && column === 'step_meeting' && typeof row.id === 'string' && row.id) {
-    const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
-    const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''
-    const endsAt = typeof row.ends_at === 'string' ? row.ends_at : ''
     return withReturnTo('/manage/class-zoom-meeting', {
-      ...(workshopDescription ? { f_workshop_description: workshopDescription } : {}),
-      ...(startsAt ? { f_class_starts_at: formatTimestamp(startsAt) } : {}),
-      ...(endsAt ? { f_class_ends_at: formatTimestamp(endsAt) } : {}),
+      f_class_id: String(row.id),
     })
   }
   if (tableName === 'class' && column === 'step_registrants' && typeof row.id === 'string' && row.id) {
@@ -859,6 +863,7 @@ export default function TableDisplay({
   const filterPopoverRef = useRef<HTMLDivElement | null>(null)
   const hoverCardPopoverRef = useRef<HTMLDivElement | null>(null)
   const hoverCardTriggerRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const hoverCardCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const filterCacheRef = useRef<Map<string, FilterOptionsCacheEntry>>(new Map())
   const filterCacheLruRef = useRef<string[]>([])
   const filterActiveRequestRef = useRef<Map<string, number>>(new Map())
@@ -1121,6 +1126,27 @@ export default function TableDisplay({
   }, [pinnedHoverCardCellId])
 
   const visibleHoverCardCellId = pinnedHoverCardCellId ?? hoveredHoverCardCellId
+
+  const cancelHoverCardClose = () => {
+    if (!hoverCardCloseTimeoutRef.current) return
+    clearTimeout(hoverCardCloseTimeoutRef.current)
+    hoverCardCloseTimeoutRef.current = null
+  }
+
+  const scheduleHoverCardClose = (cellId: string) => {
+    cancelHoverCardClose()
+    hoverCardCloseTimeoutRef.current = setTimeout(() => {
+      setHoveredHoverCardCellId(prev => (prev === cellId ? null : prev))
+      hoverCardCloseTimeoutRef.current = null
+    }, 160)
+  }
+
+  useEffect(
+    () => () => {
+      cancelHoverCardClose()
+    },
+    []
+  )
 
   const updateHoverCardPosition = () => {
     if (!visibleHoverCardCellId) {
@@ -3264,6 +3290,39 @@ export default function TableDisplay({
                         )
                       }
 
+                      if (tableName === 'class' && column === 'step_meeting') {
+                        const classId = typeof row.id === 'string' ? row.id : ''
+                        const hasGeneratedMeeting =
+                          typeof row.class_zoom_meeting_id === 'string' && row.class_zoom_meeting_id.length > 0
+
+                        if (!hasGeneratedMeeting) {
+                          const isGenerating =
+                            statusFetcher.state === 'submitting' &&
+                            statusFetcher.formData?.get('intent') === 'generate-meeting' &&
+                            statusFetcher.formData?.get('class_id') === classId
+
+                          return (
+                            <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title="Meeting generation status">
+                              <button
+                                type="button"
+                                disabled={!classId || isGenerating}
+                                onClick={event => {
+                                  event.stopPropagation()
+                                  if (!classId) return
+                                  const formData = new FormData()
+                                  formData.set('intent', 'generate-meeting')
+                                  formData.set('class_id', classId)
+                                  statusFetcher.submit(formData, { method: 'post' })
+                                }}
+                                className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isGenerating ? 'Generating...' : 'Generate'}
+                              </button>
+                            </td>
+                          )
+                        }
+                      }
+
                       if (tableName === 'class' && column === 'sync_class') {
                         const classId = typeof row.id === 'string' ? row.id : ''
                         const isBusy = statusFetcher.state === 'submitting'
@@ -3311,6 +3370,7 @@ export default function TableDisplay({
                         typeof maxChars === 'number' && maxChars > 0 && cellValue.length > maxChars
                           ? `${cellValue.slice(0, maxChars)}...`
                           : cellValue
+                      const linkClassName = `underline decoration-dotted underline-offset-2 hover:text-primary ${extraCellClass}`.trim()
                       const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard)
                       const hoverCardCellId = `row-${absoluteRowIndex}-col-${column}`
 
@@ -3323,7 +3383,7 @@ export default function TableDisplay({
                             }).toString(),
                           }}
                           onClick={event => event.stopPropagation()}
-                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                          className={linkClassName}
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                             {displayValue}
@@ -3338,7 +3398,7 @@ export default function TableDisplay({
                             }).toString(),
                           }}
                           onClick={event => event.stopPropagation()}
-                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                          className={linkClassName}
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                             {displayValue}
@@ -3348,7 +3408,7 @@ export default function TableDisplay({
                         <Link
                           to={personLink}
                           onClick={event => event.stopPropagation()}
-                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                          className={linkClassName}
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                             {displayValue}
@@ -3360,7 +3420,7 @@ export default function TableDisplay({
                           target="_blank"
                           rel="noreferrer"
                           onClick={event => event.stopPropagation()}
-                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                          className={linkClassName}
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                             {displayValue}
@@ -3415,13 +3475,18 @@ export default function TableDisplay({
                               className="inline-block max-w-full"
                               data-hovercard-cell-id={hoverCardCellId}
                               onMouseEnter={() => {
+                                cancelHoverCardClose()
                                 if (pinnedHoverCardCellId && pinnedHoverCardCellId !== hoverCardCellId) return
                                 setHoveredHoverCardCellId(hoverCardCellId)
                                 setActiveHoverCard({ cellId: hoverCardCellId, data: hoverCardData })
                               }}
-                              onMouseLeave={() => {
+                              onMouseLeave={event => {
                                 if (pinnedHoverCardCellId === hoverCardCellId) return
-                                setHoveredHoverCardCellId(prev => (prev === hoverCardCellId ? null : prev))
+                                const nextTarget = event.relatedTarget as Node | null
+                                if (nextTarget && hoverCardPopoverRef.current?.contains(nextTarget)) {
+                                  return
+                                }
+                                scheduleHoverCardClose(hoverCardCellId)
                               }}
                             >
                               {content}
@@ -3764,13 +3829,19 @@ export default function TableDisplay({
               }}
               className="z-[120] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground shadow-lg select-text"
               onMouseEnter={() => {
+                cancelHoverCardClose()
                 if (!pinnedHoverCardCellId) {
                   setHoveredHoverCardCellId(visibleHoverCardCellId)
                 }
               }}
-              onMouseLeave={() => {
+              onMouseLeave={event => {
                 if (!pinnedHoverCardCellId) {
-                  setHoveredHoverCardCellId(null)
+                  const nextTarget = event.relatedTarget as HTMLElement | null
+                  const nextHoverCardCellId = nextTarget?.closest('[data-hovercard-cell-id]')?.getAttribute('data-hovercard-cell-id')
+                  if (nextHoverCardCellId === visibleHoverCardCellId) {
+                    return
+                  }
+                  scheduleHoverCardClose(visibleHoverCardCellId)
                 }
               }}
               onClick={event => event.stopPropagation()}

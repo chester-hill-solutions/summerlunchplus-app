@@ -29,7 +29,7 @@ Useful local commands:
 - `make cron-bg` - run scheduler container in background
 - `make logs` - follow background cron logs
 - `make down` - stop background container
-- `make smoke-all` - run all three jobs once immediately
+- `make smoke-all` - run all four jobs once immediately
 
 ## Troubleshooting
 
@@ -51,5 +51,6 @@ Schedules are declared in `scheduler/crontab`.
 Current jobs:
 
 - `*/5 * * * *` -> `/internal/zoom-jobs/run`
+- `*/5 * * * *` -> `/internal/gift-card-jobs/run`
 - `*/5 * * * *` -> `/internal/export-jobs/run`
 - `5 * * * *` -> `/internal/export-jobs/cleanup`
