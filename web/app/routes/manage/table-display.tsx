@@ -847,6 +847,7 @@ export default function TableDisplay({
   const filterPopoverRef = useRef<HTMLDivElement | null>(null)
   const hoverCardPopoverRef = useRef<HTMLDivElement | null>(null)
   const hoverCardTriggerRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const hoverCardCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const filterCacheRef = useRef<Map<string, FilterOptionsCacheEntry>>(new Map())
   const filterCacheLruRef = useRef<string[]>([])
   const filterActiveRequestRef = useRef<Map<string, number>>(new Map())
@@ -1109,6 +1110,27 @@ export default function TableDisplay({
   }, [pinnedHoverCardCellId])
 
   const visibleHoverCardCellId = pinnedHoverCardCellId ?? hoveredHoverCardCellId
+
+  const cancelHoverCardClose = () => {
+    if (!hoverCardCloseTimeoutRef.current) return
+    clearTimeout(hoverCardCloseTimeoutRef.current)
+    hoverCardCloseTimeoutRef.current = null
+  }
+
+  const scheduleHoverCardClose = (cellId: string) => {
+    cancelHoverCardClose()
+    hoverCardCloseTimeoutRef.current = setTimeout(() => {
+      setHoveredHoverCardCellId(prev => (prev === cellId ? null : prev))
+      hoverCardCloseTimeoutRef.current = null
+    }, 160)
+  }
+
+  useEffect(
+    () => () => {
+      cancelHoverCardClose()
+    },
+    []
+  )
 
   const updateHoverCardPosition = () => {
     if (!visibleHoverCardCellId) {
@@ -3404,13 +3426,18 @@ export default function TableDisplay({
                               className="inline-block max-w-full"
                               data-hovercard-cell-id={hoverCardCellId}
                               onMouseEnter={() => {
+                                cancelHoverCardClose()
                                 if (pinnedHoverCardCellId && pinnedHoverCardCellId !== hoverCardCellId) return
                                 setHoveredHoverCardCellId(hoverCardCellId)
                                 setActiveHoverCard({ cellId: hoverCardCellId, data: hoverCardData })
                               }}
-                              onMouseLeave={() => {
+                              onMouseLeave={event => {
                                 if (pinnedHoverCardCellId === hoverCardCellId) return
-                                setHoveredHoverCardCellId(prev => (prev === hoverCardCellId ? null : prev))
+                                const nextTarget = event.relatedTarget as Node | null
+                                if (nextTarget && hoverCardPopoverRef.current?.contains(nextTarget)) {
+                                  return
+                                }
+                                scheduleHoverCardClose(hoverCardCellId)
                               }}
                             >
                               {content}
@@ -3753,13 +3780,19 @@ export default function TableDisplay({
               }}
               className="z-[120] rounded-md border bg-popover p-2 text-left text-xs normal-case text-popover-foreground shadow-lg select-text"
               onMouseEnter={() => {
+                cancelHoverCardClose()
                 if (!pinnedHoverCardCellId) {
                   setHoveredHoverCardCellId(visibleHoverCardCellId)
                 }
               }}
-              onMouseLeave={() => {
+              onMouseLeave={event => {
                 if (!pinnedHoverCardCellId) {
-                  setHoveredHoverCardCellId(null)
+                  const nextTarget = event.relatedTarget as HTMLElement | null
+                  const nextHoverCardCellId = nextTarget?.closest('[data-hovercard-cell-id]')?.getAttribute('data-hovercard-cell-id')
+                  if (nextHoverCardCellId === visibleHoverCardCellId) {
+                    return
+                  }
+                  scheduleHoverCardClose(visibleHoverCardCellId)
                 }
               }}
               onClick={event => event.stopPropagation()}
