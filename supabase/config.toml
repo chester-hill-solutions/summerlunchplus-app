@@ -67,7 +67,7 @@ enabled = true
 # sql_paths = ["./seeds/app-data/*.sql", "./seeds/dummy-data/*.sql"]
 #
 # Production snapshot mode (sanitized prod snapshot + local bootstrap overrides, no dummy fixtures):
-sql_paths = ["./seeds/prod-data/*-sanitized.sql", "./seeds/app-data/*.sql"]
+sql_paths = ["./seeds/prod-data/active/*-sanitized.sql", "./seeds/app-data/*.sql"]
 #
 # Dummy-only mode (for fixture-only smoke runs):
 # sql_paths = ["./seeds/dummy-data/*.sql"]
