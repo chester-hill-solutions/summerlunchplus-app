@@ -40,7 +40,7 @@
 - Cron schedule source of truth: `scheduler/crontab`.
 - `INTERNAL_RUNNER_SECRET` must match values used by `web` internal routes.
 - Main local commands: `make cron`, `make cron-bg`, `make logs`, `make down`, `make smoke-all`.
-- `make smoke-all` runs zoom/export/cleanup smoke scripts; gift-card smoke is separate (`scheduler/scripts/gift-card-jobs.sh`).
+- `make smoke-all` runs zoom/gift-card/export/cleanup once each.
 
 ## Zoom API (`zoom-api/`)
 - Use Make targets: `make setup`, `make dev`, `make test` (these use `.venv/bin/...`).

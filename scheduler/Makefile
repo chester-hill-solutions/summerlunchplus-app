@@ -2,7 +2,7 @@ IMAGE_NAME ?= summerlunchplus-scheduler-local
 CONTAINER_NAME ?= summerlunchplus-scheduler-cron
 ENV_FILE ?= .env.local
 
-.PHONY: check-env build cron cron-bg down logs status smoke-zoom smoke-export smoke-cleanup smoke-all
+.PHONY: check-env build cron cron-bg down logs status smoke-zoom smoke-gift-card smoke-export smoke-cleanup smoke-all
 
 check-env:
 	@test -f "$(ENV_FILE)" || (echo "Missing $(ENV_FILE). Create it from .env.template." && exit 1)
@@ -29,10 +29,13 @@ status:
 smoke-zoom: build
 	docker run --rm --env-file $(ENV_FILE) $(IMAGE_NAME) /bin/bash /app/scripts/zoom-jobs.sh
 
+smoke-gift-card: build
+	docker run --rm --env-file $(ENV_FILE) $(IMAGE_NAME) /bin/bash /app/scripts/gift-card-jobs.sh
+
 smoke-export: build
 	docker run --rm --env-file $(ENV_FILE) $(IMAGE_NAME) /bin/bash /app/scripts/export-jobs.sh
 
 smoke-cleanup: build
 	docker run --rm --env-file $(ENV_FILE) $(IMAGE_NAME) /bin/bash /app/scripts/export-cleanup.sh
 
-smoke-all: smoke-zoom smoke-export smoke-cleanup
+smoke-all: smoke-zoom smoke-gift-card smoke-export smoke-cleanup
