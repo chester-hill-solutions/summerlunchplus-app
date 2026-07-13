@@ -13,6 +13,9 @@ _**
 /web/test-results/
 /web/playwright-report/
 
-# Local production snapshot seed dumps (PII/sensitive)
-/supabase/seeds/prod-data/*.sql
-/supabase/seeds/prod-data/active/*.sql
+# Local production snapshot seed artifacts (PII/sensitive)
+/supabase/seeds/prod-data/*
+!/supabase/seeds/prod-data/README.md
+!/supabase/seeds/prod-data/active/
+/supabase/seeds/prod-data/active/*
+!/supabase/seeds/prod-data/active/.gitkeep
