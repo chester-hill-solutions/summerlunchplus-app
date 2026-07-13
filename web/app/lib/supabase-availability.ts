@@ -33,4 +33,4 @@ export const isSupabaseUnavailableError = (error: unknown) => {
 }
 
 export const formatSupabaseUnavailableMessage = (where: string) =>
-  `We cannot reach the database right now while ${where}. The site is online, but data services are temporarily unavailable. Please try again in a minute. If you are running locally, make sure Supabase is started (for example on 127.0.0.1:54321).`
+  `We cannot reach the database right now while ${where}. The site is online, but data services are temporarily unavailable. Please contact the system admin.`
