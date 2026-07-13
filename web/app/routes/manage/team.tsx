@@ -140,7 +140,12 @@ export default function TeamLayout() {
                       className="flex w-full items-center justify-center rounded-md p-0 hover:bg-muted"
                       aria-label={section.label}
                     >
-                      <img src={section.stickerSrc} alt={section.label} className="size-20 object-contain" />
+                      <img
+                        src={section.stickerSrc}
+                        alt={section.label}
+                        className="size-20 origin-center object-contain"
+                        style={section.stickerScale ? { transform: `scale(${section.stickerScale})` } : undefined}
+                      />
                     </button>
 
                     <div className="pointer-events-none absolute left-full top-0 z-[90] hidden w-64 rounded-lg border bg-card p-2 shadow-lg group-hover:block group-hover:pointer-events-auto group-focus-within:block group-focus-within:pointer-events-auto">
@@ -183,7 +188,12 @@ export default function TeamLayout() {
                       className="flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted"
                     >
                       <span className="flex items-center gap-2">
-                        <img src={section.stickerSrc} alt={section.label} className="size-10 object-contain" />
+                        <img
+                          src={section.stickerSrc}
+                          alt={section.label}
+                          className="size-10 origin-center object-contain"
+                          style={section.stickerScale ? { transform: `scale(${section.stickerScale})` } : undefined}
+                        />
                         {section.label}
                       </span>
                       {isCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}

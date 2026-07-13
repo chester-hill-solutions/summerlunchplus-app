@@ -8,6 +8,7 @@ export type ManageNavSection = {
   key: 'class-management' | 'zoom' | 'form-management' | 'analytics' | 'user-management' | 'email' | 'system'
   label: string
   stickerSrc: string
+  stickerScale?: number
   defaultCollapsed: boolean
   items: ManageNavItem[]
 }
@@ -46,36 +47,6 @@ export const manageSections: ManageNavSection[] = [
     ],
   },
   {
-    key: 'form-management',
-    label: 'Form Management',
-    stickerSrc: '/stickers/stocks.png',
-    defaultCollapsed: false,
-    items: [
-      { to: '/manage/form', label: 'Forms', description: 'Onboarding forms configuration.' },
-      { to: '/manage/form-question', label: 'Form questions', description: 'Questions tied to forms.' },
-      { to: '/manage/form-question-map', label: 'Form question map', description: 'Questions mapped to forms and ordering.' },
-      { to: '/manage/form-assignment', label: 'Form assignments', description: 'Assignments per user.' },
-      { to: '/manage/form-submission', label: 'Form submissions', description: 'User response metadata.' },
-      { to: '/manage/form-answer', label: 'Form answers', description: 'Individual answers with JSON value.' },
-    ],
-  },
-  {
-    key: 'zoom',
-    label: 'Zoom',
-    stickerSrc: '/stickers/radish.png',
-    defaultCollapsed: true,
-    items: [
-      { to: '/manage/zoom-connect-test', label: 'Zoom connect test', description: 'Test the configured zoom-api /zoom/connect endpoint.' },
-      { to: '/manage/zoom-reset', label: 'Zoom reset', description: 'Dry-run or execute Zoom/attendance reset and deprovision meetings.' },
-      { to: '/manage/zoom-host', label: 'Zoom hosts', description: 'Zoom host roster and assignment priority.' },
-      { to: '/manage/class-zoom-meeting', label: 'Class Zoom meetings', description: 'Zoom meeting records mapped to classes.' },
-      { to: '/manage/class-zoom-registrant', label: 'Class Zoom registrants', description: 'Per-student registrant records and join link metadata.' },
-      { to: '/manage/class-zoom-participant-sync', label: 'Zoom participant sync runs', description: 'Sync job history for meeting participant ingestion.' },
-      { to: '/manage/class-zoom-participant', label: 'Zoom participants', description: 'Participant snapshots captured from Zoom reports.' },
-      { to: '/manage/zlr-click-event', label: 'ZLR click events', description: 'Redirect click audit events for /zlr links.' },
-    ],
-  },
-  {
     key: 'analytics',
     label: 'Analytics',
     stickerSrc: '/stickers/stocks.png',
@@ -96,11 +67,42 @@ export const manageSections: ManageNavSection[] = [
   {
     key: 'email',
     label: 'Email',
-    stickerSrc: '/stickers/radish.png',
+    stickerSrc: '/stickers/envelope.png',
+    stickerScale: 1.35,
     defaultCollapsed: true,
     items: [
       { to: '/manage/email-message', label: 'Email messages', description: 'Outbound transactional email log with delivery status and template data.' },
       { to: '/manage/email-drafts', label: 'Email drafts', description: 'Markdown drafts with versioning, preview, and publish flow.' },
+    ],
+  },
+  {
+    key: 'form-management',
+    label: 'Form Management',
+    stickerSrc: '/stickers/stocks.png',
+    defaultCollapsed: false,
+    items: [
+      { to: '/manage/form', label: 'Forms', description: 'Onboarding forms configuration.' },
+      { to: '/manage/form-question', label: 'Form questions', description: 'Questions tied to forms.' },
+      { to: '/manage/form-question-map', label: 'Form question map', description: 'Questions mapped to forms and ordering.' },
+      { to: '/manage/form-assignment', label: 'Form assignments', description: 'Assignments per user.' },
+      { to: '/manage/form-submission', label: 'Form submissions', description: 'User response metadata.' },
+      { to: '/manage/form-answer', label: 'Form answers', description: 'Individual answers with JSON value.' },
+    ],
+  },
+  {
+    key: 'zoom',
+    label: 'Zoom',
+    stickerSrc: '/stickers/camcorder.png',
+    defaultCollapsed: true,
+    items: [
+      { to: '/manage/zoom-connect-test', label: 'Zoom connect test', description: 'Test the configured zoom-api /zoom/connect endpoint.' },
+      { to: '/manage/zoom-reset', label: 'Zoom reset', description: 'Dry-run or execute Zoom/attendance reset and deprovision meetings.' },
+      { to: '/manage/zoom-host', label: 'Zoom hosts', description: 'Zoom host roster and assignment priority.' },
+      { to: '/manage/class-zoom-meeting', label: 'Class Zoom meetings', description: 'Zoom meeting records mapped to classes.' },
+      { to: '/manage/class-zoom-registrant', label: 'Class Zoom registrants', description: 'Per-student registrant records and join link metadata.' },
+      { to: '/manage/class-zoom-participant-sync', label: 'Zoom participant sync runs', description: 'Sync job history for meeting participant ingestion.' },
+      { to: '/manage/class-zoom-participant', label: 'Zoom participants', description: 'Participant snapshots captured from Zoom reports.' },
+      { to: '/manage/zlr-click-event', label: 'ZLR click events', description: 'Redirect click audit events for /zlr links.' },
     ],
   },
   {
