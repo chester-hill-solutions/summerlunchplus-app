@@ -68,7 +68,7 @@ export const manageSections: ManageNavSection[] = [
     key: 'email',
     label: 'Email',
     stickerSrc: '/stickers/envelope.png',
-    stickerScale: 1.35,
+    stickerScale: 1.3,
     defaultCollapsed: true,
     items: [
       { to: '/manage/email-message', label: 'Email messages', description: 'Outbound transactional email log with delivery status and template data.' },
@@ -93,7 +93,7 @@ export const manageSections: ManageNavSection[] = [
     key: 'zoom',
     label: 'Zoom',
     stickerSrc: '/stickers/camcorder.png',
-    stickerScale: 1.35,
+    stickerScale: 1.4,
     defaultCollapsed: true,
     items: [
       { to: '/manage/zoom-connect-test', label: 'Zoom connect test', description: 'Test the configured zoom-api /zoom/connect endpoint.' },
