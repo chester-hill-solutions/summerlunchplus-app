@@ -355,11 +355,19 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await (adminClient.from('class_attendance_photo' as any) as any)
-      .select('class_id, profile_id, uploaded_at')
-      .in('class_id', chunk)
-    if (error) throw new Response(error.message, { status: 500 })
-    photoRows.push(...((data ?? []) as AttendancePhotoRow[]))
+    for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
+      const { data, error } = await (adminClient.from('class_attendance_photo' as any) as any)
+        .select('class_id, profile_id, uploaded_at')
+        .in('class_id', chunk)
+        .order('class_id', { ascending: true })
+        .order('profile_id', { ascending: true })
+        .order('uploaded_at', { ascending: true })
+        .range(offset, offset + RELATED_FETCH_BATCH_SIZE - 1)
+      if (error) throw new Response(error.message, { status: 500 })
+      const rows = (data ?? []) as AttendancePhotoRow[]
+      photoRows.push(...rows)
+      if (rows.length < RELATED_FETCH_BATCH_SIZE) break
+    }
   }
 
   for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
