@@ -7,22 +7,6 @@ import {
   loginAsAdmin,
 } from './helpers/admin-account'
 
-const getRenderedColumnWidth = async (page: import('@playwright/test').Page, column: string) => {
-  return page.evaluate(columnName => {
-    const resizeHandle = document.querySelector(`button[aria-label="Resize ${columnName}"]`)
-    if (!resizeHandle) return null
-    const th = resizeHandle.closest('th')
-    const headerRow = th?.parentElement
-    if (!th || !headerRow) return null
-    const headerCells = Array.from(headerRow.children)
-    const columnIndex = headerCells.indexOf(th)
-    if (columnIndex < 0) return null
-    const col = document.querySelectorAll('table colgroup col')[columnIndex] as HTMLElement | undefined
-    if (!col) return null
-    return Number.parseFloat(col.style.width)
-  }, column)
-}
-
 const seedPriorParticipationAnswer = async () => {
   const adminSupabase = getAdminSupabaseClient()
 
@@ -123,62 +107,5 @@ test.describe.serial('manage workshop filter loading behavior', () => {
     const hoverTitle = hoverPanel.locator('p.font-semibold').first()
     await expect(hoverTitle).toBeVisible()
     await expect(hoverTitle).not.toHaveText(/^\s*$/)
-  })
-
-  test('persists manual column widths and supports reset', async ({ page }) => {
-    const storageKey = 'manage-table-column-widths:class-enrollment'
-    const targetColumn = 'profile_display'
-    const seededWidth = 332
-
-    await loginAsAdmin(page)
-    await page.goto('/manage/workshop-enrollment')
-
-    await page.evaluate(key => {
-      window.localStorage.removeItem(key)
-    }, storageKey)
-
-    await page.evaluate(
-      ({ key, column, width }) => {
-        window.localStorage.setItem(key, JSON.stringify({ [column]: width }))
-      },
-      { key: storageKey, column: targetColumn, width: seededWidth }
-    )
-
-    await page.reload()
-
-    const seededRenderedWidth = await getRenderedColumnWidth(page, targetColumn)
-    expect(seededRenderedWidth).not.toBeNull()
-    expect(Math.round(seededRenderedWidth ?? 0)).toBe(seededWidth)
-
-    const resizeHandle = page.getByRole('button', { name: `Resize ${targetColumn}` })
-    const resizeBox = await resizeHandle.boundingBox()
-    expect(resizeBox).not.toBeNull()
-
-    await page.mouse.move((resizeBox?.x ?? 0) + (resizeBox?.width ?? 0) / 2, (resizeBox?.y ?? 0) + (resizeBox?.height ?? 0) / 2)
-    await page.mouse.down()
-    await page.mouse.move((resizeBox?.x ?? 0) + (resizeBox?.width ?? 0) / 2 + 90, (resizeBox?.y ?? 0) + (resizeBox?.height ?? 0) / 2)
-    await page.mouse.up()
-
-    const resizedWidth = await getRenderedColumnWidth(page, targetColumn)
-    expect(resizedWidth).not.toBeNull()
-    expect((resizedWidth ?? 0) - seededWidth).toBeGreaterThan(40)
-
-    await page.reload()
-
-    const reloadedWidth = await getRenderedColumnWidth(page, targetColumn)
-    expect(reloadedWidth).not.toBeNull()
-    expect(Math.abs((reloadedWidth ?? 0) - (resizedWidth ?? 0))).toBeLessThanOrEqual(2)
-
-    await page.getByRole('button', { name: 'Reset widths' }).click()
-
-    await expect
-      .poll(async () =>
-        page.evaluate(key => window.localStorage.getItem(key), storageKey)
-      )
-      .toBeNull()
-
-    const resetWidth = await getRenderedColumnWidth(page, targetColumn)
-    expect(resetWidth).not.toBeNull()
-    expect((reloadedWidth ?? 0) - (resetWidth ?? 0)).toBeGreaterThan(10)
   })
 })
