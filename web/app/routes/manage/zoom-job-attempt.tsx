@@ -184,12 +184,16 @@ export async function loader(args: Route.LoaderArgs) {
       'external_request_payload',
       'external_response_payload',
       'created_at',
+      'class_id',
+      'profile_id',
     ],
     columnMeta: {
       ...(base.columnMeta ?? {}),
       workshop_description: { label: 'Workshop', filterable: true },
       class_starts_at: { label: 'Class starts', filterable: true },
       class_ends_at: { label: 'Class ends', filterable: true },
+      class_id: { label: 'Class ID', filterable: true },
+      profile_id: { label: 'Profile ID', filterable: true },
       profile_display: { label: 'Profile', filterable: true },
       class_zoom_meeting_display: {
         label: 'Class zoom meeting',
