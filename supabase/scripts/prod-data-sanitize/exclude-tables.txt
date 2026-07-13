@@ -13,4 +13,5 @@ public.sign_up_terms
 public.user_roles
 public.email_draft
 public.email_draft_version
+public.ip_org_policy
 storage.buckets
