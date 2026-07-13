@@ -176,6 +176,13 @@ type RegisterStudentActionResult = {
   error?: string
 }
 
+type RegisterStatusResponse = {
+  state?: 'no_attempt' | 'attempt_found'
+  message?: string
+  detail?: string
+  attemptedAt?: string | null
+}
+
 type AttendancePhotoResource = {
   id: string
   file_name: string | null
@@ -572,7 +579,8 @@ const personLinkForCell = (
   if (tableName === 'class' && column === 'step_registrants' && typeof row.id === 'string' && row.id) {
     const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
     const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''
-    return withReturnTo('/manage/class-attendance', {
+    return withReturnTo('/manage/class-zoom-registrant', {
+      f_class_id: row.id,
       ...(workshopDescription ? { f_workshop_description: workshopDescription } : {}),
       ...(startsAt ? { f_class_starts_at: formatTimestamp(startsAt) } : {}),
       ...(typeof row.ends_at === 'string' && row.ends_at ? { f_class_ends_at: formatTimestamp(row.ends_at) } : {}),
@@ -874,6 +882,12 @@ export default function TableDisplay({
   const [attendanceRegisterFeedback, setAttendanceRegisterFeedback] = useState<
     Record<string, { type: 'success' | 'error'; message: string }>
   >({})
+  const [attendanceRegisterStatusByKey, setAttendanceRegisterStatusByKey] = useState<
+    Record<string, { message: string; detail: string; attemptedAt: string | null }>
+  >({})
+  const [attendanceRegisterStatusLoadingByKey, setAttendanceRegisterStatusLoadingByKey] = useState<Record<string, boolean>>({})
+  const [attendanceRegisterStatusErrorByKey, setAttendanceRegisterStatusErrorByKey] = useState<Record<string, string>>({})
+  const [attendanceRegisterStatusOpenKey, setAttendanceRegisterStatusOpenKey] = useState<string | null>(null)
   const [attendancePhotoModalRow, setAttendancePhotoModalRow] = useState<Record<string, unknown> | null>(null)
   const [attendancePhotoCache, setAttendancePhotoCache] = useState<Record<string, AttendancePhotoResource[]>>({})
   const [attendancePhotoLoading, setAttendancePhotoLoading] = useState(false)
@@ -2345,6 +2359,48 @@ export default function TableDisplay({
     statusFetcher.submit(formData, { method: 'post' })
   }
 
+  const requestAttendanceRegisterStatus = async (row: Record<string, unknown>) => {
+    if (!isClassAttendance) return
+    const classId = typeof row.class_id === 'string' ? row.class_id : ''
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    const key = attendanceRowKey(row)
+    if (!classId || !profileId || !key) return
+    if (attendanceRegisterStatusByKey[key] || attendanceRegisterStatusLoadingByKey[key]) return
+
+    setAttendanceRegisterStatusLoadingByKey(prev => ({ ...prev, [key]: true }))
+    setAttendanceRegisterStatusErrorByKey(prev => {
+      if (!prev[key]) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+
+    try {
+      const query = new URLSearchParams({ classId, profileId })
+      const response = await fetch(`/manage/class-attendance/register-status?${query.toString()}`)
+      const payload = (await response.json()) as RegisterStatusResponse
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.message || 'Failed to load register status.')
+      }
+
+      setAttendanceRegisterStatusByKey(prev => ({
+        ...prev,
+        [key]: {
+          message: payload.message ?? 'No attempt recorded yet.',
+          detail: payload.detail ?? '',
+          attemptedAt: payload.attemptedAt ?? null,
+        },
+      }))
+    } catch (error) {
+      setAttendanceRegisterStatusErrorByKey(prev => ({
+        ...prev,
+        [key]: error instanceof Error ? error.message : 'Failed to load register status.',
+      }))
+    } finally {
+      setAttendanceRegisterStatusLoadingByKey(prev => ({ ...prev, [key]: false }))
+    }
+  }
+
   const deleteAttendanceRow = (row: Record<string, unknown>) => {
     if (!isClassAttendance || !canEditStatus) return
     const classId = typeof row.class_id === 'string' ? row.class_id : ''
@@ -2968,25 +3024,70 @@ export default function TableDisplay({
                               </a>
                             ) : canEditStatus ? (
                               <div className="space-y-1">
-                                <button
-                                  type="button"
-                                  disabled={!classId || !profileId || isRegistering}
-                                  onClick={event => {
-                                    event.stopPropagation()
-                                    if (key) {
-                                      setAttendanceRegisterFeedback(prev => {
-                                        if (!prev[key]) return prev
-                                        const next = { ...prev }
-                                        delete next[key]
-                                        return next
-                                      })
-                                    }
-                                    registerAttendanceStudent(row)
-                                  }}
-                                  className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                  {isRegistering ? 'Registering...' : 'Register'}
-                                </button>
+                                <div className="relative inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    disabled={!classId || !profileId || isRegistering}
+                                    onClick={event => {
+                                      event.stopPropagation()
+                                      if (key) {
+                                        setAttendanceRegisterFeedback(prev => {
+                                          if (!prev[key]) return prev
+                                          const next = { ...prev }
+                                          delete next[key]
+                                          return next
+                                        })
+                                      }
+                                      registerAttendanceStudent(row)
+                                    }}
+                                    className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    {isRegistering ? 'Registering...' : 'Register'}
+                                  </button>
+                                  {classId && profileId && key ? (
+                                    <button
+                                      type="button"
+                                      aria-label="Why no zoom link"
+                                      className="inline-flex size-5 items-center justify-center rounded-full border border-input text-[11px] font-semibold text-muted-foreground hover:bg-muted"
+                                      onClick={event => event.stopPropagation()}
+                                      onMouseEnter={() => {
+                                        setAttendanceRegisterStatusOpenKey(key)
+                                        void requestAttendanceRegisterStatus(row)
+                                      }}
+                                      onMouseLeave={() => {
+                                        setAttendanceRegisterStatusOpenKey(prev => (prev === key ? null : prev))
+                                      }}
+                                    >
+                                      ?
+                                    </button>
+                                  ) : null}
+                                  {attendanceRegisterStatusOpenKey === key ? (
+                                    <div
+                                      className="absolute left-full top-1/2 z-30 ml-2 w-80 -translate-y-1/2 rounded border bg-popover p-2 text-xs shadow-lg"
+                                      onMouseEnter={() => setAttendanceRegisterStatusOpenKey(key)}
+                                      onMouseLeave={() => setAttendanceRegisterStatusOpenKey(null)}
+                                      onClick={event => event.stopPropagation()}
+                                    >
+                                      {attendanceRegisterStatusLoadingByKey[key] ? (
+                                        <p className="text-muted-foreground">Loading register status...</p>
+                                      ) : attendanceRegisterStatusErrorByKey[key] ? (
+                                        <p className="text-destructive">{attendanceRegisterStatusErrorByKey[key]}</p>
+                                      ) : attendanceRegisterStatusByKey[key] ? (
+                                        <div className="space-y-1">
+                                          <p className="font-medium">{attendanceRegisterStatusByKey[key].message}</p>
+                                          {attendanceRegisterStatusByKey[key].attemptedAt ? (
+                                            <p className="text-muted-foreground">Attempted at: {formatTimestamp(attendanceRegisterStatusByKey[key].attemptedAt)}</p>
+                                          ) : null}
+                                          {attendanceRegisterStatusByKey[key].detail ? (
+                                            <p className="whitespace-normal text-muted-foreground">{attendanceRegisterStatusByKey[key].detail}</p>
+                                          ) : null}
+                                        </div>
+                                      ) : (
+                                        <p className="text-muted-foreground">No status loaded.</p>
+                                      )}
+                                    </div>
+                                  ) : null}
+                                </div>
                                 {feedback ? (
                                   <p className={`max-w-64 whitespace-normal text-[11px] ${feedback.type === 'error' ? 'text-destructive' : 'text-emerald-700'}`}>
                                     {feedback.message}
