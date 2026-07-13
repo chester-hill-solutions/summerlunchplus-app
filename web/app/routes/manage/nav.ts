@@ -108,7 +108,7 @@ export const manageSections: ManageNavSection[] = [
   {
     key: 'system',
     label: 'System',
-    stickerSrc: '/stickers/radish.png',
+    stickerSrc: '/stickers/gear.png',
     defaultCollapsed: true,
     items: [
       { to: '/manage/login-event', label: 'Login events', description: 'Successful sign-in metadata and source context.' },
