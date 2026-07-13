@@ -285,7 +285,7 @@ export async function loader(args: Route.LoaderArgs) {
       sync_class: 'Sync class',
       zoom_host_email: meeting?.host_zoom_user_email ?? row.zoom_host_email ?? '',
       zoom_join_url: meeting?.join_url ?? row.zoom_join_url ?? '',
-      step_meeting: meetingComplete ? 'Generated' : 'Generate',
+      step_meeting: meetingComplete ? meeting?.start_time ?? 'Generated' : 'Generate',
       step_registrants: progressLabel(registrantsProgress),
       step_attendance_rows: progressLabel(attendanceRowsProgress),
       step_reminder: progressLabel(remindersProgress),

@@ -3292,25 +3292,17 @@ export default function TableDisplay({
 
                       if (tableName === 'class' && column === 'step_meeting') {
                         const classId = typeof row.id === 'string' ? row.id : ''
-                        const meetingReady = row.step_meeting === 'Generated'
-                        const isGenerating =
-                          statusFetcher.state === 'submitting' &&
-                          statusFetcher.formData?.get('intent') === 'generate-meeting' &&
-                          statusFetcher.formData?.get('class_id') === classId
-                        const returnTo = `${location.pathname}${location.search}`
-                        const linkSearch = new URLSearchParams({ f_class_id: classId, returnTo }).toString()
+                        const hasGeneratedMeeting =
+                          typeof row.class_zoom_meeting_id === 'string' && row.class_zoom_meeting_id.length > 0
 
-                        return (
-                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title="Meeting generation status">
-                            {meetingReady ? (
-                              <Link
-                                to={{ pathname: '/manage/class-zoom-meeting', search: linkSearch }}
-                                onClick={event => event.stopPropagation()}
-                                className="underline decoration-dotted underline-offset-2 hover:text-primary"
-                              >
-                                Generated
-                              </Link>
-                            ) : (
+                        if (!hasGeneratedMeeting) {
+                          const isGenerating =
+                            statusFetcher.state === 'submitting' &&
+                            statusFetcher.formData?.get('intent') === 'generate-meeting' &&
+                            statusFetcher.formData?.get('class_id') === classId
+
+                          return (
+                            <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title="Meeting generation status">
                               <button
                                 type="button"
                                 disabled={!classId || isGenerating}
@@ -3326,9 +3318,9 @@ export default function TableDisplay({
                               >
                                 {isGenerating ? 'Generating...' : 'Generate'}
                               </button>
-                            )}
-                          </td>
-                        )
+                            </td>
+                          )
+                        }
                       }
 
                       if (tableName === 'class' && column === 'sync_class') {
