@@ -9,6 +9,7 @@
 - Treat `main` as read-only; do all work on `sai/<topic>` branches.
 - Create all worktrees under `/Users/saihaansyed/chs/prj/summerlunchplus-app/worktrees/`.
 - Before rebasing a worktree branch back into `sai/main`, first update `sai/main` with latest changes (`git pull --rebase`) and then rebase the worktree branch onto that updated `sai/main`.
+- Required order: (1) rebase `sai/main` to latest, (2) rebase `sai/<topic>` worktree branch onto `sai/main`, (3) fast-forward `sai/main` to `sai/<topic>`.
 - After rebasing, fast-forward merge into `sai/main` (no merge commits).
 
 ## Commands (Verified)
