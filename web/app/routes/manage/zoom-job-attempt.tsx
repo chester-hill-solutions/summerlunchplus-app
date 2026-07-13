@@ -53,19 +53,13 @@ export async function loader(args: Route.LoaderArgs) {
 
   const { supabase } = createClient(args.request)
 
-  const [{ data: classRows }, { data: profileRows }, { data: meetingRows }, { data: registrantRows }] = await Promise.all([
+  const [{ data: classRows }, { data: meetingRows }, { data: registrantRows }] = await Promise.all([
     classIds.length
       ? supabase
           .from('class')
           .select('id, starts_at, ends_at, workshop:workshop_id ( description )')
           .in('id', classIds)
       : Promise.resolve({ data: [] as Array<{ id: string; starts_at: string | null; ends_at: string | null; workshop: { description: string | null } | null }> }),
-    profileIds.length
-      ? supabase
-          .from('profile')
-          .select('id, firstname, surname, email')
-          .in('id', profileIds)
-      : Promise.resolve({ data: [] as Array<{ id: string; firstname: string | null; surname: string | null; email: string | null }> }),
     meetingIds.length
       ? supabase
           .from('class_zoom_meeting')
@@ -102,6 +96,20 @@ export async function loader(args: Route.LoaderArgs) {
         }),
   ])
 
+  const enrichedProfileIds = new Set(profileIds)
+  for (const registrant of registrantRows ?? []) {
+    if (typeof registrant.profile_id === 'string' && registrant.profile_id) {
+      enrichedProfileIds.add(registrant.profile_id)
+    }
+  }
+
+  const { data: profileRows } = enrichedProfileIds.size
+    ? await supabase
+        .from('profile')
+        .select('id, firstname, surname, email')
+        .in('id', Array.from(enrichedProfileIds))
+    : { data: [] as Array<{ id: string; firstname: string | null; surname: string | null; email: string | null }> }
+
   const classById = new Map((classRows ?? []).map(row => [row.id, row]))
   const profileById = new Map((profileRows ?? []).map(row => [row.id, row]))
   const meetingById = new Map((meetingRows ?? []).map(row => [row.id, row]))
@@ -117,9 +125,10 @@ export async function loader(args: Route.LoaderArgs) {
 
       const classRow = classById.get(classId)
       const workshopRelation = Array.isArray(classRow?.workshop) ? classRow.workshop[0] : classRow?.workshop
-      const profileRow = profileById.get(profileId)
       const meetingRow = meetingById.get(meetingId)
       const registrantRow = registrantById.get(registrantId)
+      const effectiveProfileId = profileId || (typeof registrantRow?.profile_id === 'string' ? registrantRow.profile_id : '')
+      const profileRow = profileById.get(effectiveProfileId)
       const registrantProfile = registrantRow?.profile_id ? profileById.get(registrantRow.profile_id) : null
 
       return {
@@ -127,7 +136,7 @@ export async function loader(args: Route.LoaderArgs) {
         workshop_description: workshopRelation?.description ?? '',
         class_starts_at: classRow?.starts_at ?? null,
         class_ends_at: classRow?.ends_at ?? null,
-        profile_display: profileRow ? profileDisplay(profileRow, profileId) : profileId,
+        profile_display: profileRow ? profileDisplay(profileRow, effectiveProfileId) : effectiveProfileId ? `ID ${effectiveProfileId}` : '',
         class_zoom_meeting_display: meetingRow?.zoom_meeting_id ?? meetingId,
         class_zoom_registrant_display: registrantRow?.zoom_registrant_id ?? registrantId,
         skip_reason: toSkipReason(row),
