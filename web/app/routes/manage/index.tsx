@@ -120,19 +120,23 @@ export default function TeamOverviewPage() {
         <div className="flex flex-wrap gap-2.5">
           <button
             type="button"
-            className="h-36 w-full sm:w-[17.5rem] rounded-lg border bg-card px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5"
+            className="h-36 w-full cursor-pointer rounded-lg border bg-card px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/20 hover:bg-accent/20 sm:w-[17.5rem]"
             onClick={() => setStep('day')}
           >
-            <h2 className="text-lg font-semibold leading-tight">Manage Class Attendance</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Select day, workshop, and class session.</p>
+            <div className="flex h-full flex-col justify-between">
+              <h2 className="text-lg font-semibold leading-tight">Manage Class Attendance</h2>
+              <p className="text-sm text-muted-foreground">Select day, workshop, and class session.</p>
+            </div>
           </button>
 
           <Link
             to="/manage/workshop-enrollment"
-            className="h-36 w-full sm:w-[17.5rem] rounded-lg border bg-card px-3 py-3 shadow-sm transition hover:-translate-y-0.5"
+            className="h-36 w-full cursor-pointer rounded-lg border bg-card px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/20 hover:bg-accent/20 sm:w-[17.5rem]"
           >
-            <h2 className="text-lg font-semibold leading-tight">Manage Workshop Enrollments</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Open the workshop enrollment queue.</p>
+            <div className="flex h-full flex-col justify-between">
+              <h2 className="text-lg font-semibold leading-tight">Manage Workshop Enrollments</h2>
+              <p className="text-sm text-muted-foreground">Open the workshop enrollment queue.</p>
+            </div>
           </Link>
         </div>
       ) : null}
@@ -158,15 +162,17 @@ export default function TeamOverviewPage() {
                 <button
                   key={day.key}
                   type="button"
-                  className="h-28 w-full sm:w-[15rem] rounded-lg border bg-card px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5"
+                  className="h-28 w-full cursor-pointer rounded-lg border bg-card px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/20 hover:bg-accent/20 sm:w-[15rem]"
                   onClick={() => {
                     setSelectedDayKey(day.key)
                     setSelectedWorkshopId(null)
                     setStep('workshop')
                   }}
                 >
-                  <h3 className="text-lg font-semibold leading-tight">{day.label}</h3>
-                  <p className="mt-2 text-sm text-muted-foreground">{day.workshops.length} workshops</p>
+                  <div className="flex h-full flex-col justify-between">
+                    <h3 className="text-lg font-semibold leading-tight">{day.label}</h3>
+                    <p className="text-sm tabular-nums text-muted-foreground">{day.workshops.length} workshops</p>
+                  </div>
                 </button>
               ))}
             </div>
@@ -192,14 +198,16 @@ export default function TeamOverviewPage() {
               <button
                 key={workshop.id}
                 type="button"
-                className="h-28 w-full sm:w-[19rem] rounded-lg border bg-card px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5"
+                className="h-28 w-full cursor-pointer rounded-lg border bg-card px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/20 hover:bg-accent/20 sm:w-[19rem]"
                 onClick={() => {
                   setSelectedWorkshopId(workshop.id)
                   setStep('class')
                 }}
               >
-                <h3 className="text-base font-semibold leading-tight">{workshop.description}</h3>
-                <p className="mt-2 text-sm text-muted-foreground">{workshop.classes.length} class sessions</p>
+                <div className="flex h-full flex-col justify-between">
+                  <h3 className="text-base font-semibold leading-tight">{workshop.description}</h3>
+                  <p className="text-sm tabular-nums text-muted-foreground">{workshop.classes.length} class sessions</p>
+                </div>
               </button>
             ))}
           </div>
@@ -224,7 +232,7 @@ export default function TeamOverviewPage() {
               <button
                 key={classItem.id}
                 type="button"
-                className="h-28 w-full sm:w-[19rem] rounded-lg border bg-card px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5"
+                className="h-28 w-full cursor-pointer rounded-lg border bg-card px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/20 hover:bg-accent/20 sm:w-[19rem]"
                 onClick={() => {
                   const params = new URLSearchParams()
                   params.set('scopeClassId', classItem.id)
@@ -232,10 +240,12 @@ export default function TeamOverviewPage() {
                   navigate(`/manage/class-attendance?${params.toString()}`)
                 }}
               >
-                <h3 className="text-base font-semibold leading-tight">
-                  {formatClassDateTime(classItem.startsAt, classItem.endsAt)}
-                </h3>
-                <p className="mt-2 text-xs text-muted-foreground">Class ID: {classItem.id.slice(0, 8)}</p>
+                <div className="flex h-full flex-col justify-between">
+                  <h3 className="text-base font-semibold leading-tight">
+                    {formatClassDateTime(classItem.startsAt, classItem.endsAt)}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">Class ID: {classItem.id.slice(0, 8)}</p>
+                </div>
               </button>
             ))}
           </div>
