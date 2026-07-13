@@ -72,6 +72,8 @@ export default [
     route("class-zoom-registrant", "routes/manage/class-zoom-registrant.tsx"),
     route("class-zoom-participant-sync", "routes/manage/class-zoom-participant-sync.tsx"),
     route("class-zoom-participant", "routes/manage/class-zoom-participant.tsx"),
+    route("zoom-job-run", "routes/manage/zoom-job-run.tsx"),
+    route("zoom-job-attempt", "routes/manage/zoom-job-attempt.tsx"),
     route("zlr-click-event", "routes/manage/zlr-click-event.tsx"),
     route("workshop-enrollment", "routes/manage/workshop-enrollment.tsx"),
     route("workshop-enrollment/table-data", "routes/manage/workshop-enrollment.table-data.ts"),

@@ -104,6 +104,8 @@ export const manageSections: ManageNavSection[] = [
       { to: '/manage/class-zoom-registrant', label: 'Class Zoom registrants', description: 'Per-student registrant records and join link metadata.' },
       { to: '/manage/class-zoom-participant-sync', label: 'Zoom participant sync runs', description: 'Sync job history for meeting participant ingestion.' },
       { to: '/manage/class-zoom-participant', label: 'Zoom participants', description: 'Participant snapshots captured from Zoom reports.' },
+      { to: '/manage/zoom-job-run', label: 'Zoom job runs', description: 'Top-level scheduler/UI zoom run audit records.' },
+      { to: '/manage/zoom-job-attempt', label: 'Zoom job attempts', description: 'Per-action audit trail for meeting, registrant, and sync attempts.' },
       { to: '/manage/zlr-click-event', label: 'ZLR click events', description: 'Redirect click audit events for /zlr links.' },
     ],
   },

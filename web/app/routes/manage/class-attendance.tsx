@@ -1087,6 +1087,10 @@ export async function action({ request }: Route.ActionArgs) {
         classId,
         profileId,
         runId: `manual-row-${Date.now().toString(36)}`,
+        triggerSource: 'ui',
+        triggerKind: 'register_button',
+        actorUserId: auth.user.id,
+        actorRole: auth.claims.role,
       })
       profile.mark('register_run_zoom_registrant', {
         classId,

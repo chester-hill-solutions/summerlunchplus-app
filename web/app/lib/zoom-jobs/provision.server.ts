@@ -1,4 +1,10 @@
 import { adminClient } from '@/lib/supabase/adminClient'
+import {
+  appendZoomJobAttemptEvent,
+  finishZoomJobAttemptAudit,
+  startZoomJobAttemptAudit,
+  type ZoomAuditContext,
+} from '@/lib/zoom-jobs/audit.server'
 import { releaseZoomClassLock, tryAcquireZoomClassLock } from '@/lib/zoom-jobs/lock.server'
 import { zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.server'
 import { hashZlrToken, newZlrToken } from '@/lib/zoom-jobs/zlr-token.server'
@@ -79,6 +85,7 @@ type ProvisionOptions = {
   lockOwnerRunId?: string
   lockOwnerKind?: string
   lockRetryMs?: number
+  auditContext?: ZoomAuditContext
 }
 
 type ClassScheduleRelation = { starts_at: string; ends_at: string }
@@ -375,11 +382,27 @@ const ensureMeetingForClass = async ({
   classRow,
   forceMeetingRecreate = false,
   excludedHostIds,
+  auditContext,
 }: {
   classRow: ClassRow
   forceMeetingRecreate?: boolean
   excludedHostIds?: string[]
+  auditContext?: ZoomAuditContext
 }) => {
+  const meetingAttempt = await startZoomJobAttemptAudit({
+    runDbId: auditContext?.runDbId,
+    runId: auditContext?.runId ?? 'missing-run-id',
+    actionType: 'meeting_generate',
+    triggerSource: auditContext?.triggerSource ?? 'unknown',
+    triggerKind: auditContext?.triggerKind ?? 'unknown',
+    classId: classRow.id,
+    requestPayload: {
+      classId: classRow.id,
+      forceMeetingRecreate,
+      excludedHostIds: excludedHostIds ?? [],
+    },
+  })
+
   const desiredTopic = buildTopic(classRow)
   const zoomStartTime = toZoomUtcStartTime(classRow.starts_at)
   const durationMinutes = Math.max(
@@ -387,111 +410,160 @@ const ensureMeetingForClass = async ({
     Math.round((new Date(classRow.ends_at).getTime() - new Date(classRow.starts_at).getTime()) / 60000)
   )
 
-  const { data: existingMeeting, error: existingError } = await adminClient
-    .from('class_zoom_meeting')
-    .select('id, class_id, zoom_host_id, status, zoom_meeting_id, zoom_meeting_uuid, start_time, duration_minutes, topic')
-    .eq('class_id', classRow.id)
-    .maybeSingle<ExistingMeeting>()
+  try {
+    const { data: existingMeeting, error: existingError } = await adminClient
+      .from('class_zoom_meeting')
+      .select('id, class_id, zoom_host_id, status, zoom_meeting_id, zoom_meeting_uuid, start_time, duration_minutes, topic')
+      .eq('class_id', classRow.id)
+      .maybeSingle<ExistingMeeting>()
 
-  if (existingError) throw new Error(existingError.message)
-  if (
-    existingMeeting?.status === 'created' &&
-    existingMeeting.zoom_meeting_id &&
-    existingMeeting.zoom_meeting_uuid &&
-    !forceMeetingRecreate
-  ) {
+    if (existingError) throw new Error(existingError.message)
     if (
-      isMeetingScheduleOutOfSync({
-        existingStart: existingMeeting.start_time,
-        existingDuration: existingMeeting.duration_minutes,
-        existingTopic: existingMeeting.topic,
-        nextStart: classRow.starts_at,
-        nextDuration: durationMinutes,
-        nextTopic: desiredTopic,
-      })
+      existingMeeting?.status === 'created' &&
+      existingMeeting.zoom_meeting_id &&
+      existingMeeting.zoom_meeting_uuid &&
+      !forceMeetingRecreate
     ) {
-      await zoomApiClient.updateMeeting(existingMeeting.zoom_meeting_id, {
-        topic: desiredTopic,
-        start_time: zoomStartTime,
-        duration: durationMinutes,
+      let updatedMeeting = false
+      let updateResponse: { ok: boolean } | null = null
+      if (
+        isMeetingScheduleOutOfSync({
+          existingStart: existingMeeting.start_time,
+          existingDuration: existingMeeting.duration_minutes,
+          existingTopic: existingMeeting.topic,
+          nextStart: classRow.starts_at,
+          nextDuration: durationMinutes,
+          nextTopic: desiredTopic,
+        })
+      ) {
+        updateResponse = await zoomApiClient.updateMeeting(existingMeeting.zoom_meeting_id, {
+          topic: desiredTopic,
+          start_time: zoomStartTime,
+          duration: durationMinutes,
+        })
+
+        const { error: updateError } = await adminClient
+          .from('class_zoom_meeting')
+          .update({
+            topic: desiredTopic,
+            start_time: classRow.starts_at,
+            duration_minutes: durationMinutes,
+            error_message: null,
+            last_synced_at: new Date().toISOString(),
+          })
+          .eq('id', existingMeeting.id)
+
+        if (updateError) throw new Error(updateError.message)
+        updatedMeeting = true
+      }
+
+      await finishZoomJobAttemptAudit(meetingAttempt, {
+        id: meetingAttempt?.id ?? '',
+        status: 'succeeded',
+        resultPayload: {
+          classZoomMeetingId: existingMeeting.id,
+          zoomMeetingId: existingMeeting.zoom_meeting_id,
+          created: false,
+          recreated: false,
+          updatedMeeting,
+        },
+        externalResponsePayload: updateResponse ? { updateMeeting: updateResponse } : {},
       })
 
-      const { error: updateError } = await adminClient
-        .from('class_zoom_meeting')
-        .update({
+      return {
+        id: existingMeeting.id,
+        zoom_meeting_id: existingMeeting.zoom_meeting_id,
+        created: false,
+        recreated: false,
+        zoom_host_id: existingMeeting.zoom_host_id,
+      }
+    }
+
+    const host = await selectAvailableHost({
+      classRow,
+      excludeMeetingId: existingMeeting?.id,
+      excludedHostIds,
+    })
+
+    if (!host) {
+      const msg = 'No available Zoom host for class time window.'
+      await upsertFailedMeeting(classRow.id, msg)
+      throw new Error(msg)
+    }
+
+    const createRequestPayload = {
+      topic: desiredTopic,
+      start_time: zoomStartTime,
+      duration: durationMinutes,
+      ...(host.zoom_user_id ? { host_zoom_user_id: host.zoom_user_id } : {}),
+      ...(!host.zoom_user_id && host.zoom_user_email ? { host_zoom_user_email: host.zoom_user_email } : {}),
+    }
+    const createResp = await zoomApiClient.createMeeting(createRequestPayload)
+
+    if (meetingAttempt) {
+      await appendZoomJobAttemptEvent({
+        attemptId: meetingAttempt.id,
+        eventType: 'zoom_create_meeting_response',
+        payload: createResp as Record<string, unknown>,
+      })
+    }
+
+    const { data: upserted, error: upsertError } = await adminClient
+      .from('class_zoom_meeting')
+      .upsert(
+        {
+          class_id: classRow.id,
+          zoom_host_id: host.id,
+          host_zoom_user_id: host.zoom_user_id,
+          host_zoom_user_email: host.zoom_user_email,
+          zoom_meeting_id: String(createResp.id),
+          zoom_meeting_uuid: createResp.uuid,
           topic: desiredTopic,
           start_time: classRow.starts_at,
           duration_minutes: durationMinutes,
+          join_url: createResp.join_url,
+          status: 'created',
           error_message: null,
           last_synced_at: new Date().toISOString(),
-        })
-        .eq('id', existingMeeting.id)
+        },
+        { onConflict: 'class_id' }
+      )
+      .select('id, zoom_meeting_id, zoom_host_id')
+      .single<{ id: string; zoom_meeting_id: string; zoom_host_id: string }>()
 
-      if (updateError) throw new Error(updateError.message)
+    if (upsertError || !upserted?.id || !upserted.zoom_meeting_id) {
+      throw new Error(upsertError?.message ?? 'Failed to persist class_zoom_meeting')
     }
+
+    await finishZoomJobAttemptAudit(meetingAttempt, {
+      id: meetingAttempt?.id ?? '',
+      status: 'succeeded',
+      resultPayload: {
+        classZoomMeetingId: upserted.id,
+        zoomMeetingId: upserted.zoom_meeting_id,
+        created: !existingMeeting,
+        recreated: Boolean(existingMeeting),
+      },
+      externalResponsePayload: createResp as Record<string, unknown>,
+    })
 
     return {
-      id: existingMeeting.id,
-      zoom_meeting_id: existingMeeting.zoom_meeting_id,
-      created: false,
-      recreated: false,
-      zoom_host_id: existingMeeting.zoom_host_id,
+      id: upserted.id,
+      zoom_meeting_id: upserted.zoom_meeting_id,
+      created: !existingMeeting,
+      recreated: Boolean(existingMeeting),
+      zoom_host_id: upserted.zoom_host_id,
     }
-  }
-
-  const host = await selectAvailableHost({
-    classRow,
-    excludeMeetingId: existingMeeting?.id,
-    excludedHostIds,
-  })
-
-  if (!host) {
-    const msg = 'No available Zoom host for class time window.'
-    await upsertFailedMeeting(classRow.id, msg)
-    throw new Error(msg)
-  }
-
-  const createResp = await zoomApiClient.createMeeting({
-    topic: desiredTopic,
-    start_time: zoomStartTime,
-    duration: durationMinutes,
-    ...(host.zoom_user_id ? { host_zoom_user_id: host.zoom_user_id } : {}),
-    ...(!host.zoom_user_id && host.zoom_user_email ? { host_zoom_user_email: host.zoom_user_email } : {}),
-  })
-
-  const { data: upserted, error: upsertError } = await adminClient
-    .from('class_zoom_meeting')
-    .upsert(
-      {
-        class_id: classRow.id,
-        zoom_host_id: host.id,
-        host_zoom_user_id: host.zoom_user_id,
-        host_zoom_user_email: host.zoom_user_email,
-        zoom_meeting_id: String(createResp.id),
-        zoom_meeting_uuid: createResp.uuid,
-        topic: desiredTopic,
-        start_time: classRow.starts_at,
-        duration_minutes: durationMinutes,
-        join_url: createResp.join_url,
-        status: 'created',
-        error_message: null,
-        last_synced_at: new Date().toISOString(),
+  } catch (error) {
+    await finishZoomJobAttemptAudit(meetingAttempt, {
+      id: meetingAttempt?.id ?? '',
+      status: 'failed',
+      errorMessage: error instanceof Error ? error.message : 'Unknown meeting generation error',
+      errorPayload: {
+        name: error instanceof Error ? error.name : 'UnknownError',
       },
-      { onConflict: 'class_id' }
-    )
-    .select('id, zoom_meeting_id, zoom_host_id')
-    .single<{ id: string; zoom_meeting_id: string; zoom_host_id: string }>()
-
-  if (upsertError || !upserted?.id || !upserted.zoom_meeting_id) {
-    throw new Error(upsertError?.message ?? 'Failed to persist class_zoom_meeting')
-  }
-
-  return {
-    id: upserted.id,
-    zoom_meeting_id: upserted.zoom_meeting_id,
-    created: !existingMeeting,
-    recreated: Boolean(existingMeeting),
-    zoom_host_id: upserted.zoom_host_id,
+    })
+    throw error
   }
 }
 
@@ -503,6 +575,7 @@ const ensureRegistrantsForClass = async ({
   approvedProfileIds,
   forceReregister,
   targetProfileId,
+  auditContext,
 }: {
   classRow: ClassRow
   classZoomMeetingId: string
@@ -511,13 +584,32 @@ const ensureRegistrantsForClass = async ({
   approvedProfileIds: Set<string>
   forceReregister: boolean
   targetProfileId?: string | null
+  auditContext?: ZoomAuditContext
 }) => {
-  const { data: existingRows, error: existingError } = await adminClient
-    .from('class_zoom_registrant')
-    .select('id, profile_id, zoom_registrant_id, zoom_join_url, class_zoom_meeting_id, updated_at, class_zoom_meeting:class_zoom_meeting_id ( zoom_meeting_id )')
-    .eq('class_id', classRow.id)
+  const registrantBatchAttempt = await startZoomJobAttemptAudit({
+    runDbId: auditContext?.runDbId,
+    runId: auditContext?.runId ?? 'missing-run-id',
+    actionType: 'registrant_register_batch',
+    triggerSource: auditContext?.triggerSource ?? 'unknown',
+    triggerKind: auditContext?.triggerKind ?? 'unknown',
+    classId: classRow.id,
+    classZoomMeetingId,
+    requestPayload: {
+      classId: classRow.id,
+      classZoomMeetingId,
+      forceReregister,
+      targetProfileId,
+      candidateCount: identities.size,
+    },
+  })
 
-  if (existingError) throw new Error(existingError.message)
+  try {
+    const { data: existingRows, error: existingError } = await adminClient
+      .from('class_zoom_registrant')
+      .select('id, profile_id, zoom_registrant_id, zoom_join_url, class_zoom_meeting_id, updated_at, class_zoom_meeting:class_zoom_meeting_id ( zoom_meeting_id )')
+      .eq('class_id', classRow.id)
+
+    if (existingError) throw new Error(existingError.message)
 
   const existingByProfileId = new Map(
     (existingRows ?? []).map(row => [
@@ -535,7 +627,7 @@ const ensureRegistrantsForClass = async ({
   let skipped = 0
   const failures: Array<{ profileId: string; email: string; error: string }> = []
 
-  if (!targetProfileId) {
+    if (!targetProfileId) {
     for (const row of existingRows ?? []) {
       const profileId = row.profile_id
       if (!profileId || approvedProfileIds.has(profileId)) continue
@@ -559,21 +651,44 @@ const ensureRegistrantsForClass = async ({
     }
   }
 
-  for (const identity of identities.values()) {
+    for (const identity of identities.values()) {
     if (targetProfileId && identity.profileId !== targetProfileId) continue
 
-    const existing = existingByProfileId.get(identity.profileId)
-    const mustReregister =
-      forceReregister ||
-      !existing?.zoom_registrant_id ||
-      !existing.zoom_join_url ||
-      existing.class_zoom_meeting_id !== classZoomMeetingId ||
-      (identity.profileUpdatedAt && existing.updated_at && new Date(identity.profileUpdatedAt).getTime() > new Date(existing.updated_at).getTime())
+      const existing = existingByProfileId.get(identity.profileId)
+      const mustReregister =
+        forceReregister ||
+        !existing?.zoom_registrant_id ||
+        !existing.zoom_join_url ||
+        existing.class_zoom_meeting_id !== classZoomMeetingId ||
+        (identity.profileUpdatedAt && existing.updated_at && new Date(identity.profileUpdatedAt).getTime() > new Date(existing.updated_at).getTime())
 
-    if (!mustReregister) {
-      skipped += 1
-      continue
-    }
+      const profileAttempt = await startZoomJobAttemptAudit({
+        runDbId: auditContext?.runDbId,
+        runId: auditContext?.runId ?? 'missing-run-id',
+        actionType: 'registrant_register',
+        triggerSource: auditContext?.triggerSource ?? 'unknown',
+        triggerKind: auditContext?.triggerKind ?? 'unknown',
+        classId: classRow.id,
+        classZoomMeetingId,
+        profileId: identity.profileId,
+        classZoomRegistrantId: existing?.id ?? null,
+        requestPayload: {
+          profileId: identity.profileId,
+          email: identity.email,
+          source: identity.source,
+          mustReregister,
+        },
+      })
+
+      if (!mustReregister) {
+        skipped += 1
+        await finishZoomJobAttemptAudit(profileAttempt, {
+          id: profileAttempt?.id ?? '',
+          status: 'skipped',
+          resultPayload: { reason: 'already_registered', profileId: identity.profileId },
+        })
+        continue
+      }
 
     try {
       if (existing?.zoom_registrant_id && existing.zoom_meeting_id) {
@@ -588,11 +703,12 @@ const ensureRegistrantsForClass = async ({
         }
       }
 
-      const registrant = await zoomApiClient.registerParticipant(meetingId, {
+      const registerRequest = {
         first_name: identity.firstName,
         last_name: identity.lastName,
         email: identity.email,
-      })
+      }
+      const registrant = await zoomApiClient.registerParticipant(meetingId, registerRequest)
 
       const tokenHash = hashZlrToken(newZlrToken())
       const { error: upsertError } = await adminClient.from('class_zoom_registrant').upsert(
@@ -615,6 +731,21 @@ const ensureRegistrantsForClass = async ({
       } else {
         created += 1
       }
+
+      await finishZoomJobAttemptAudit(profileAttempt, {
+        id: profileAttempt?.id ?? '',
+        status: 'succeeded',
+        resultPayload: {
+          profileId: identity.profileId,
+          created: !existing,
+          updated: Boolean(existing),
+          zoomRegistrantId: registrant?.registrant_id ?? null,
+          hasJoinUrl: Boolean(registrant?.join_url),
+        },
+        externalResponsePayload: {
+          registerParticipant: registrant as Record<string, unknown> | null,
+        },
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown registrant creation error'
       failures.push({
@@ -622,11 +753,46 @@ const ensureRegistrantsForClass = async ({
         email: identity.email,
         error: `${message} | attempted_profile_id=${identity.profileId} | attempted_email=${identity.email}`,
       })
+      await finishZoomJobAttemptAudit(profileAttempt, {
+        id: profileAttempt?.id ?? '',
+        status: 'failed',
+        errorMessage: message,
+        errorPayload: {
+          profileId: identity.profileId,
+          email: identity.email,
+        },
+      })
       continue
     }
   }
 
-  return { created, updated, removed, skipped, failures }
+    const batchResult = { created, updated, removed, skipped, failures }
+    await finishZoomJobAttemptAudit(registrantBatchAttempt, {
+      id: registrantBatchAttempt?.id ?? '',
+      status: failures.length ? 'failed' : 'succeeded',
+      resultPayload: {
+        created,
+        updated,
+        removed,
+        skipped,
+        failuresCount: failures.length,
+      },
+      errorPayload: failures.length ? { failures } : {},
+      errorMessage: failures.length ? 'One or more registrant attempts failed' : null,
+    })
+
+    return batchResult
+  } catch (error) {
+    await finishZoomJobAttemptAudit(registrantBatchAttempt, {
+      id: registrantBatchAttempt?.id ?? '',
+      status: 'failed',
+      errorMessage: error instanceof Error ? error.message : 'Unknown registrant batch error',
+      errorPayload: {
+        name: error instanceof Error ? error.name : 'UnknownError',
+      },
+    })
+    throw error
+  }
 }
 
 export const provisionClassById = async (classId: string, options: ProvisionOptions = {}): Promise<ProvisionClassResult> => {
@@ -649,6 +815,24 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
   const lockRetryMs = Number.isFinite(rawLockRetryMs) ? Math.max(0, rawLockRetryMs) : 0
   const lockTtlSeconds = Number.parseInt(process.env.ZOOM_CLASS_LOCK_TTL_SECONDS ?? '120', 10)
   const ttlSeconds = Number.isFinite(lockTtlSeconds) ? Math.max(30, lockTtlSeconds) : 120
+
+  const classProvisionAttempt = await startZoomJobAttemptAudit({
+    runDbId: options.auditContext?.runDbId,
+    runId: options.auditContext?.runId ?? lockOwnerRunId,
+    actionType: 'class_provision',
+    triggerSource: options.auditContext?.triggerSource ?? 'unknown',
+    triggerKind: options.auditContext?.triggerKind ?? 'unknown',
+    classId,
+    profileId: targetProfileId,
+    requestPayload: {
+      classId,
+      scope,
+      targetProfileId,
+      lockOwnerKind,
+      lockRetryMs,
+      forceMeetingRecreate: Boolean(options.forceMeetingRecreate),
+    },
+  })
 
   const lockStartMs = Date.now()
   let lockResult = await tryAcquireZoomClassLock({
@@ -682,7 +866,7 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
   const lockWaitMs = Date.now() - lockStartMs
 
   if (!lockResult.acquired) {
-    return {
+    const result = {
       classId,
       attendanceRowsEnsured: 0,
       meetingCreated: false,
@@ -704,6 +888,20 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       skipped: true,
       skipReason: 'lock_not_acquired',
     }
+
+    await finishZoomJobAttemptAudit(classProvisionAttempt, {
+      id: classProvisionAttempt?.id ?? '',
+      status: 'skipped',
+      resultPayload: {
+        skipReason: result.skipReason,
+      },
+      errorPayload: {
+        lockBlockedByOwnerRunId: lockResult.blockedByOwnerRunId,
+        lockBlockedByOwnerKind: lockResult.blockedByOwnerKind,
+      },
+    })
+
+    return result
   }
   const { data: classRowRaw, error: classError } = await adminClient
     .from('class')
@@ -712,7 +910,7 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
     .single()
 
   if (classError || !classRowRaw) {
-    return {
+    const result = {
       classId,
       attendanceRowsEnsured: 0,
       meetingCreated: false,
@@ -733,6 +931,17 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       lockWaitMs,
       error: classError?.message ?? 'Class not found',
     }
+
+    await finishZoomJobAttemptAudit(classProvisionAttempt, {
+      id: classProvisionAttempt?.id ?? '',
+      status: 'failed',
+      errorMessage: result.error,
+      errorPayload: {
+        classId,
+      },
+    })
+
+    return result
   }
 
   const classRow = classRowRaw as unknown as ClassRow
@@ -743,7 +952,7 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
     const approvedProfileIds = Array.from(new Set(profilesInScope.map(profile => profile.id).filter(Boolean)))
 
     if (targetProfileId && !approvedProfileIds.length) {
-      return {
+      const result = {
         classId,
         attendanceRowsEnsured: 0,
         meetingCreated: false,
@@ -765,6 +974,17 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
         skipped: true,
         skipReason: 'target_profile_not_approved',
       }
+
+      await finishZoomJobAttemptAudit(classProvisionAttempt, {
+        id: classProvisionAttempt?.id ?? '',
+        status: 'skipped',
+        resultPayload: {
+          skipReason: result.skipReason,
+          targetProfileId,
+        },
+      })
+
+      return result
     }
 
     const identities = await buildIdentities(profilesInScope)
@@ -774,6 +994,7 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       classRow,
       forceMeetingRecreate: Boolean(options.forceMeetingRecreate),
       excludedHostIds: options.excludedHostIds,
+      auditContext: options.auditContext,
     })
 
     const registrants = await ensureRegistrantsForClass({
@@ -784,9 +1005,10 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       approvedProfileIds: new Set(approvedProfileIds),
       forceReregister: meeting.recreated,
       targetProfileId,
+      auditContext: options.auditContext,
     })
 
-    return {
+    const result = {
       classId,
       attendanceRowsEnsured,
       meetingCreated: meeting.created,
@@ -806,8 +1028,25 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       lockTtlRemainingMs: null,
       lockWaitMs,
     }
+
+    await finishZoomJobAttemptAudit(classProvisionAttempt, {
+      id: classProvisionAttempt?.id ?? '',
+      status: 'succeeded',
+      resultPayload: {
+        attendanceRowsEnsured,
+        meetingCreated: result.meetingCreated,
+        meetingRecreated: result.meetingRecreated,
+        registrantsCreated: result.registrantsCreated,
+        registrantsUpdated: result.registrantsUpdated,
+        registrantsRemoved: result.registrantsRemoved,
+        registrantsSkipped: result.registrantsSkipped,
+        registrantFailures: result.registrantFailures.length,
+      },
+    })
+
+    return result
   } catch (error) {
-    return {
+    const result = {
       classId,
       attendanceRowsEnsured: 0,
       meetingCreated: false,
@@ -828,6 +1067,17 @@ export const provisionClassById = async (classId: string, options: ProvisionOpti
       lockWaitMs,
       error: error instanceof Error ? error.message : 'Unknown provisioning error',
     }
+
+    await finishZoomJobAttemptAudit(classProvisionAttempt, {
+      id: classProvisionAttempt?.id ?? '',
+      status: 'failed',
+      errorMessage: result.error,
+      errorPayload: {
+        name: error instanceof Error ? error.name : 'UnknownError',
+      },
+    })
+
+    return result
   } finally {
     await releaseZoomClassLock({ classId, ownerRunId: lockOwnerRunId })
   }

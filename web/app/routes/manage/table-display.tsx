@@ -3290,6 +3290,47 @@ export default function TableDisplay({
                         )
                       }
 
+                      if (tableName === 'class' && column === 'step_meeting') {
+                        const classId = typeof row.id === 'string' ? row.id : ''
+                        const meetingReady = row.step_meeting === 'Generated'
+                        const isGenerating =
+                          statusFetcher.state === 'submitting' &&
+                          statusFetcher.formData?.get('intent') === 'generate-meeting' &&
+                          statusFetcher.formData?.get('class_id') === classId
+                        const returnTo = `${location.pathname}${location.search}`
+                        const linkSearch = new URLSearchParams({ f_class_id: classId, returnTo }).toString()
+
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2 font-mono" title="Meeting generation status">
+                            {meetingReady ? (
+                              <Link
+                                to={{ pathname: '/manage/class-zoom-meeting', search: linkSearch }}
+                                onClick={event => event.stopPropagation()}
+                                className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                              >
+                                Generated
+                              </Link>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={!classId || isGenerating}
+                                onClick={event => {
+                                  event.stopPropagation()
+                                  if (!classId) return
+                                  const formData = new FormData()
+                                  formData.set('intent', 'generate-meeting')
+                                  formData.set('class_id', classId)
+                                  statusFetcher.submit(formData, { method: 'post' })
+                                }}
+                                className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isGenerating ? 'Generating...' : 'Generate'}
+                              </button>
+                            )}
+                          </td>
+                        )
+                      }
+
                       if (tableName === 'class' && column === 'sync_class') {
                         const classId = typeof row.id === 'string' ? row.id : ''
                         const isBusy = statusFetcher.state === 'submitting'

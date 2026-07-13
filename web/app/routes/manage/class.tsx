@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
+import { provisionClassById } from '@/lib/zoom-jobs/provision.server'
 import { runZoomJobs, runZoomJobsForClass } from '@/lib/zoom-jobs/runner.server'
 import type { Route } from './+types/class'
 import DeferredTableDisplay from './deferred-table-display'
@@ -18,6 +19,8 @@ type ActionData = {
   zoomRunError?: string
   classSyncSuccess?: string
   classSyncError?: string
+  classMeetingSuccess?: string
+  classMeetingError?: string
 }
 
 type ClassRow = Record<string, unknown> & {
@@ -282,7 +285,7 @@ export async function loader(args: Route.LoaderArgs) {
       sync_class: 'Sync class',
       zoom_host_email: meeting?.host_zoom_user_email ?? row.zoom_host_email ?? '',
       zoom_join_url: meeting?.join_url ?? row.zoom_join_url ?? '',
-      step_meeting: meetingComplete ? meeting?.start_time ?? 'Done' : 'Missing',
+      step_meeting: meetingComplete ? 'Generated' : 'Generate',
       step_registrants: progressLabel(registrantsProgress),
       step_attendance_rows: progressLabel(attendanceRowsProgress),
       step_reminder: progressLabel(remindersProgress),
@@ -386,7 +389,14 @@ export async function action(args: Route.ActionArgs) {
 
     try {
       const appOrigin = new URL(args.request.url).origin
-      await runZoomJobs({ appOrigin, runId: `manual-ui-${Date.now().toString(36)}` })
+      await runZoomJobs({
+        appOrigin,
+        runId: `manual-ui-${Date.now().toString(36)}`,
+        triggerSource: 'ui',
+        triggerKind: 'zoom_jobs_run',
+        actorUserId: auth.user.id,
+        actorRole: auth.claims.role,
+      })
       return { zoomRunSuccess: 'Zoom provisioning sequence started and completed for this run.' } satisfies ActionData
     } catch (error) {
       return {
@@ -408,13 +418,62 @@ export async function action(args: Route.ActionArgs) {
 
     try {
       const appOrigin = new URL(args.request.url).origin
-      await runZoomJobsForClass({ classId, appOrigin, runId: `manual-class-${Date.now().toString(36)}` })
+      await runZoomJobsForClass({
+        classId,
+        appOrigin,
+        runId: `manual-class-${Date.now().toString(36)}`,
+        triggerSource: 'ui',
+        triggerKind: 'sync_button',
+        actorUserId: auth.user.id,
+        actorRole: auth.claims.role,
+      })
       return { classSyncSuccess: `Class sync completed for ${classId}.` } satisfies ActionData
     } catch (error) {
       return {
         classSyncError: error instanceof Error ? error.message : `Failed to sync class ${classId}.`,
       } satisfies ActionData
     }
+  }
+
+  if (intent === 'generate-meeting') {
+    const auth = await requireAuth(args.request)
+    if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    const classId = String(formData.get('class_id') ?? '')
+    if (!classId) {
+      return { classMeetingError: 'Missing class id.' } satisfies ActionData
+    }
+
+    const runId = `manual-generate-${Date.now().toString(36)}`
+    const result = await provisionClassById(classId, {
+      lockOwnerRunId: runId,
+      lockOwnerKind: 'generate_meeting',
+      auditContext: {
+        runId,
+        triggerSource: 'ui',
+        triggerKind: 'generate_meeting_button',
+        actorUserId: auth.user.id,
+        actorRole: auth.claims.role,
+      },
+    })
+
+    if (result.error) {
+      return {
+        classMeetingError: result.error,
+      } satisfies ActionData
+    }
+
+    if (result.skipped) {
+      return {
+        classMeetingError: `Meeting generation skipped (${result.skipReason ?? 'unknown'}).`,
+      } satisfies ActionData
+    }
+
+    return {
+      classMeetingSuccess: `Meeting generated for ${classId}.`,
+    } satisfies ActionData
   }
 
   return baseAction(args)
@@ -451,6 +510,12 @@ export default function ClassTablePage() {
           ) : null}
           {actionData?.classSyncError ? (
             <p className="text-sm text-destructive">{actionData.classSyncError}</p>
+          ) : null}
+          {actionData?.classMeetingSuccess ? (
+            <p className="text-sm text-emerald-700">{actionData.classMeetingSuccess}</p>
+          ) : null}
+          {actionData?.classMeetingError ? (
+            <p className="text-sm text-destructive">{actionData.classMeetingError}</p>
           ) : null}
         </div>
       }
