@@ -238,9 +238,12 @@ export async function loader(args: Route.LoaderArgs) {
         ? new Date(new Date(meeting.start_time).getTime() + meeting.duration_minutes * 60_000).toISOString()
         : ''
 
-    const registrantsReady = classRegistrants.filter(
-      entry => Boolean(entry.zoom_registrant_id && entry.zoom_join_url)
-    ).length
+    const registrantProfileIds = new Set(
+      classRegistrants
+        .map(entry => entry.profile_id)
+        .filter(profileId => expectedProfileIds.has(profileId))
+    )
+    const registrantsReady = registrantProfileIds.size
     const attendanceRowsReady = Array.from(expectedProfileIds).filter(profileId => attendanceProfileIds.has(profileId)).length
     const remindersSent = classRegistrants.filter(entry => Boolean(entry.last_sent_at)).length
 
