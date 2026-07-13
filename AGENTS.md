@@ -2,8 +2,8 @@
 
 ## Scope
 - Main app is `web/` (React Router v7, SSR). Run Node commands from `web/`; root `package.json` has no scripts.
-- `scheduler/` and `zoom-api/` are separate deployables with separate run/test flows.
-- Before touching `zoom-api/`, read and follow `zoom-api/CLAUDE.md`.
+- `scheduler/` and `zoom-api/` are separate services with independent run/test flows.
+- Before editing `zoom-api/`, read `zoom-api/CLAUDE.md` and follow its stricter workflow requirements.
 
 ## Local setup and core commands
 - First-time setup (repo root): `cp web/.env.template web/.env.local` -> `supabase start --debug` -> copy values from `supabase status -o json` into `web/.env.local`.
@@ -20,10 +20,9 @@
 - `createClient` from `web/app/lib/supabase/server.ts` returns `{ supabase, headers }`; include `headers` in redirects/responses or auth cookies are dropped.
 
 ## Manage table conventions
-- Prefer server-side query mode for manage tables so filter options remain correct across pagination/sorting.
-- Prefer deferred table pages: lightweight shell loader + `DeferredTableDisplay` + route-level `*.table-data.ts` loader that sets `_deferTable=1`.
+- Prefer deferred manage tables: shell loader + `DeferredTableDisplay` + route-level `*.table-data.ts` loader that sets `_deferTable=1`.
 - For CSV exports, use `/manage/exports` form posts with `intent=create-export`, `export_type`, and `source_path`.
-- For full-dataset filter option scans (for example `email-message`), remove `page`/`pageSize` and force `sort=__full_scan__` in the deferred loader request.
+- For full-dataset filter option scans (for example `email-message`), remove `page`/`pageSize`, set `sort=__full_scan__`, and clear `dir` in the deferred loader request.
 - Supabase API `max_rows` is `1000` (`supabase/config.toml`); batch large reads with stable ordered `.range(...)` loops.
 
 ## Tests and CI
