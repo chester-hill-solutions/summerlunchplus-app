@@ -93,6 +93,7 @@ export const manageSections: ManageNavSection[] = [
     key: 'zoom',
     label: 'Zoom',
     stickerSrc: '/stickers/camcorder.png',
+    stickerScale: 1.35,
     defaultCollapsed: true,
     items: [
       { to: '/manage/zoom-connect-test', label: 'Zoom connect test', description: 'Test the configured zoom-api /zoom/connect endpoint.' },
@@ -109,6 +110,7 @@ export const manageSections: ManageNavSection[] = [
     key: 'system',
     label: 'System',
     stickerSrc: '/stickers/gear.png',
+    stickerScale: 1.35,
     defaultCollapsed: true,
     items: [
       { to: '/manage/login-event', label: 'Login events', description: 'Successful sign-in metadata and source context.' },
