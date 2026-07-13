@@ -273,6 +273,16 @@ const HEADER_CONTROL_ALLOWANCE_PX = 30
 const MAX_ROWS_FOR_WIDTH_ESTIMATION = 1500
 const hasOwn = (obj: object, key: string) => Object.prototype.hasOwnProperty.call(obj, key)
 
+const areNumberMapsEqual = (left: Record<string, number>, right: Record<string, number>) => {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  if (leftKeys.length !== rightKeys.length) return false
+  for (const key of leftKeys) {
+    if (left[key] !== right[key]) return false
+  }
+  return true
+}
+
 type FilterOptionsStatus = 'idle' | 'loading' | 'loaded' | 'error'
 
 type FilterOptionsCacheEntry = {
@@ -1046,8 +1056,8 @@ export default function TableDisplay({
       }
     }
 
-    setColumnMinWidths(minWidths)
-    setColumnWidths(nextWidths)
+    setColumnMinWidths(prev => (areNumberMapsEqual(prev, minWidths) ? prev : minWidths))
+    setColumnWidths(prev => (areNumberMapsEqual(prev, nextWidths) ? prev : nextWidths))
   }, [columns, columnMeta, rows, tableName])
 
   useEffect(() => {
@@ -3244,6 +3254,30 @@ export default function TableDisplay({
                             >
                               {isDeleting ? 'Deleting...' : 'Delete'}
                             </button>
+                          </td>
+                        )
+                      }
+
+                      if (isClassAttendance && column === 'history_row') {
+                        const attendanceId = typeof row.id === 'string' ? row.id : ''
+                        const returnTo = `${location.pathname}${location.search}`
+
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="View attendance history">
+                            <Button asChild variant="outline" size="xs">
+                              <Link
+                                to={{
+                                  pathname: '/manage/class-attendance-audit',
+                                  search: new URLSearchParams({
+                                    f_class_attendance_id: attendanceId,
+                                    returnTo,
+                                  }).toString(),
+                                }}
+                                onClick={event => event.stopPropagation()}
+                              >
+                                View history
+                              </Link>
+                            </Button>
                           </td>
                         )
                       }

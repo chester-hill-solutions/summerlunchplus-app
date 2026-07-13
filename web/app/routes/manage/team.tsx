@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { NavLink, Outlet, redirect, useLoaderData } from 'react-router'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { NavLink, Outlet, redirect, useFetchers, useLoaderData, useLocation, useNavigation } from 'react-router'
 
 import { ChevronDown, ChevronRight, House, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
@@ -10,9 +10,23 @@ import { cn } from '@/lib/utils'
 import type { Route } from './+types/team'
 import { manageSections, overviewPage } from './nav'
 
-const STAFF_ALLOWED_MANAGE_PATHS = new Set([
+const shouldLogManageTeamServerInstrumentation =
+  process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+
+const logManageTeamServerEvent = (event: string, payload: Record<string, unknown>) => {
+  if (!shouldLogManageTeamServerInstrumentation) return
+  console.info('[manage-team-server]', {
+    event,
+    at: new Date().toISOString(),
+    ...payload,
+  })
+}
+
+const TEAM_ALLOWED_MANAGE_PATHS = new Set([
   '/manage',
+  '/manage/team',
   '/manage/class-attendance',
+  '/manage/class-attendance-audit',
   '/manage/class-attendance-card-data',
   '/manage/class',
   '/manage/workshop',
@@ -23,27 +37,146 @@ const STAFF_ALLOWED_MANAGE_PATHS = new Set([
   '/manage/families',
 ])
 
+const TEAM_ALLOWED_MANAGE_PREFIXES = Array.from(TEAM_ALLOWED_MANAGE_PATHS).filter(path => path !== '/manage')
+
+const isTeamAllowedManagePath = (pathname: string) => {
+  if (TEAM_ALLOWED_MANAGE_PATHS.has(pathname)) return true
+  return TEAM_ALLOWED_MANAGE_PREFIXES.some(prefix => pathname.startsWith(`${prefix}/`))
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
+  const startedAt = Date.now()
+  const requestUrl = request.url
   const auth = await requireAuth(request)
   const pathname = new URL(request.url).pathname
   const isTeamRoute = pathname === '/manage/team'
   const isStaff = auth.claims.role === 'staff'
 
-  if (!isRoleAtLeast(auth.claims.role, 'staff') && !(isRoleAtLeast(auth.claims.role, 'instructor') && isTeamRoute)) {
-    throw redirect('/home', { headers: auth.headers })
+  logManageTeamServerEvent('loader_start', {
+    requestUrl,
+    pathname,
+    role: auth.claims.role,
+    emailHint: auth.emailHint,
+    isTeamRoute,
+    isStaff,
+  })
+
+  if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+    if (isRoleAtLeast(auth.claims.role, 'instructor')) {
+      if (!isTeamRoute) {
+        logManageTeamServerEvent('loader_redirect', {
+          reason: 'instructor_non_team_path',
+          pathname,
+          target: '/manage/team',
+          role: auth.claims.role,
+          emailHint: auth.emailHint,
+          durationMs: Date.now() - startedAt,
+        })
+        throw redirect('/manage/team', { headers: auth.headers })
+      }
+    } else {
+      logManageTeamServerEvent('loader_redirect', {
+        reason: 'below_instructor',
+        pathname,
+        target: '/home',
+        role: auth.claims.role,
+        emailHint: auth.emailHint,
+        durationMs: Date.now() - startedAt,
+      })
+      throw redirect('/home', { headers: auth.headers })
+    }
   }
 
-  if (isStaff && !STAFF_ALLOWED_MANAGE_PATHS.has(pathname)) {
+  if (isStaff && !isTeamAllowedManagePath(pathname)) {
+    logManageTeamServerEvent('loader_redirect', {
+      reason: 'staff_manage_path_blocked',
+      pathname,
+      target: '/manage/class-attendance',
+      role: auth.claims.role,
+      emailHint: auth.emailHint,
+      durationMs: Date.now() - startedAt,
+    })
     throw redirect('/manage/class-attendance', { headers: auth.headers })
   }
+
+  logManageTeamServerEvent('loader_allow', {
+    pathname,
+    role: auth.claims.role,
+    emailHint: auth.emailHint,
+    durationMs: Date.now() - startedAt,
+  })
 
   return { role: auth.claims.role }
 }
 
 export default function TeamLayout() {
   const { role } = useLoaderData<typeof loader>()
+  const location = useLocation()
+  const navigation = useNavigation()
+  const fetchers = useFetchers()
+  const navStartRef = useRef<number | null>(null)
+  const navFromRef = useRef<string>('')
   const isManagerOrAdmin = isRoleAtLeast(role, 'manager')
   const isStaff = role === 'staff'
+  const shouldLogManageTeamClientInstrumentation =
+    import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+
+  const logManageTeamClientEvent = (event: string, payload: Record<string, unknown>) => {
+    if (!shouldLogManageTeamClientInstrumentation) return
+    console.info('[manage-team-client]', {
+      event,
+      at: new Date().toISOString(),
+      ...payload,
+    })
+  }
+
+  useEffect(() => {
+    logManageTeamClientEvent('route_render', {
+      pathname: location.pathname,
+      search: location.search,
+      role,
+      isManagerOrAdmin,
+      isStaff,
+      navigationState: navigation.state,
+      activeFetcherCount: fetchers.filter(fetcher => fetcher.state !== 'idle').length,
+    })
+  }, [fetchers, isManagerOrAdmin, isStaff, location.pathname, location.search, navigation.state, role])
+
+  useEffect(() => {
+    const state = navigation.state
+    if (state !== 'idle' && navStartRef.current === null) {
+      navStartRef.current = performance.now()
+      navFromRef.current = `${location.pathname}${location.search}`
+      logManageTeamClientEvent('navigation_start', {
+        from: navFromRef.current,
+        to: navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : null,
+        state,
+      })
+      return
+    }
+
+    if (state === 'idle' && navStartRef.current !== null) {
+      const durationMs = Math.round(performance.now() - navStartRef.current)
+      logManageTeamClientEvent('navigation_end', {
+        from: navFromRef.current,
+        to: `${location.pathname}${location.search}`,
+        durationMs,
+      })
+      navStartRef.current = null
+      navFromRef.current = ''
+    }
+  }, [location.pathname, location.search, navigation.location, navigation.state])
+
+  const logSidebarNavClick = (target: string) => {
+    logManageTeamClientEvent('sidebar_nav_click', {
+      from: `${location.pathname}${location.search}`,
+      target,
+      role,
+      isManagerOrAdmin,
+      isStaff,
+    })
+  }
+
   const teamNavSections = useMemo(
     () =>
       isManagerOrAdmin
@@ -57,7 +190,7 @@ export default function TeamLayout() {
                 defaultCollapsed: false,
                 items: manageSections
                   .find(section => section.key === 'class-management')
-                  ?.items.filter(item => STAFF_ALLOWED_MANAGE_PATHS.has(item.to)) ?? [],
+                  ?.items.filter(item => TEAM_ALLOWED_MANAGE_PATHS.has(item.to)) ?? [],
               },
               {
                 key: 'user-management' as const,
@@ -66,7 +199,7 @@ export default function TeamLayout() {
                 defaultCollapsed: true,
                 items: manageSections
                   .find(section => section.key === 'user-management')
-                  ?.items.filter(item => STAFF_ALLOWED_MANAGE_PATHS.has(item.to)) ?? [],
+                  ?.items.filter(item => TEAM_ALLOWED_MANAGE_PATHS.has(item.to)) ?? [],
               },
             ]
         : [
@@ -109,6 +242,7 @@ export default function TeamLayout() {
               <NavLink
                 to={overviewPage.to}
                 end
+                onClick={() => logSidebarNavClick(overviewPage.to)}
                 className={({ isActive }) =>
                   cn(
                     'flex flex-1 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors',
@@ -160,6 +294,7 @@ export default function TeamLayout() {
                             key={item.to}
                             to={item.to}
                             end={item.to === '/manage'}
+                            onClick={() => logSidebarNavClick(item.to)}
                             className={({ isActive }) =>
                               cn(
                                 'block rounded-md px-3 py-2 text-sm font-medium transition-colors',
@@ -208,6 +343,7 @@ export default function TeamLayout() {
                             key={item.to}
                             to={item.to}
                             end={item.to === '/manage'}
+                            onClick={() => logSidebarNavClick(item.to)}
                             className={({ isActive }) =>
                               cn(
                                 'block rounded-md px-3 py-2 text-sm font-medium transition-colors',
