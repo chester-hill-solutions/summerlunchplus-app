@@ -9,6 +9,7 @@
 - Treat `main` as read-only.
 - Use `sai/<topic>` branches, with worktrees under `/Users/saihaansyed/chs/prj/summerlunchplus-app/worktrees/`.
 - Rebase order when landing work: update `sai/main` (`git pull --rebase`) -> rebase `sai/<topic>` onto `sai/main` -> fast-forward `sai/main`.
+- When running `gh` commands from shell, do not include unescaped backticks in inline `--body` text (zsh treats them as command substitution). Use `--body-file`, single-quoted strings, or escape backticks.
 
 ## Web (`web/`)
 - Primary commands: `npm ci`, `npm run dev`, `npm run typecheck`, `npm run build && npm run start`, `npm run test`.
@@ -33,7 +34,10 @@
 - Regenerate DB types after schema changes:
   `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`
 - Local seeds are configured to sanitized prod snapshot + app seeds in `supabase/config.toml`.
-- Supabase API row cap is `1000` (`supabase/config.toml`), so batch large reads.
+- Supabase API row cap is `1000` (`supabase/config.toml`), and over-cap reads can be silently truncated.
+- For `/manage` loaders, exports, and any status/count derivation, never rely on a single unpaginated related-row query (`.in(...).select(...)`) when result size can exceed `max_rows`.
+- Required pattern for high-cardinality reads: deterministic `.order(...)` + `.range(...)` pagination loop, fetch until page size is below batch size, then derive aggregates from the fully collected dataset.
+- Treat paginated-read mistakes as data-integrity bugs (for example status/count mismatches like `photo_status` vs `photo_count` caused by partial reads).
 - `CODE_STANDARDS.md` is the DB/auth convention source of truth.
 
 ## Scheduler (`scheduler/`)
