@@ -78,7 +78,8 @@ export const manageSections: ManageNavSection[] = [
   {
     key: 'form-management',
     label: 'Form Management',
-    stickerSrc: '/stickers/stocks.png',
+    stickerSrc: '/stickers/checklist.png',
+    stickerScale: 1.3,
     defaultCollapsed: false,
     items: [
       { to: '/manage/form', label: 'Forms', description: 'Onboarding forms configuration.' },
