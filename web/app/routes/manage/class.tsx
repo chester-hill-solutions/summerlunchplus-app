@@ -52,6 +52,7 @@ export async function loader(args: Route.LoaderArgs) {
         step_meeting: {
           label: 'Meeting',
           filterable: true,
+          fitContentOnLoad: true,
           hoverCard: {
             titleField: 'zoom_topic',
             titleFallback: 'Zoom meeting details',
@@ -349,6 +350,7 @@ export async function loader(args: Route.LoaderArgs) {
       step_meeting: {
         label: 'Meeting',
         filterable: true,
+        fitContentOnLoad: true,
         hoverCard: {
           titleField: 'zoom_topic',
           titleFallback: 'Zoom meeting details',

@@ -305,24 +305,13 @@ const formatCompactLocalDateTime = (value: string) => {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
 
-  const parts = new Intl.DateTimeFormat(TABLE_DISPLAY_LOCALE, {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
+  return new Intl.DateTimeFormat(TABLE_DISPLAY_LOCALE, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
     minute: '2-digit',
-    hour12: false,
-  }).formatToParts(date)
-
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find(item => item.type === type)?.value ?? ''
-
-  const month = part('month')
-  const day = part('day')
-  const hour = part('hour')
-  const minute = part('minute')
-  if (!month || !day || !hour || !minute) return value
-
-  return `${month}-${day} ${hour}-${minute}`
+    hour12: true,
+  }).format(date)
 }
 
 const isTimestampLabelValue = (value: unknown): value is TimestampLabelValue => {
