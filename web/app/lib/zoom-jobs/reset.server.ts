@@ -3,6 +3,7 @@ import { ZoomApiError, zoomApiClient } from '@/lib/zoom-jobs/zoom-api.client.ser
 
 const HORIZON_MINUTES = 36 * 60
 const IN_CLAUSE_BATCH_SIZE = 150
+const nowMs = () => Date.now()
 
 const toIso = (date: Date) => date.toISOString()
 
@@ -162,6 +163,7 @@ export const resetZoomProcessingState = async ({
   }
 
   let attendanceRowsReset = 0
+  const attendanceResetStartedAt = nowMs()
   for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
     const { error, count } = await adminClient
       .from('class_attendance')
@@ -175,6 +177,13 @@ export const resetZoomProcessingState = async ({
     if (error) throw new Error(error.message)
     attendanceRowsReset += count ?? 0
   }
+  console.info('[class-attendance][mutation]', {
+    source: 'zoom_reset',
+    mutation: 'reset_attendance_fields',
+    classCount: classIds.length,
+    attendanceRowsReset,
+    duration_ms: nowMs() - attendanceResetStartedAt,
+  })
 
   return {
     dryRun: false,

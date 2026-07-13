@@ -6,6 +6,7 @@ import { adminClient } from '@/lib/supabase/adminClient'
 import type { Route } from './+types/home.class-photos.upload'
 
 const PHOTO_BUCKET = 'class-attendance-photos'
+const nowMs = () => Date.now()
 
 const sanitizeFileName = (input: string) => {
   const trimmed = input.trim().toLowerCase()
@@ -92,6 +93,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (!attendanceId) {
+    const insertAttendanceStartedAt = nowMs()
     const { data: insertedAttendance, error: insertAttendanceError } = await adminClient
       .from('class_attendance')
       .insert({
@@ -101,6 +103,14 @@ export async function action({ request }: Route.ActionArgs) {
       })
       .select('id')
       .single<{ id: string }>()
+    console.info('[class-attendance][mutation]', {
+      intent: 'photo-upload',
+      mutation: 'insert_attendance_row',
+      classId,
+      profileId,
+      duration_ms: nowMs() - insertAttendanceStartedAt,
+      hasError: Boolean(insertAttendanceError),
+    })
 
     if (insertAttendanceError || !insertedAttendance?.id) {
       return Response.json(
@@ -187,6 +197,7 @@ export async function action({ request }: Route.ActionArgs) {
         throw new Error(photoError.message)
       }
 
+      const markUploadedStartedAt = nowMs()
       await Promise.all([
         adminClient
           .from('class_attendance_photo_upload_attempt' as any)
@@ -206,6 +217,15 @@ export async function action({ request }: Route.ActionArgs) {
           .eq('class_id', classId)
           .eq('profile_id', profileId),
       ])
+      console.info('[class-attendance][mutation]', {
+        intent: 'photo-upload',
+        mutation: 'mark_photo_uploaded',
+        classId,
+        profileId,
+        attemptId,
+        duration_ms: nowMs() - markUploadedStartedAt,
+        hasError: false,
+      })
 
       results.push({ fileName, ok: true })
     } catch (error) {
