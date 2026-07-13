@@ -133,6 +133,7 @@ type GiftCardClickRow = {
 const IN_CLAUSE_BATCH_SIZE = 150
 const CLASS_ATTENDANCE_FETCH_BATCH_SIZE = 1000
 const RELATED_FETCH_BATCH_SIZE = 1000
+const nowMs = () => Date.now()
 
 const isSchemaMismatchError = (error: { code?: string | null; message?: string | null } | null) => {
   if (!error) return false
@@ -1247,7 +1248,16 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     const { supabase } = createClient(request)
+    const deleteStartedAt = nowMs()
     const { error } = await supabase.from('class_attendance').delete().eq('class_id', classId).eq('profile_id', profileId)
+    console.info('[class-attendance][mutation]', {
+      intent,
+      mutation: 'delete_attendance_row',
+      classId,
+      profileId,
+      duration_ms: nowMs() - deleteStartedAt,
+      hasError: Boolean(error),
+    })
     profile.mark('delete_attendance_row_execute', {
       classId,
       profileId,
@@ -1483,6 +1493,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     const { supabase } = createClient(request)
     const nowIso = new Date().toISOString()
+    const updateStartedAt = nowMs()
     const { error } = await supabase
       .from('class_attendance')
       .update({
@@ -1493,6 +1504,15 @@ export async function action({ request }: Route.ActionArgs) {
       })
       .eq('class_id', classId)
       .eq('profile_id', profileId)
+    console.info('[class-attendance][mutation]', {
+      intent,
+      mutation: 'toggle_gift_card_block',
+      classId,
+      profileId,
+      blocked: nextBlocked,
+      duration_ms: nowMs() - updateStartedAt,
+      hasError: Boolean(error),
+    })
     profile.mark('toggle_block_update_attendance', {
       classId,
       profileId,
@@ -1668,11 +1688,21 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const { supabase } = createClient(request)
+  const updateStartedAt = nowMs()
   const { error } = await supabase
     .from('class_attendance')
     .update(updates)
     .eq('class_id', classId)
     .eq('profile_id', profileId)
+  console.info('[class-attendance][mutation]', {
+    intent,
+    mutation: 'update_attendance_row',
+    classId,
+    profileId,
+    fields: Object.keys(updates).filter(key => key !== 'recorded_by'),
+    duration_ms: nowMs() - updateStartedAt,
+    hasError: Boolean(error),
+  })
   profile.mark('update_attendance_row', {
     intent,
     classId,

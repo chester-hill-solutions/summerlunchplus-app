@@ -79,6 +79,7 @@ const POST_CLASS_FOLLOWUP_DELAY_HOURS = 24
 const RUNNING_SYNC_TIMEOUT_MINUTES = 20
 const FAILED_SYNC_RETRY_COOLDOWN_MINUTES = 10
 const IN_CLAUSE_BATCH_SIZE = 150
+const nowMs = () => Date.now()
 
 const chunkArray = <T,>(items: T[], size: number) => {
   if (size <= 0 || !items.length) return [] as T[][]
@@ -231,6 +232,7 @@ const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
   }
 
   let inserted = 0
+  const attendanceBackfillStartedAt = nowMs()
   for (const chunk of chunkArray(missingPairs, IN_CLAUSE_BATCH_SIZE)) {
     const rows = chunk.map(row => ({ class_id: row.class_id, profile_id: row.profile_id }))
     const { error } = await adminClient.from('class_attendance').upsert(rows, { onConflict: 'class_id,profile_id' })
@@ -245,6 +247,14 @@ const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
     }
     inserted += chunk.length
   }
+  console.info('[class-attendance][mutation]', {
+    source: 'zoom_runner',
+    mutation: 'attendance_backfill',
+    classesScanned: classes.length,
+    expectedPairs: expectedPairs.length,
+    inserted,
+    duration_ms: nowMs() - attendanceBackfillStartedAt,
+  })
 
   return {
     ok: true,
@@ -763,6 +773,7 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
   let failed = 0
   let pendingRetry = 0
   let skippedCooldown = 0
+  let presentMarked = 0
   let absentMarked = 0
 
   const approvedByWorkshop = new Map<string, Set<string>>()
@@ -862,6 +873,7 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
         const missingProfileIds = approvedProfileIdsList.filter(profileId => !existingProfileIds.has(profileId))
 
         if (missingProfileIds.length) {
+          const attendanceSeedStartedAt = nowMs()
           const attendanceSeedRows = missingProfileIds.map(profileId => ({
             class_id: meeting.class_id,
             profile_id: profileId,
@@ -870,6 +882,13 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
             .from('class_attendance')
             .upsert(attendanceSeedRows, { onConflict: 'class_id,profile_id' })
           if (attendanceSeedError) throw new Error(attendanceSeedError.message)
+          console.info('[class-attendance][mutation]', {
+            source: 'zoom_runner',
+            mutation: 'seed_missing_attendance_rows',
+            classId: meeting.class_id,
+            rows: missingProfileIds.length,
+            duration_ms: nowMs() - attendanceSeedStartedAt,
+          })
         }
       }
 
@@ -981,23 +1000,36 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
         }
 
         if (presentProfileIds.size) {
+          const markPresentStartedAt = nowMs()
+          let presentMarkedForClass = 0
           for (const profileChunk of chunkArray(Array.from(presentProfileIds), IN_CLAUSE_BATCH_SIZE)) {
-            const { error: attendanceUpdateError } = await adminClient
+            const { error: attendanceUpdateError, count: presentCount } = await adminClient
               .from('class_attendance')
-              .update({ status: 'present', recorded_by: null })
+              .update({ status: 'present', recorded_by: null }, { count: 'exact' })
               .eq('class_id', meeting.class_id)
               .in('profile_id', profileChunk)
               .is('status', null)
             if (attendanceUpdateError) {
               throw new Error(attendanceUpdateError.message)
             }
+            presentMarkedForClass += presentCount ?? 0
           }
+          presentMarked += presentMarkedForClass
+          console.info('[class-attendance][mutation]', {
+            source: 'zoom_runner',
+            mutation: 'mark_attendance_present',
+            classId: meeting.class_id,
+            candidateRows: presentProfileIds.size,
+            updatedRows: presentMarkedForClass,
+            duration_ms: nowMs() - markPresentStartedAt,
+          })
         }
       }
 
       if (approvedProfileIds.size > 0) {
         const missingProfileIds = Array.from(approvedProfileIds).filter(profileId => !presentProfileIds.has(profileId))
         if (missingProfileIds.length) {
+          const markAbsentStartedAt = nowMs()
           const { error: absentNullError, count: absentNullCount } = await adminClient
             .from('class_attendance')
             .update({ status: 'absent', recorded_by: null }, { count: 'exact' })
@@ -1007,6 +1039,14 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
           if (absentNullError) throw new Error(absentNullError.message)
 
           absentMarked += absentNullCount ?? 0
+          console.info('[class-attendance][mutation]', {
+            source: 'zoom_runner',
+            mutation: 'mark_attendance_absent',
+            classId: meeting.class_id,
+            candidateRows: missingProfileIds.length,
+            updatedRows: absentNullCount ?? 0,
+            duration_ms: nowMs() - markAbsentStartedAt,
+          })
         }
       }
 
@@ -1059,7 +1099,7 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
     }
   }
 
-  return { scanned, synced, failed, pendingRetry, skippedCooldown, absentMarked }
+  return { scanned, synced, failed, pendingRetry, skippedCooldown, presentMarked, absentMarked }
 }
 
 export const runZoomJobs = async ({

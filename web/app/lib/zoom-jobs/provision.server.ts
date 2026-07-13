@@ -111,6 +111,7 @@ const toDisplayName = (profile: Pick<ProfileRow, 'firstname' | 'surname'>) => {
 }
 
 const normalizeEmail = (value: string | null) => (value ?? '').trim().toLowerCase()
+const nowMs = () => Date.now()
 
 const wait = async (ms: number) => {
   if (ms <= 0) return
@@ -282,8 +283,16 @@ const ensureAttendanceRowsForClass = async (classId: string, profileIds: string[
   if (!missingProfileIds.length) return 0
 
   const rows = missingProfileIds.map(profileId => ({ class_id: classId, profile_id: profileId }))
+  const upsertStartedAt = nowMs()
   const { error } = await adminClient.from('class_attendance').upsert(rows, { onConflict: 'class_id,profile_id' })
   if (error) throw new Error(error.message)
+  console.info('[class-attendance][mutation]', {
+    source: 'zoom_provision',
+    mutation: 'ensure_attendance_rows',
+    classId,
+    rows: missingProfileIds.length,
+    duration_ms: nowMs() - upsertStartedAt,
+  })
 
   return missingProfileIds.length
 }
@@ -646,7 +655,15 @@ const ensureRegistrantsForClass = async ({
       }
 
       await adminClient.from('class_zoom_registrant').delete().eq('id', row.id)
+      const deleteAttendanceStartedAt = nowMs()
       await adminClient.from('class_attendance').delete().eq('class_id', classRow.id).eq('profile_id', profileId)
+      console.info('[class-attendance][mutation]', {
+        source: 'zoom_provision',
+        mutation: 'remove_stale_attendance_row',
+        classId: classRow.id,
+        profileId,
+        duration_ms: nowMs() - deleteAttendanceStartedAt,
+      })
       removed += 1
     }
   }
