@@ -4,7 +4,7 @@ import re
 import sys
 from collections import Counter
 
-EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-']+@([A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@([A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
 
 
 def main() -> None:

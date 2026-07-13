@@ -42,7 +42,8 @@ export default function TeamOverviewPage() {
                   <img
                     src={selectedGroup.stickerSrc}
                     alt={selectedGroup.label}
-                    className="h-[4.5rem] w-[4.5rem] shrink-0 object-contain"
+                    className="h-[4.5rem] w-[4.5rem] shrink-0 origin-center object-contain"
+                    style={selectedGroup.stickerScale ? { transform: `scale(${selectedGroup.stickerScale})` } : undefined}
                   />
                   <div className="max-w-[18rem]">
                     <h3 className="text-lg font-semibold leading-tight">{page.label}</h3>
@@ -65,7 +66,8 @@ export default function TeamOverviewPage() {
                 <img
                   src={section.stickerSrc}
                   alt={section.label}
-                  className="h-[4.5rem] w-[4.5rem] shrink-0 object-contain"
+                  className="h-[4.5rem] w-[4.5rem] shrink-0 origin-center object-contain"
+                  style={section.stickerScale ? { transform: `scale(${section.stickerScale})` } : undefined}
                 />
                 <div className="max-w-[18rem]">
                   <h2 className="text-lg font-semibold leading-tight">{section.label}</h2>
