@@ -382,6 +382,7 @@ export const TABLE_DEFINITIONS: Record<string, TableDefinition> = {
     select:
       'id, class_id, zoom_host_id, zoom_meeting_id, zoom_meeting_uuid, host_zoom_user_id, host_zoom_user_email, topic, start_time, duration_minutes, join_url, status, error_message, last_synced_at, created_at, updated_at',
     columns: [
+      'class_id',
       'class_display',
       'zoom_host_display',
       'status',

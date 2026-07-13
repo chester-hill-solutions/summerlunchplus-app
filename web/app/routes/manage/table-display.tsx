@@ -542,27 +542,15 @@ const personLinkForCell = (
   if (tableName === 'class-attendance' && column === 'class_display' && typeof row.class_id === 'string' && row.class_id) {
     return withReturnTo('/manage/class', { f_id: row.class_id })
   }
-  if (
-    tableName === 'class' &&
-    ['workshop_description', 'starts_at', 'ends_at', 'zoom_host_email'].includes(column)
-  ) {
+  if (tableName === 'class' && column === 'workshop_description') {
     const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
-    const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''
-    const endsAt = typeof row.ends_at === 'string' ? row.ends_at : ''
-    return withReturnTo('/manage/class-attendance', {
-      ...(workshopDescription ? { f_workshop_description: workshopDescription } : {}),
-      ...(startsAt ? { f_class_starts_at: formatTimestamp(startsAt) } : {}),
-      ...(endsAt ? { f_class_ends_at: formatTimestamp(endsAt) } : {}),
+    return withReturnTo('/manage/workshop', {
+      ...(workshopDescription ? { f_description: workshopDescription } : {}),
     })
   }
   if (tableName === 'class' && column === 'step_meeting' && typeof row.id === 'string' && row.id) {
-    const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
-    const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''
-    const endsAt = typeof row.ends_at === 'string' ? row.ends_at : ''
     return withReturnTo('/manage/class-zoom-meeting', {
-      ...(workshopDescription ? { f_workshop_description: workshopDescription } : {}),
-      ...(startsAt ? { f_class_starts_at: formatTimestamp(startsAt) } : {}),
-      ...(endsAt ? { f_class_ends_at: formatTimestamp(endsAt) } : {}),
+      f_class_id: String(row.id),
     })
   }
   if (tableName === 'class' && column === 'step_registrants' && typeof row.id === 'string' && row.id) {

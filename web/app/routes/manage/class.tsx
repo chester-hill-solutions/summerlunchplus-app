@@ -332,7 +332,7 @@ export async function loader(args: Route.LoaderArgs) {
       zoom_end_at: { label: 'Zoom End (UTC)' },
       zoom_schedule_match: { label: 'Zoom Time Check', filterable: true },
       sync_class: { label: 'Sync', filterable: false },
-      zoom_host_email: { label: 'Zoom Host', filterable: true },
+      zoom_host_email: { label: 'Zoom Host', filterable: true, fitContentOnLoad: true },
       zoom_join_url: { label: 'Zoom Join Link', truncate: true },
     },
   }
