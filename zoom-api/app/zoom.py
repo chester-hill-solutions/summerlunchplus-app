@@ -1,5 +1,5 @@
 from base64 import b64encode
-from time import monotonic
+from time import monotonic, sleep
 from urllib.parse import quote
 
 import httpx
@@ -20,15 +20,55 @@ class ZoomClient:
         self._token: str | None = None
         self._token_expires_at: float = 0.0
 
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict | None = None,
+        json: dict | None = None,
+        headers: dict | None = None,
+        retryable: bool,
+    ) -> httpx.Response:
+        max_retries = 2
+        retryable_status_codes = {429, 500, 502, 503, 504}
+        attempt = 0
+
+        while True:
+            try:
+                request_func = getattr(httpx, method.lower())
+                response = request_func(
+                    url,
+                    params=params,
+                    json=json,
+                    headers=headers,
+                    timeout=20.0,
+                )
+            except httpx.RequestError:
+                if not retryable or attempt >= max_retries:
+                    raise
+                attempt += 1
+                sleep(float(attempt))
+                continue
+
+            if retryable and response.status_code in retryable_status_codes and attempt < max_retries:
+                attempt += 1
+                sleep(float(attempt))
+                continue
+
+            return response
+
     def _get_token(self) -> str:
         if self._token and monotonic() < self._token_expires_at:
             return self._token
 
         credentials = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
-        response = httpx.post(
+        response = self._request(
+            "POST",
             ZOOM_OAUTH_URL,
             params={"grant_type": "account_credentials", "account_id": self.account_id},
             headers={"Authorization": f"Basic {credentials}"},
+            retryable=True,
         )
         response.raise_for_status()
         payload = response.json()
@@ -49,10 +89,12 @@ class ZoomClient:
             if next_page_token:
                 request_params["next_page_token"] = next_page_token
 
-            response = httpx.get(
+            response = self._request(
+                "GET",
                 f"{ZOOM_API_BASE}{path}",
                 params=request_params,
                 headers=self._headers(),
+                retryable=True,
             )
             response.raise_for_status()
             payload = response.json()
@@ -69,7 +111,7 @@ class ZoomClient:
             next_page_token = token.strip()
 
     def validate_credentials(self) -> dict:
-        r = httpx.get(f"{ZOOM_API_BASE}/users/me", headers=self._headers())
+        r = self._request("GET", f"{ZOOM_API_BASE}/users/me", headers=self._headers(), retryable=True)
         r.raise_for_status()
         return r.json()
 
@@ -100,7 +142,13 @@ class ZoomClient:
             user_id = host_zoom_user_email.strip()
 
         encoded_user_id = quote(user_id, safe="")
-        r = httpx.post(f"{ZOOM_API_BASE}/users/{encoded_user_id}/meetings", json=payload, headers=self._headers())
+        r = self._request(
+            "POST",
+            f"{ZOOM_API_BASE}/users/{encoded_user_id}/meetings",
+            json=payload,
+            headers=self._headers(),
+            retryable=False,
+        )
         r.raise_for_status()
         return r.json()
 
@@ -117,17 +165,21 @@ class ZoomClient:
             "start_time": start_time,
             "duration": duration,
         }
-        r = httpx.patch(
+        r = self._request(
+            "PATCH",
             f"{ZOOM_API_BASE}/meetings/{meeting_id}",
             json=payload,
             headers=self._headers(),
+            retryable=False,
         )
         r.raise_for_status()
 
     def delete_meeting(self, meeting_id: str) -> None:
-        r = httpx.delete(
+        r = self._request(
+            "DELETE",
             f"{ZOOM_API_BASE}/meetings/{meeting_id}",
             headers=self._headers(),
+            retryable=True,
         )
         r.raise_for_status()
 
@@ -135,10 +187,12 @@ class ZoomClient:
         results = []
         headers = self._headers()
         for person in registrants:
-            r = httpx.post(
+            r = self._request(
+                "POST",
                 f"{ZOOM_API_BASE}/meetings/{meeting_id}/registrants",
                 json=person,
                 headers=headers,
+                retryable=False,
             )
             r.raise_for_status()
             results.append(r.json())
@@ -146,9 +200,11 @@ class ZoomClient:
 
     def remove_registrant(self, meeting_id: str, registrant_id: str) -> dict:
         encoded_registrant_id = quote(registrant_id, safe="")
-        r = httpx.delete(
+        r = self._request(
+            "DELETE",
             f"{ZOOM_API_BASE}/meetings/{meeting_id}/registrants/{encoded_registrant_id}",
             headers=self._headers(),
+            retryable=True,
         )
         r.raise_for_status()
         return {"ok": True}

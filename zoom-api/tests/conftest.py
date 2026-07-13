@@ -8,6 +8,7 @@ os.environ.setdefault("API_KEY", "test-api-key")
 import pytest
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.main import app
 from app import cache as cache_module
 
@@ -18,6 +19,7 @@ API_KEY = "test-api-key"
 def clear_caches():
     cache_module._past_meetings_cache.clear()
     cache_module._participants_cache.clear()
+    main_module._zoom_client = None
     yield
 
 

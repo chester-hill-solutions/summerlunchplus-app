@@ -232,6 +232,23 @@ def test_list_past_meetings_paginates(client, headers):
     assert [meeting["id"] for meeting in payload["meetings"]] == ["111", "222"]
 
 
+def test_list_past_meetings_cache_stores_transformed_shape(client, headers):
+    with patch("app.main._zoom_client", None), \
+         patch("app.zoom.httpx.post", return_value=ok(TOKEN_RESP)) as mock_post, \
+         patch("app.zoom.httpx.get", return_value=ok(MEETINGS_RESP)) as mock_get, \
+         patch("app.main.transform_meetings", return_value={"meetings": [{"id": "normalized"}]}) as transform:
+        first = client.get("/meetings/past", headers=headers)
+        second = client.get("/meetings/past", headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["meetings"][0]["id"] == "normalized"
+    assert second.json()["meetings"][0]["id"] == "normalized"
+    assert transform.call_count == 1
+    assert mock_post.call_count == 1
+    assert mock_get.call_count == 1
+
+
 # ── GET /meetings/{uuid}/participants ─────────────────────────────────────────
 
 def test_get_participants_success(client, headers):
@@ -460,3 +477,17 @@ def test_remove_registrant_success(client, headers):
 
 def test_remove_registrant_missing_auth(client):
     assert client.delete("/meetings/99999/registrants/reg-abc").status_code == 401
+
+
+def test_zoom_client_retries_transient_network_errors(client, headers):
+    timeout = httpx.ConnectTimeout("timeout", request=httpx.Request("POST", "https://zoom.us/oauth/token"))
+
+    with patch("app.main._zoom_client", None), \
+         patch("app.zoom.httpx.post", side_effect=[timeout, ok(TOKEN_RESP)]) as mock_post, \
+         patch("app.zoom.httpx.get", return_value=ok(HOSTS_RESP)) as mock_get:
+        resp = client.get("/hosts", headers=headers)
+
+    assert resp.status_code == 200
+    assert resp.json()["users"][0]["email"] == "host1@example.com"
+    assert mock_post.call_count == 2
+    assert mock_get.call_count == 1
