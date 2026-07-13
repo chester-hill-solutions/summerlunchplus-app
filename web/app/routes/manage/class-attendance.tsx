@@ -202,10 +202,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   const url = new URL(request.url)
   const deferTable = url.searchParams.get('_deferTable') === '1'
+  const scopedClassId = (url.searchParams.get('scopeClassId') ?? '').trim()
+  const isScopedToSingleClass = scopedClassId.length > 0
   profile.mark('require_auth', {
     role: auth.claims.role,
     emailHint: auth.emailHint,
     deferTable,
+    scopedClassId: scopedClassId || null,
   })
 
   if (!deferTable) {
@@ -287,13 +290,28 @@ export async function loader({ request }: Route.LoaderArgs) {
       break
     }
   }
+
+  const scopedAttendanceRows = isScopedToSingleClass
+    ? attendanceRows.filter(row => row.class_id === scopedClassId)
+    : attendanceRows
+
+  if (isScopedToSingleClass) {
+    profile.mark('apply_class_scope', {
+      scopedClassId,
+      sourceRows: attendanceRows.length,
+      scopedRows: scopedAttendanceRows.length,
+    })
+  }
+
   profile.mark('fetch_class_attendance_rows', {
-    rowCount: attendanceRows.length,
+    rowCount: scopedAttendanceRows.length,
   })
 
-  const classIds = Array.from(new Set(attendanceRows.map(row => row.class_id).filter(Boolean)))
-  const profileIds = Array.from(new Set(attendanceRows.map(row => row.profile_id).filter(Boolean)))
-  const recordedByIds = Array.from(new Set(attendanceRows.map(row => row.recorded_by).filter((id): id is string => Boolean(id))))
+  const classIds = Array.from(new Set(scopedAttendanceRows.map(row => row.class_id).filter(Boolean)))
+  const profileIds = Array.from(new Set(scopedAttendanceRows.map(row => row.profile_id).filter(Boolean)))
+  const recordedByIds = Array.from(
+    new Set(scopedAttendanceRows.map(row => row.recorded_by).filter((id): id is string => Boolean(id)))
+  )
 
   let giftCardSchemaAvailable = hasGiftCardSchema
   const classRows: ClassRow[] = []
@@ -565,7 +583,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     })
   }
 
-  const rows = attendanceRows.map(row => {
+  const rows = scopedAttendanceRows.map(row => {
     const classRow = classById.get(row.class_id) ?? null
     const workshop = classRow?.workshop_id ? workshopById.get(classRow.workshop_id) ?? null : null
     const profile = profileById.get(row.profile_id) ?? null
@@ -748,6 +766,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     profileIdCount: profileIds.length,
     emailHint: auth.emailHint,
     role: auth.claims.role,
+    scopedClassId: scopedClassId || null,
   })
 
   return {
