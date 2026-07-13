@@ -3299,6 +3299,7 @@ export default function TableDisplay({
                         typeof maxChars === 'number' && maxChars > 0 && cellValue.length > maxChars
                           ? `${cellValue.slice(0, maxChars)}...`
                           : cellValue
+                      const linkClassName = `underline decoration-dotted underline-offset-2 hover:text-primary ${extraCellClass}`.trim()
                       const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard)
                       const hoverCardCellId = `row-${absoluteRowIndex}-col-${column}`
 
@@ -3311,7 +3312,7 @@ export default function TableDisplay({
                             }).toString(),
                           }}
                           onClick={event => event.stopPropagation()}
-                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                          className={linkClassName}
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                             {displayValue}
@@ -3326,7 +3327,7 @@ export default function TableDisplay({
                             }).toString(),
                           }}
                           onClick={event => event.stopPropagation()}
-                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                          className={linkClassName}
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                             {displayValue}
@@ -3336,7 +3337,7 @@ export default function TableDisplay({
                         <Link
                           to={personLink}
                           onClick={event => event.stopPropagation()}
-                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                          className={linkClassName}
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                             {displayValue}
@@ -3348,7 +3349,7 @@ export default function TableDisplay({
                           target="_blank"
                           rel="noreferrer"
                           onClick={event => event.stopPropagation()}
-                          className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                          className={linkClassName}
                         >
                           <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                             {displayValue}

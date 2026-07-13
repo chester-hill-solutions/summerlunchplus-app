@@ -49,7 +49,21 @@ export async function loader(args: Route.LoaderArgs) {
       columnMeta: {
         workshop_description: { label: 'Workshop', filterable: true, fitContentOnLoad: true },
         starts_at: { label: 'Timestamp', filterable: true, fitContentOnLoad: true },
-        step_meeting: { label: 'Meeting', filterable: true },
+        step_meeting: {
+          label: 'Meeting',
+          filterable: true,
+          hoverCard: {
+            titleField: 'zoom_topic',
+            titleFallback: 'Zoom meeting details',
+            fields: [
+              { label: 'Meeting ID', field: 'class_zoom_meeting_display', fallback: 'Missing' },
+              { label: 'Start (UTC)', field: 'zoom_start_at', fallback: 'Missing' },
+              { label: 'End (UTC)', field: 'zoom_end_at', fallback: 'Missing' },
+              { label: 'Time check', field: 'zoom_schedule_match', fallback: 'Missing' },
+              { label: 'Join URL', field: 'zoom_join_url', fallback: 'Missing' },
+            ],
+          },
+        },
         step_registrants: { label: 'Zoom Registrants', filterable: true },
         step_attendance_rows: { label: 'Attendance Rows', filterable: true },
         step_reminder: { label: 'Reminder', filterable: true },
@@ -176,7 +190,9 @@ export async function loader(args: Route.LoaderArgs) {
   const progressLabel = ({ done, total }: { done: number; total: number }) => `${done}/${total}`
 
   const progressCellClass = ({ done, total }: { done: number; total: number }) =>
-    done >= total ? 'font-semibold text-[var(--brand-green)]' : 'font-semibold text-destructive'
+    done >= total
+      ? 'font-semibold !text-[var(--brand-green)] visited:!text-[var(--brand-green)] hover:!text-[var(--brand-green)]'
+      : 'font-semibold !text-destructive visited:!text-destructive hover:!text-destructive'
 
   const zoomScheduleMatchLabel = ({
     classStartsAt,
@@ -291,7 +307,7 @@ export async function loader(args: Route.LoaderArgs) {
     displayColumns.splice(meetingColumnIndex, 0, 'step_attendance_rows')
   }
 
-  displayColumns.push('zoom_topic', 'zoom_start_at', 'zoom_end_at', 'zoom_schedule_match', 'ends_at', 'sync_class')
+  displayColumns.push('ends_at', 'sync_class')
 
   const fitAllColumnsMeta = Object.fromEntries(
     displayColumns.map(column => [
@@ -328,15 +344,25 @@ export async function loader(args: Route.LoaderArgs) {
         preferredWidth: 220,
         fitContentOnLoad: true,
       },
-      step_meeting: { label: 'Meeting', filterable: true },
+      step_meeting: {
+        label: 'Meeting',
+        filterable: true,
+        hoverCard: {
+          titleField: 'zoom_topic',
+          titleFallback: 'Zoom meeting details',
+          fields: [
+            { label: 'Meeting ID', field: 'class_zoom_meeting_display', fallback: 'Missing' },
+            { label: 'Start (UTC)', field: 'zoom_start_at', fallback: 'Missing' },
+            { label: 'End (UTC)', field: 'zoom_end_at', fallback: 'Missing' },
+            { label: 'Time check', field: 'zoom_schedule_match', fallback: 'Missing' },
+            { label: 'Join URL', field: 'zoom_join_url', fallback: 'Missing' },
+          ],
+        },
+      },
       step_registrants: { label: 'Zoom Registrants', filterable: true },
       step_attendance_rows: { label: 'Attendance Rows', filterable: true },
       step_reminder: { label: 'Reminder', filterable: true },
       step_attendance: { label: 'Attendance Sync', filterable: true },
-      zoom_topic: { label: 'Zoom Topic', truncate: true, minWidth: 170, preferredWidth: 240 },
-      zoom_start_at: { label: 'Zoom Start (UTC)' },
-      zoom_end_at: { label: 'Zoom End (UTC)' },
-      zoom_schedule_match: { label: 'Zoom Time Check', filterable: true },
       sync_class: { label: 'Sync', filterable: false },
       zoom_host_email: { label: 'Zoom Host', filterable: true, fitContentOnLoad: true },
       zoom_join_url: { label: 'Zoom Join Link', truncate: true },
