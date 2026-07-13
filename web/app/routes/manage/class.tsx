@@ -263,6 +263,8 @@ export async function loader(args: Route.LoaderArgs) {
     const attendanceRowsProgress = { done: attendanceRowsReady, total: expected }
     const remindersProgress = { done: remindersSent, total: expected }
 
+    const meetingComplete = Boolean(meeting && meeting.status === 'created' && meeting.join_url)
+
     return {
       ...row,
       class_zoom_meeting_id: meeting?.id ?? '',
@@ -279,7 +281,7 @@ export async function loader(args: Route.LoaderArgs) {
       sync_class: 'Sync class',
       zoom_host_email: meeting?.host_zoom_user_email ?? row.zoom_host_email ?? '',
       zoom_join_url: meeting?.join_url ?? row.zoom_join_url ?? '',
-      step_meeting: meeting && meeting.status === 'created' && meeting.join_url ? 'Done' : 'Missing',
+      step_meeting: meetingComplete ? meeting?.start_time ?? 'Done' : 'Missing',
       step_registrants: progressLabel(registrantsProgress),
       step_attendance_rows: progressLabel(attendanceRowsProgress),
       step_reminder: progressLabel(remindersProgress),

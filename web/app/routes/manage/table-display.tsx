@@ -301,6 +301,30 @@ const formatDateOnly = (value: string) => {
   return new Intl.DateTimeFormat(TABLE_DISPLAY_LOCALE, { dateStyle: 'medium' }).format(date)
 }
 
+const formatCompactLocalDateTime = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  const parts = new Intl.DateTimeFormat(TABLE_DISPLAY_LOCALE, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find(item => item.type === type)?.value ?? ''
+
+  const month = part('month')
+  const day = part('day')
+  const hour = part('hour')
+  const minute = part('minute')
+  if (!month || !day || !hour || !minute) return value
+
+  return `${month}-${day} ${hour}-${minute}`
+}
+
 const isTimestampLabelValue = (value: unknown): value is TimestampLabelValue => {
   if (!value || typeof value !== 'object') return false
   return 'timestamp' in value && 'label' in value
@@ -329,6 +353,9 @@ const getCellValue = (column: string, row: Record<string, unknown>, tableName?: 
       return formatDateOnly(value)
     }
     return formatTimestamp(value)
+  }
+  if (tableName === 'class' && column === 'step_meeting' && typeof value === 'string' && value) {
+    return formatCompactLocalDateTime(value)
   }
   return (value ?? '').toString()
 }
