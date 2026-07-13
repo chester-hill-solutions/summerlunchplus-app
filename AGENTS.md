@@ -5,6 +5,12 @@
 - `scheduler/` and `zoom-api/` are separate deployables with separate command sets.
 - Before editing `zoom-api/`, read `zoom-api/CLAUDE.md` and follow its stricter workflow.
 
+## Git/Worktree Flow
+- Treat `main` as read-only; do all work on `sai/<topic>` branches.
+- Create all worktrees under `/Users/saihaansyed/chs/prj/summerlunchplus-app/worktrees/`.
+- Before rebasing a worktree branch back into `sai/main`, first update `sai/main` with latest changes (`git pull --rebase`) and then rebase the worktree branch onto that updated `sai/main`.
+- After rebasing, fast-forward merge into `sai/main` (no merge commits).
+
 ## Commands (Verified)
 - Root `package.json` has no scripts; do not run `npm run ...` from repo root.
 - Web (`web/`): `npm ci`, `npm run dev`, `npm run typecheck`, `npm run build && npm run start`, `npm run test`.
