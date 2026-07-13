@@ -66,7 +66,7 @@ const releaseZoomRegistrantReminderLock = async (registrantId: string) => {
   return data === true
 }
 
-const REPROVISION_HORIZON_MINUTES = 36 * 60
+const REPROVISION_HORIZON_MINUTES = 7 * 24 * 60
 const REMINDER_WINDOW_MINUTES = 2 * 60
 const POST_CLASS_FOLLOWUP_DELAY_HOURS = 24
 const RUNNING_SYNC_TIMEOUT_MINUTES = 20
@@ -185,7 +185,7 @@ const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
   }
 }
 
-const provisionWithin36h = async ({ now }: { now: Date }) => {
+const provisionWithin7d = async ({ now }: { now: Date }) => {
   const classIds = await getClassesInWindow({
     startsAt: toIso(now),
     endsAt: toIso(addMinutes(now, REPROVISION_HORIZON_MINUTES)),
@@ -1006,7 +1006,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
   })
 
   const attendanceRowBackfill = await backfillAttendanceRowsCoverage({ now })
-  const within36h = await provisionWithin36h({ now })
+  const within7d = await provisionWithin7d({ now })
   const hostReconciliation = await reconcileHostOverlaps({ now })
   const reminders = await sendReminderCoverage({ now, appOrigin })
   const postClassCameraOrPhotoFollowup = await sendPostClassCameraOrPhotoFollowupCoverage({ now })
@@ -1015,7 +1015,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
   console.info('[zoom-jobs] run completed', {
     runId: runId ?? null,
     ranAt: now.toISOString(),
-    within36hScanned: within36h.scanned,
+    within7dScanned: within7d.scanned,
     hostConflictsDetected: hostReconciliation.detected,
     reminderScanned: reminders.scannedClasses,
     postClassFollowupEligible: postClassCameraOrPhotoFollowup.eligible,
@@ -1031,7 +1031,7 @@ export const runZoomJobs = async ({ now = new Date(), appOrigin, runId }: { now?
     ok: true,
     runId: runId ?? null,
     ranAt: now.toISOString(),
-    provisionWithin36h: within36h,
+    provisionWithin7d: within7d,
     hostOverlapReconciliation: hostReconciliation,
     reminderCoverage: reminders,
     postClassCameraOrPhotoFollowup,
