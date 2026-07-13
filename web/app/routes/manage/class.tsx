@@ -39,9 +39,9 @@ export async function loader(args: Route.LoaderArgs) {
       columns: [
         'workshop_description',
         'starts_at',
+        'step_attendance_rows',
         'step_meeting',
         'step_registrants',
-        'step_attendance_rows',
         'step_reminder',
         'step_attendance',
       ],
@@ -49,11 +49,11 @@ export async function loader(args: Route.LoaderArgs) {
       columnMeta: {
         workshop_description: { label: 'Workshop', filterable: true, fitContentOnLoad: true },
         starts_at: { label: 'Timestamp', filterable: true, fitContentOnLoad: true },
-        step_meeting: { label: 'Step 1: Meeting', filterable: true },
-        step_registrants: { label: 'Step 2: Zoom Registrants', filterable: true },
-        step_attendance_rows: { label: 'Step 3: Attendance Rows', filterable: true },
-        step_reminder: { label: 'Step 4: Reminder', filterable: true },
-        step_attendance: { label: 'Step 5: Attendance Sync', filterable: true },
+        step_meeting: { label: 'Meeting', filterable: true },
+        step_registrants: { label: 'Zoom Registrants', filterable: true },
+        step_attendance_rows: { label: 'Attendance Rows', filterable: true },
+        step_reminder: { label: 'Reminder', filterable: true },
+        step_attendance: { label: 'Attendance Sync', filterable: true },
       },
     }
   }
@@ -173,12 +173,10 @@ export async function loader(args: Route.LoaderArgs) {
     registrantsByClassId.set(registrant.class_id, bucket)
   }
 
-  const statusLabel = ({ done, total }: { done: number; total: number }) => {
-    if (total <= 0) return 'N/A'
-    if (done >= total) return `Done (${done}/${total})`
-    if (done <= 0) return `Missing (0/${total})`
-    return `Partial (${done}/${total})`
-  }
+  const progressLabel = ({ done, total }: { done: number; total: number }) => `${done}/${total}`
+
+  const progressCellClass = ({ done, total }: { done: number; total: number }) =>
+    done >= total ? 'font-semibold text-[var(--brand-green)]' : 'font-semibold text-destructive'
 
   const zoomScheduleMatchLabel = ({
     classStartsAt,
@@ -245,6 +243,10 @@ export async function loader(args: Route.LoaderArgs) {
       attendanceStep = 'Failed'
     }
 
+    const registrantsProgress = { done: registrantsReady, total: expected }
+    const attendanceRowsProgress = { done: attendanceRowsReady, total: expected }
+    const remindersProgress = { done: remindersSent, total: expected }
+
     return {
       ...row,
       class_zoom_meeting_id: meeting?.id ?? '',
@@ -262,10 +264,16 @@ export async function loader(args: Route.LoaderArgs) {
       zoom_host_email: meeting?.host_zoom_user_email ?? row.zoom_host_email ?? '',
       zoom_join_url: meeting?.join_url ?? row.zoom_join_url ?? '',
       step_meeting: meeting && meeting.status === 'created' && meeting.join_url ? 'Done' : 'Missing',
-      step_registrants: statusLabel({ done: registrantsReady, total: expected }),
-      step_attendance_rows: statusLabel({ done: attendanceRowsReady, total: expected }),
-      step_reminder: statusLabel({ done: remindersSent, total: expected }),
+      step_registrants: progressLabel(registrantsProgress),
+      step_attendance_rows: progressLabel(attendanceRowsProgress),
+      step_reminder: progressLabel(remindersProgress),
       step_attendance: attendanceStep,
+      _cell_class_by_column: {
+        ...(row._cell_class_by_column && typeof row._cell_class_by_column === 'object' ? row._cell_class_by_column : {}),
+        step_registrants: progressCellClass(registrantsProgress),
+        step_attendance_rows: progressCellClass(attendanceRowsProgress),
+        step_reminder: progressCellClass(remindersProgress),
+      },
     }
   })
 
@@ -277,12 +285,10 @@ export async function loader(args: Route.LoaderArgs) {
       column !== 'ends_at'
   )
 
-  const displayColumns: string[] = []
-  for (const column of baseDisplayColumns) {
-    displayColumns.push(column)
-    if (column === 'step_registrants') {
-      displayColumns.push('step_attendance_rows')
-    }
+  const displayColumns = [...baseDisplayColumns]
+  const meetingColumnIndex = displayColumns.indexOf('step_meeting')
+  if (meetingColumnIndex !== -1) {
+    displayColumns.splice(meetingColumnIndex, 0, 'step_attendance_rows')
   }
 
   displayColumns.push('zoom_topic', 'zoom_start_at', 'zoom_end_at', 'zoom_schedule_match', 'ends_at', 'sync_class')
@@ -322,11 +328,11 @@ export async function loader(args: Route.LoaderArgs) {
         preferredWidth: 220,
         fitContentOnLoad: true,
       },
-      step_meeting: { label: 'Step 1: Meeting', filterable: true },
-      step_registrants: { label: 'Step 2: Zoom Registrants', filterable: true },
-      step_attendance_rows: { label: 'Step 3: Attendance Rows', filterable: true },
-      step_reminder: { label: 'Step 4: Reminder', filterable: true },
-      step_attendance: { label: 'Step 5: Attendance Sync', filterable: true },
+      step_meeting: { label: 'Meeting', filterable: true },
+      step_registrants: { label: 'Zoom Registrants', filterable: true },
+      step_attendance_rows: { label: 'Attendance Rows', filterable: true },
+      step_reminder: { label: 'Reminder', filterable: true },
+      step_attendance: { label: 'Attendance Sync', filterable: true },
       zoom_topic: { label: 'Zoom Topic', truncate: true, minWidth: 170, preferredWidth: 240 },
       zoom_start_at: { label: 'Zoom Start (UTC)' },
       zoom_end_at: { label: 'Zoom End (UTC)' },
