@@ -116,6 +116,51 @@ export type Database = {
           },
         ]
       }
+      class_attendance_audit: {
+        Row: {
+          actor_role: string | null
+          actor_user_id: string | null
+          changed_fields: Json
+          class_attendance_id: string | null
+          class_id: string | null
+          created_at: string
+          event_type: string
+          id: string
+          profile_id: string | null
+          recorded_by_after: string | null
+          recorded_by_before: string | null
+          source: string
+        }
+        Insert: {
+          actor_role?: string | null
+          actor_user_id?: string | null
+          changed_fields?: Json
+          class_attendance_id?: string | null
+          class_id?: string | null
+          created_at?: string
+          event_type: string
+          id?: string
+          profile_id?: string | null
+          recorded_by_after?: string | null
+          recorded_by_before?: string | null
+          source: string
+        }
+        Update: {
+          actor_role?: string | null
+          actor_user_id?: string | null
+          changed_fields?: Json
+          class_attendance_id?: string | null
+          class_id?: string | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          profile_id?: string | null
+          recorded_by_after?: string | null
+          recorded_by_before?: string | null
+          source?: string
+        }
+        Relationships: []
+      }
       class_zoom_meeting: {
         Row: {
           class_id: string
