@@ -150,6 +150,7 @@ export type LoaderData = {
   enableCellClickFilter?: boolean
   columnMeta?: Record<string, {
     label?: string
+    headerTooltip?: string
     truncate?: boolean
     filterable?: boolean
     numeric?: boolean
@@ -2913,6 +2914,7 @@ export default function TableDisplay({
                 return (
                   <th
                     key={`head-${column}`}
+                    title={columnMeta[column]?.headerTooltip}
                     className={`${isNumericColumn(column) ? 'w-24' : ''} relative px-4 py-2 text-left ${hasStickyTopBar ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''}`}
                   >
                     <div className="relative flex items-center gap-1">

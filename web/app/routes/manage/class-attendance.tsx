@@ -915,8 +915,18 @@ export async function loader({ request }: Route.LoaderArgs) {
       status: { label: 'Attendance', filterable: true },
       latest_geo: { label: 'Geo', filterable: true, truncate: true, fitContentOnLoad: true },
       giftcard_display: { label: 'Provider', filterable: true, truncate: true },
-      gift_card_allocated: { label: 'Gift allocated', filterable: true },
-      gift_card_available: { label: 'Gift available', filterable: true },
+      gift_card_allocated: {
+        label: 'Gift allocated',
+        filterable: true,
+        headerTooltip:
+          'Gift allocated is true when a gift_card_allocation row exists for this class and profile. Allocation can happen from the runner after attendance evidence (camera_on=true or photo_status=accepted), or manually via Allocate in this table.',
+      },
+      gift_card_available: {
+        label: 'Gift available',
+        filterable: true,
+        headerTooltip:
+          'Gift available is true only when a gift has been allocated, the attendance row is not blocked, and release timing has passed. Release timing comes from allocation metadata/class timing and can be overridden by the Gift available dropdown.',
+      },
       gift_card_availability_reason: { label: 'Gift availability reason', filterable: true, truncate: true },
       gift_card_release_source: { label: 'Gift release source', filterable: true },
       gift_card_effective_release_at: { label: 'Gift effective release at', filterable: true },
