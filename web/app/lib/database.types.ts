@@ -2377,7 +2377,7 @@ export type Database = {
         | "instructor"
         | "student"
         | "guardian"
-      class_attendance_photo_status: "uploaded" | "accepted" | "rejected"
+      class_attendance_photo_status: "uploaded" | "accepted" | "rejected" | "expired"
       class_attendance_status: "unknown" | "present" | "absent"
       email_draft_channel: "transactional" | "auth"
       email_draft_status: "draft" | "published" | "archived"
@@ -2632,7 +2632,7 @@ export const Constants = {
         "student",
         "guardian",
       ],
-      class_attendance_photo_status: ["uploaded", "accepted", "rejected"],
+      class_attendance_photo_status: ["uploaded", "accepted", "rejected", "expired"],
       class_attendance_status: ["unknown", "present", "absent"],
       email_draft_channel: ["transactional", "auth"],
       email_draft_status: ["draft", "published", "archived"],

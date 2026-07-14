@@ -73,6 +73,7 @@ type LoaderData = {
   giftCardLinkByClass: Record<string, string>
   selectedProfileIdByClass: Record<string, string>
   selectedPhotoStatusByClass: Record<string, string>
+  activePhotoUploadClassIdByWorkshop: Record<string, string>
   nextClass:
       | {
         classId: string
@@ -114,6 +115,8 @@ const personName = (profile: { firstname: string | null; surname: string | null;
 
 const shouldLogHomeInstrumentation =
   process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+
+const PHOTO_UPLOAD_GRACE_MS = 15 * 60_000
 
 const sendInvite = async ({
   email,
@@ -273,6 +276,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       giftCardLinkByClass: {},
       selectedProfileIdByClass: {},
       selectedPhotoStatusByClass: {},
+      activePhotoUploadClassIdByWorkshop: {},
       nextClass: null,
     } satisfies LoaderData
   }
@@ -419,6 +423,60 @@ export async function loader({ request }: Route.LoaderArgs) {
     return acc
   }, {})
 
+  const activePhotoUploadClassIdByWorkshop = classes.reduce<Record<string, string>>((acc, classRow) => {
+    if (!classRow.workshop_id) return acc
+    if (!approvedWorkshopIds.has(classRow.workshop_id)) return acc
+    if (!selectedProfileIdByClass[classRow.id]) return acc
+
+    const endsAtMs = new Date(classRow.ends_at).getTime()
+    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + PHOTO_UPLOAD_GRACE_MS
+    if (!closed) return acc
+
+    const existingClassId = acc[classRow.workshop_id]
+    if (!existingClassId) {
+      acc[classRow.workshop_id] = classRow.id
+      return acc
+    }
+
+    const existingEndsAtMs = new Date(classEndsAtById[existingClassId] ?? '').getTime()
+    if (!Number.isFinite(existingEndsAtMs) || endsAtMs > existingEndsAtMs) {
+      acc[classRow.workshop_id] = classRow.id
+    }
+
+    return acc
+  }, {})
+
+  const selectedPhotoStatusByClassFinal = { ...selectedPhotoStatusByClass }
+  const staleAttendancePairs = classes
+    .map(classRow => {
+      if (!classRow.workshop_id) return null
+      const selectedProfileId = selectedProfileIdByClass[classRow.id]
+      if (!selectedProfileId) return null
+
+      const activeClassId = activePhotoUploadClassIdByWorkshop[classRow.workshop_id]
+      if (!activeClassId || activeClassId === classRow.id) return null
+
+      const currentStatus = selectedPhotoStatusByClassFinal[classRow.id]
+      if (currentStatus) return null
+
+      selectedPhotoStatusByClassFinal[classRow.id] = 'expired'
+      return { classId: classRow.id, profileId: selectedProfileId }
+    })
+    .filter((row): row is { classId: string; profileId: string } => Boolean(row))
+
+  if (staleAttendancePairs.length) {
+    await Promise.all(
+      staleAttendancePairs.map(({ classId, profileId }) =>
+        adminClient
+          .from('class_attendance')
+          .update({ photo_status: 'expired' })
+          .eq('class_id', classId)
+          .eq('profile_id', profileId)
+          .is('photo_status', null)
+      )
+    )
+  }
+
   const { data: allocationRowsRaw } = classIds.length
     ? await adminClient
         .from('gift_card_allocation')
@@ -508,7 +566,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     joinUrlByClass,
     giftCardLinkByClass: giftCardLinkByClassFinal,
     selectedProfileIdByClass,
-    selectedPhotoStatusByClass,
+    selectedPhotoStatusByClass: selectedPhotoStatusByClassFinal,
+    activePhotoUploadClassIdByWorkshop,
     nextClass,
   } satisfies LoaderData
 }
@@ -823,6 +882,7 @@ export default function Home() {
     giftCardLinkByClass,
     selectedProfileIdByClass,
     selectedPhotoStatusByClass,
+    activePhotoUploadClassIdByWorkshop,
     nextClass,
   } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
@@ -1086,8 +1146,9 @@ export default function Home() {
   }) => {
     const now = Date.now()
     const endsAtMs = new Date(classRow.ends_at).getTime()
-    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + 15 * 60_000
+    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + PHOTO_UPLOAD_GRACE_MS
     const selectedProfileId = selectedProfileIdByClass[classRow.id]
+    const activeClassId = classRow.workshop_id ? activePhotoUploadClassIdByWorkshop[classRow.workshop_id] : undefined
     const photoStatus =
       photoStatusOverrideByClass[classRow.id] ?? selectedPhotoStatusByClass[classRow.id] ?? ''
 
@@ -1101,10 +1162,20 @@ export default function Home() {
           ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
           : photoStatus === 'rejected'
             ? 'border-destructive/40 bg-destructive/10 text-destructive'
+            : photoStatus === 'expired'
+              ? 'border-slate-300 bg-slate-100 text-slate-700'
             : 'border-amber-300 bg-amber-50 text-amber-700'
       return (
         <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusToneClass}`}>
           {photoStatus}
+        </span>
+      )
+    }
+
+    if (activeClassId && activeClassId !== classRow.id) {
+      return (
+        <span className="inline-flex rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+          expired
         </span>
       )
     }
