@@ -25,6 +25,8 @@ import {
 } from '@/lib/admin-form-answers.server'
 
 const isLikelyEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+const shouldLogWorkshopEnrollmentInstrumentation =
+  process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
 
 const parseEnrollmentField = (
   formData: FormData,
@@ -52,6 +54,7 @@ const parseEnrollmentField = (
 }
 
 export async function loader(args: Route.LoaderArgs) {
+  const startedAt = Date.now()
   const profile = createLoaderProfile({
     name: 'workshop_enrollment_loader',
     request: args.request,
@@ -59,6 +62,15 @@ export async function loader(args: Route.LoaderArgs) {
 
   const url = new URL(args.request.url)
   const deferTable = url.searchParams.get('_deferTable') === '1'
+  if (shouldLogWorkshopEnrollmentInstrumentation) {
+    console.info('[manage-workshop-enrollment-loader]', {
+      event: 'start',
+      at: new Date().toISOString(),
+      pathname: url.pathname,
+      search: url.search,
+      deferTable,
+    })
+  }
   profile.mark('defer_table_mode', {
     deferTable,
   })
@@ -98,6 +110,15 @@ export async function loader(args: Route.LoaderArgs) {
       emailHint: auth.emailHint,
       role: auth.claims.role,
     })
+    if (shouldLogWorkshopEnrollmentInstrumentation) {
+      console.info('[manage-workshop-enrollment-loader]', {
+        event: 'shell_complete',
+        at: new Date().toISOString(),
+        pathname: url.pathname,
+        role: auth.claims.role,
+        durationMs: Date.now() - startedAt,
+      })
+    }
     return shell
   }
 
@@ -150,6 +171,16 @@ export async function loader(args: Route.LoaderArgs) {
     giftCardOptionCount: giftCardOptions.length,
     districtOptionCount: federalDistrictOptions.length,
   })
+  if (shouldLogWorkshopEnrollmentInstrumentation) {
+    console.info('[manage-workshop-enrollment-loader]', {
+      event: 'data_complete',
+      at: new Date().toISOString(),
+      pathname: url.pathname,
+      rowCount: result.rows.length,
+      totalRows: result.totalRows ?? result.rows.length,
+      durationMs: Date.now() - startedAt,
+    })
+  }
 
   return result
 }

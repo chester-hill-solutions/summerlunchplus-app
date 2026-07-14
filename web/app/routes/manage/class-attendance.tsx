@@ -133,6 +133,8 @@ type GiftCardClickRow = {
 const IN_CLAUSE_BATCH_SIZE = 150
 const CLASS_ATTENDANCE_FETCH_BATCH_SIZE = 1000
 const RELATED_FETCH_BATCH_SIZE = 1000
+const shouldLogClassAttendanceInstrumentation =
+  process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
 const nowMs = () => Date.now()
 
 const isSchemaMismatchError = (error: { code?: string | null; message?: string | null } | null) => {
@@ -195,6 +197,7 @@ const fallbackProfileHoverContext = {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const startedAt = Date.now()
   const profile = createLoaderProfile({
     name: 'class_attendance_loader',
     request,
@@ -203,6 +206,17 @@ export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   const url = new URL(request.url)
   const deferTable = url.searchParams.get('_deferTable') === '1'
+  if (shouldLogClassAttendanceInstrumentation) {
+    console.info('[manage-class-attendance-loader]', {
+      event: 'start',
+      at: new Date().toISOString(),
+      pathname: url.pathname,
+      search: url.search,
+      role: auth.claims.role,
+      emailHint: auth.emailHint,
+      deferTable,
+    })
+  }
   const scopedClassId = (url.searchParams.get('scopeClassId') ?? '').trim()
   const isScopedToSingleClass = scopedClassId.length > 0
   profile.mark('require_auth', {
@@ -247,6 +261,15 @@ export async function loader({ request }: Route.LoaderArgs) {
       emailHint: auth.emailHint,
       role: auth.claims.role,
     })
+    if (shouldLogClassAttendanceInstrumentation) {
+      console.info('[manage-class-attendance-loader]', {
+        event: 'shell_complete',
+        at: new Date().toISOString(),
+        pathname: url.pathname,
+        role: auth.claims.role,
+        durationMs: Date.now() - startedAt,
+      })
+    }
     return shell
   }
 
@@ -780,6 +803,17 @@ export async function loader({ request }: Route.LoaderArgs) {
     role: auth.claims.role,
     scopedClassId: scopedClassId || null,
   })
+  if (shouldLogClassAttendanceInstrumentation) {
+    console.info('[manage-class-attendance-loader]', {
+      event: 'data_complete',
+      at: new Date().toISOString(),
+      pathname: url.pathname,
+      role: auth.claims.role,
+      rowCount: rows.length,
+      durationMs: Date.now() - startedAt,
+      scopedClassId: scopedClassId || null,
+    })
+  }
 
   return {
     label: 'Class attendance',
