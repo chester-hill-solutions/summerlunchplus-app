@@ -7,6 +7,7 @@ import type { Route } from './+types/home.class-photos.upload'
 
 const PHOTO_BUCKET = 'class-attendance-photos'
 const PHOTO_UPLOAD_GRACE_MS = 15 * 60_000
+const PHOTO_UPLOAD_WINDOW_MS = 7 * 24 * 60 * 60_000
 const nowMs = () => Date.now()
 
 const sanitizeFileName = (input: string) => {
@@ -82,25 +83,7 @@ export async function action({ request }: Route.ActionArgs) {
     )
   }
 
-  const { data: workshopClassesRaw, error: workshopClassesError } = await adminClient
-    .from('class')
-    .select('id, ends_at')
-    .eq('workshop_id', classRow.workshop_id)
-    .order('ends_at', { ascending: false })
-
-  if (workshopClassesError) {
-    return Response.json(
-      { error: workshopClassesError.message },
-      { status: 500, headers: auth.headers }
-    )
-  }
-
-  const latestClosedClass = (workshopClassesRaw ?? []).find(row => {
-    const endsAtMs = new Date(row.ends_at).getTime()
-    return Number.isFinite(endsAtMs) && now > endsAtMs + PHOTO_UPLOAD_GRACE_MS
-  })
-
-  if (!latestClosedClass || latestClosedClass.id !== classId) {
+  if (now > classEndMs + PHOTO_UPLOAD_GRACE_MS + PHOTO_UPLOAD_WINDOW_MS) {
     await adminClient
       .from('class_attendance')
       .update({ photo_status: 'expired' })
@@ -109,26 +92,9 @@ export async function action({ request }: Route.ActionArgs) {
       .is('photo_status', null)
 
     return Response.json(
-      { error: 'Photo upload is only available for the most recent closed class. This class upload window has expired.' },
+      { error: 'Photo upload is available for 7 days after class end. This class upload window has expired.' },
       { status: 409, headers: auth.headers }
     )
-  }
-
-  const staleClosedClassIds = (workshopClassesRaw ?? [])
-    .filter(row => row.id !== classId)
-    .filter(row => {
-      const endsAtMs = new Date(row.ends_at).getTime()
-      return Number.isFinite(endsAtMs) && now > endsAtMs + PHOTO_UPLOAD_GRACE_MS
-    })
-    .map(row => row.id)
-
-  if (staleClosedClassIds.length) {
-    await adminClient
-      .from('class_attendance')
-      .update({ photo_status: 'expired' })
-      .in('class_id', staleClosedClassIds)
-      .eq('profile_id', profileId)
-      .is('photo_status', null)
   }
 
   const { data: attendanceRow, error: attendanceError } = await adminClient

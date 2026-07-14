@@ -117,6 +117,7 @@ const shouldLogHomeInstrumentation =
   process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
 
 const PHOTO_UPLOAD_GRACE_MS = 15 * 60_000
+const PHOTO_UPLOAD_WINDOW_MS = 7 * 24 * 60 * 60_000
 
 const sendInvite = async ({
   email,
@@ -429,8 +430,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     if (!selectedProfileIdByClass[classRow.id]) return acc
 
     const endsAtMs = new Date(classRow.ends_at).getTime()
-    const closed = Number.isFinite(endsAtMs) && now > endsAtMs + PHOTO_UPLOAD_GRACE_MS
-    if (!closed) return acc
+    const withinUploadWindow =
+      Number.isFinite(endsAtMs) &&
+      now > endsAtMs + PHOTO_UPLOAD_GRACE_MS &&
+      now <= endsAtMs + PHOTO_UPLOAD_GRACE_MS + PHOTO_UPLOAD_WINDOW_MS
+    if (!withinUploadWindow) return acc
 
     const existingClassId = acc[classRow.workshop_id]
     if (!existingClassId) {
@@ -449,15 +453,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   const selectedPhotoStatusByClassFinal = { ...selectedPhotoStatusByClass }
   const staleAttendancePairs = classes
     .map(classRow => {
-      if (!classRow.workshop_id) return null
       const selectedProfileId = selectedProfileIdByClass[classRow.id]
       if (!selectedProfileId) return null
 
-      const activeClassId = activePhotoUploadClassIdByWorkshop[classRow.workshop_id]
-      if (!activeClassId || activeClassId === classRow.id) return null
-
       const currentStatus = selectedPhotoStatusByClassFinal[classRow.id]
       if (currentStatus) return null
+
+      const endsAtMs = new Date(classRow.ends_at).getTime()
+      const expired = Number.isFinite(endsAtMs) && now > endsAtMs + PHOTO_UPLOAD_GRACE_MS + PHOTO_UPLOAD_WINDOW_MS
+      if (!expired) return null
 
       selectedPhotoStatusByClassFinal[classRow.id] = 'expired'
       return { classId: classRow.id, profileId: selectedProfileId }
@@ -1147,8 +1151,8 @@ export default function Home() {
     const now = Date.now()
     const endsAtMs = new Date(classRow.ends_at).getTime()
     const closed = Number.isFinite(endsAtMs) && now > endsAtMs + PHOTO_UPLOAD_GRACE_MS
+    const expired = Number.isFinite(endsAtMs) && now > endsAtMs + PHOTO_UPLOAD_GRACE_MS + PHOTO_UPLOAD_WINDOW_MS
     const selectedProfileId = selectedProfileIdByClass[classRow.id]
-    const activeClassId = classRow.workshop_id ? activePhotoUploadClassIdByWorkshop[classRow.workshop_id] : undefined
     const photoStatus =
       photoStatusOverrideByClass[classRow.id] ?? selectedPhotoStatusByClass[classRow.id] ?? ''
 
@@ -1172,7 +1176,7 @@ export default function Home() {
       )
     }
 
-    if (activeClassId && activeClassId !== classRow.id) {
+    if (expired) {
       return (
         <span className="inline-flex rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
           expired
