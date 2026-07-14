@@ -2746,6 +2746,9 @@ export default function TableDisplay({
   const shouldHideOptionsList =
     (openFilterCacheEntry?.totalCount ?? 0) > FILTER_OPTION_MAX_VISIBLE_LIST && !hasFilterSearchQuery
   const canRenderFilterOptionsList = openFilterCacheEntry?.status === 'loaded' && !shouldHideOptionsList
+  const hasAnySelectionInCurrentFilterScope = canRenderFilterOptionsList
+    ? visibleFilterOptions.some(option => openFilterDraftValues.includes(option))
+    : openFilterDraftValues.length > 0
   const openFilterStatusText = isOpenFilterLoading
     ? 'Loading...'
     : shouldHideOptionsList
@@ -2763,10 +2766,10 @@ export default function TableDisplay({
     setOpenFilterDraft(next)
   }
 
-  const clearVisibleFilterOptions = () => {
+  const selectNoneForVisibleFilterOptions = () => {
     if (!openFilterColumn) return
     if (!canRenderFilterOptionsList) {
-      clearOpenFilter()
+      setOpenFilterDraft([])
       return
     }
     const current = openFilterDraftValues
@@ -4094,12 +4097,12 @@ export default function TableDisplay({
                 </button>
                 <button
                   type="button"
-                  onClick={clearVisibleFilterOptions}
-                  disabled={!canRenderFilterOptionsList && openFilterDraftValues.length === openFilterOptions.length}
-                  aria-label="Clear visible options"
+                  onClick={selectNoneForVisibleFilterOptions}
+                  disabled={!hasAnySelectionInCurrentFilterScope}
+                  aria-label="Select none for visible options"
                   className="rounded border border-input px-2 py-1 hover:bg-muted"
                 >
-                  Clear
+                  Select none
                 </button>
               </div>
 
