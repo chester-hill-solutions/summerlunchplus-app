@@ -17,7 +17,8 @@ create type public.class_attendance_status as enum (
 create type public.class_attendance_photo_status as enum (
   'uploaded',
   'accepted',
-  'rejected'
+  'rejected',
+  'expired'
 );
 
 create table public.semester (

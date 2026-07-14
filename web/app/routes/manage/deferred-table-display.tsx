@@ -11,6 +11,9 @@ type DeferredTableDisplayProps = {
   paginationActions?: ReactNode
 }
 
+const shouldLogDeferredTableInstrumentation =
+  import.meta.env.DEV || import.meta.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
+
 export default function DeferredTableDisplay({
   dataPath,
   fallbackData,
@@ -36,13 +39,44 @@ export default function DeferredTableDisplay({
   useEffect(() => {
     if (lastRequestedUrlRef.current === dataRequestUrl) return
     lastRequestedUrlRef.current = dataRequestUrl
+    if (shouldLogDeferredTableInstrumentation) {
+      console.info('[manage-deferred-table]', {
+        event: 'fetcher_load',
+        at: new Date().toISOString(),
+        routePath: location.pathname,
+        routeSearch: location.search,
+        dataRequestUrl,
+      })
+    }
     fetcher.load(dataRequestUrl)
   }, [dataRequestUrl, fetcher])
 
   useEffect(() => {
     if (!fetcher.data) return
     lastResolvedDataRef.current = fetcher.data
+    if (shouldLogDeferredTableInstrumentation) {
+      console.info('[manage-deferred-table]', {
+        event: 'fetcher_data',
+        at: new Date().toISOString(),
+        routePath: location.pathname,
+        routeSearch: location.search,
+        tableName: fetcher.data.tableName,
+        rowCount: Array.isArray(fetcher.data.rows) ? fetcher.data.rows.length : null,
+      })
+    }
   }, [fetcher.data])
+
+  useEffect(() => {
+    if (!shouldLogDeferredTableInstrumentation) return
+    console.info('[manage-deferred-table]', {
+      event: 'fetcher_state',
+      at: new Date().toISOString(),
+      routePath: location.pathname,
+      routeSearch: location.search,
+      fetcherState: fetcher.state,
+      dataRequestUrl,
+    })
+  }, [dataRequestUrl, fetcher.state, location.pathname, location.search])
 
   const resolvedData = fetcher.data ?? lastResolvedDataRef.current ?? fallbackData
   const data: LoaderData = {

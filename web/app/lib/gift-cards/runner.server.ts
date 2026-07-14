@@ -732,7 +732,7 @@ const allocateGiftCards = async (): Promise<AllocationSummary> => {
     class_id: string
     profile_id: string
     camera_on: boolean | null
-    photo_status: 'uploaded' | 'accepted' | 'rejected' | null
+    photo_status: 'uploaded' | 'accepted' | 'rejected' | 'expired' | null
     gift_card_blocked: boolean | null
     class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
     profile: { email: string | null } | Array<{ email: string | null }> | null
@@ -759,7 +759,7 @@ const allocateGiftCards = async (): Promise<AllocationSummary> => {
         class_id: string
         profile_id: string
         camera_on: boolean | null
-        photo_status: 'uploaded' | 'accepted' | 'rejected' | null
+        photo_status: 'uploaded' | 'accepted' | 'rejected' | 'expired' | null
         gift_card_blocked: boolean | null
         class: { starts_at: string | null; ends_at: string | null } | Array<{ starts_at: string | null; ends_at: string | null }> | null
         profile: { email: string | null } | Array<{ email: string | null }> | null

@@ -23,6 +23,8 @@ type ActionData = {
 
 const TEAM_ROLES = ['instructor', 'staff', 'manager', 'admin'] as const
 const TEAM_ROLE_SET = new Set<string>(TEAM_ROLES)
+const shouldLogTeamMembersInstrumentation =
+  process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
 
 const allowedInviteRolesFor = (role: string | null | undefined): string[] => {
   if (role === 'admin') return ['instructor', 'staff', 'manager', 'admin']
@@ -32,8 +34,26 @@ const allowedInviteRolesFor = (role: string | null | undefined): string[] => {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const startedAt = Date.now()
   const auth = await requireAuth(request)
+  if (shouldLogTeamMembersInstrumentation) {
+    console.info('[manage-team-members-loader]', {
+      event: 'start',
+      at: new Date().toISOString(),
+      pathname: new URL(request.url).pathname,
+      role: auth.claims.role,
+      emailHint: auth.emailHint,
+    })
+  }
   if (!isRoleAtLeast(auth.claims.role, 'instructor')) {
+    if (shouldLogTeamMembersInstrumentation) {
+      console.info('[manage-team-members-loader]', {
+        event: 'unauthorized',
+        at: new Date().toISOString(),
+        pathname: new URL(request.url).pathname,
+        role: auth.claims.role,
+      })
+    }
     throw new Response('Unauthorized', { status: 403, headers: auth.headers })
   }
 
@@ -49,7 +69,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Response(error.message, { status: 500, headers: auth.headers })
   }
 
-  return {
+  const result = {
     columns: ['role', 'email', 'firstname', 'surname', 'phone', 'postcode', 'password_set'],
     rows: (data ?? []).filter(row => TEAM_ROLE_SET.has(String(row.role ?? ''))),
     label: 'Team',
@@ -57,6 +77,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     role: auth.claims.role,
     allowedInviteRoles: allowedInviteRolesFor(auth.claims.role),
   }
+
+  if (shouldLogTeamMembersInstrumentation) {
+    console.info('[manage-team-members-loader]', {
+      event: 'complete',
+      at: new Date().toISOString(),
+      pathname: new URL(request.url).pathname,
+      role: auth.claims.role,
+      rowCount: result.rows.length,
+      durationMs: Date.now() - startedAt,
+    })
+  }
+
+  return result
 }
 
 export async function action({ request }: Route.ActionArgs) {

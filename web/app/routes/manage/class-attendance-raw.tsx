@@ -12,7 +12,7 @@ type RawAttendanceRow = {
   class_id: string
   profile_id: string
   status: 'unknown' | 'present' | 'absent' | null
-  photo_status: 'uploaded' | 'accepted' | 'rejected' | null
+  photo_status: 'uploaded' | 'accepted' | 'rejected' | 'expired' | null
   camera_on: boolean | null
   recorded_by: string | null
   created_at: string
