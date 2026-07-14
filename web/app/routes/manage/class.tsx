@@ -21,6 +21,23 @@ type ActionData = {
   classSyncError?: string
   classMeetingSuccess?: string
   classMeetingError?: string
+  classRecoverySuccess?: string
+  classRecoveryError?: string
+  classRecoveryResult?: {
+    classId: string
+    attendanceRowsEnsured: number
+    meetingCreated: boolean
+    meetingRecreated: boolean
+    registrantsCreated: number
+    registrantsUpdated: number
+    registrantsRemoved: number
+    registrantsSkipped: number
+    registrantFailureCount: number
+    lockWaitMs: number
+    skipped: boolean
+    skipReason: string | null
+    error: string | null
+  }
 }
 
 type ClassRow = Record<string, unknown> & {
@@ -28,6 +45,18 @@ type ClassRow = Record<string, unknown> & {
   workshop_id?: string | null
   starts_at?: string | null
   ends_at?: string | null
+}
+
+const IN_CLAUSE_BATCH_SIZE = 150
+const RELATED_FETCH_BATCH_SIZE = 1000
+
+const chunkArray = <T,>(items: T[], size: number) => {
+  if (size <= 0 || !items.length) return [] as T[][]
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
 }
 
 export async function loader(args: Route.LoaderArgs) {
@@ -86,25 +115,106 @@ export async function loader(args: Route.LoaderArgs) {
 
   const { supabase } = createClient(args.request)
 
-  const [{ data: meetings }, { data: registrants }, { data: enrollments }, { data: attendanceRows }] = await Promise.all([
-    supabase
-      .from('class_zoom_meeting')
-      .select('id, class_id, status, join_url, host_zoom_user_email, zoom_meeting_id, start_time, duration_minutes, topic')
-      .in('class_id', classIds),
-    supabase
-      .from('class_zoom_registrant')
-      .select('class_id, profile_id, zoom_registrant_id, zoom_join_url, last_sent_at')
-      .in('class_id', classIds),
-    workshopIds.length
-      ? supabase
+  const fetchMeetingsByClassId = async () => {
+    const meetings: Array<{
+      id: string
+      class_id: string
+      status: string
+      join_url: string | null
+      host_zoom_user_email: string | null
+      zoom_meeting_id: string | null
+      start_time: string | null
+      duration_minutes: number | null
+      topic: string | null
+    }> = []
+
+    for (const classIdChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+      const { data, error } = await supabase
+        .from('class_zoom_meeting')
+        .select('id, class_id, status, join_url, host_zoom_user_email, zoom_meeting_id, start_time, duration_minutes, topic')
+        .in('class_id', classIdChunk)
+      if (error) throw new Response(error.message, { status: 500 })
+      meetings.push(...((data ?? []) as typeof meetings))
+    }
+
+    return meetings
+  }
+
+  const fetchRegistrantsByClassId = async () => {
+    const registrants: Array<{
+      class_id: string
+      profile_id: string | null
+      zoom_registrant_id: string | null
+      zoom_join_url: string | null
+      last_sent_at: string | null
+    }> = []
+
+    for (const classIdChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+      for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
+        const { data, error } = await supabase
+          .from('class_zoom_registrant')
+          .select('class_id, profile_id, zoom_registrant_id, zoom_join_url, last_sent_at')
+          .in('class_id', classIdChunk)
+          .order('class_id', { ascending: true })
+          .order('profile_id', { ascending: true })
+          .range(offset, offset + RELATED_FETCH_BATCH_SIZE - 1)
+        if (error) throw new Response(error.message, { status: 500 })
+        const chunk = (data ?? []) as typeof registrants
+        registrants.push(...chunk)
+        if (chunk.length < RELATED_FETCH_BATCH_SIZE) break
+      }
+    }
+
+    return registrants
+  }
+
+  const fetchApprovedEnrollmentsByWorkshopId = async () => {
+    const enrollments: Array<{ workshop_id: string; profile_id: string | null; status: string }> = []
+    if (!workshopIds.length) return enrollments
+
+    for (const workshopIdChunk of chunkArray(workshopIds, IN_CLAUSE_BATCH_SIZE)) {
+      for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
+        const { data, error } = await supabase
           .from('workshop_enrollment')
           .select('workshop_id, profile_id, status')
-          .in('workshop_id', workshopIds)
+          .in('workshop_id', workshopIdChunk)
           .eq('status', 'approved')
-      : Promise.resolve({ data: [] as Array<{ workshop_id: string; profile_id: string | null; status: string }> }),
-    classIds.length
-      ? supabase.from('class_attendance').select('class_id, profile_id').in('class_id', classIds)
-      : Promise.resolve({ data: [] as Array<{ class_id: string; profile_id: string | null }> }),
+          .order('workshop_id', { ascending: true })
+          .range(offset, offset + RELATED_FETCH_BATCH_SIZE - 1)
+        if (error) throw new Response(error.message, { status: 500 })
+        const chunk = (data ?? []) as typeof enrollments
+        enrollments.push(...chunk)
+        if (chunk.length < RELATED_FETCH_BATCH_SIZE) break
+      }
+    }
+
+    return enrollments
+  }
+
+  const fetchAttendanceRowsByClassId = async () => {
+    const attendanceRows: Array<{ class_id: string; profile_id: string | null }> = []
+    for (const classIdChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+      for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
+        const { data, error } = await supabase
+          .from('class_attendance')
+          .select('class_id, profile_id')
+          .in('class_id', classIdChunk)
+          .order('class_id', { ascending: true })
+          .range(offset, offset + RELATED_FETCH_BATCH_SIZE - 1)
+        if (error) throw new Response(error.message, { status: 500 })
+        const chunk = (data ?? []) as typeof attendanceRows
+        attendanceRows.push(...chunk)
+        if (chunk.length < RELATED_FETCH_BATCH_SIZE) break
+      }
+    }
+    return attendanceRows
+  }
+
+  const [meetings, registrants, enrollments, attendanceRows] = await Promise.all([
+    fetchMeetingsByClassId(),
+    fetchRegistrantsByClassId(),
+    fetchApprovedEnrollmentsByWorkshopId(),
+    fetchAttendanceRowsByClassId(),
   ])
 
   const meetingByClassId = new Map<
@@ -135,16 +245,26 @@ export async function loader(args: Route.LoaderArgs) {
   }
 
   const meetingIds = Array.from(new Set(Array.from(meetingByClassId.values()).map(item => item.id)))
-  const { data: syncRuns } = meetingIds.length
-    ? await supabase
-        .from('class_zoom_participant_sync')
-        .select('class_zoom_meeting_id, status, created_at')
-        .in('class_zoom_meeting_id', meetingIds)
-        .order('created_at', { ascending: false })
-    : { data: [] as Array<{ class_zoom_meeting_id: string; status: string; created_at: string }> }
+  const syncRuns: Array<{ class_zoom_meeting_id: string; status: string; created_at: string }> = []
+  if (meetingIds.length) {
+    for (const meetingIdChunk of chunkArray(meetingIds, IN_CLAUSE_BATCH_SIZE)) {
+      for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
+        const { data, error } = await supabase
+          .from('class_zoom_participant_sync')
+          .select('class_zoom_meeting_id, status, created_at')
+          .in('class_zoom_meeting_id', meetingIdChunk)
+          .order('created_at', { ascending: false })
+          .range(offset, offset + RELATED_FETCH_BATCH_SIZE - 1)
+        if (error) throw new Response(error.message, { status: 500 })
+        const chunk = (data ?? []) as typeof syncRuns
+        syncRuns.push(...chunk)
+        if (chunk.length < RELATED_FETCH_BATCH_SIZE) break
+      }
+    }
+  }
 
   const latestSyncByMeetingId = new Map<string, { status: string; created_at: string }>()
-  for (const syncRun of syncRuns ?? []) {
+  for (const syncRun of syncRuns) {
     if (!latestSyncByMeetingId.has(syncRun.class_zoom_meeting_id)) {
       latestSyncByMeetingId.set(syncRun.class_zoom_meeting_id, {
         status: syncRun.status,
@@ -156,7 +276,7 @@ export async function loader(args: Route.LoaderArgs) {
   const approvedCountByWorkshopId = new Map<string, number>()
   const approvedProfileIdsByWorkshopId = new Map<string, Set<string>>()
   const seenWorkshopProfile = new Set<string>()
-  for (const enrollment of enrollments ?? []) {
+  for (const enrollment of enrollments) {
     if (!enrollment.workshop_id || !enrollment.profile_id) continue
     const key = `${enrollment.workshop_id}::${enrollment.profile_id}`
     if (seenWorkshopProfile.has(key)) continue
@@ -168,7 +288,7 @@ export async function loader(args: Route.LoaderArgs) {
   }
 
   const attendanceProfileIdsByClassId = new Map<string, Set<string>>()
-  for (const row of attendanceRows ?? []) {
+  for (const row of attendanceRows) {
     if (!row.class_id || !row.profile_id) continue
     const classProfiles = attendanceProfileIdsByClassId.get(row.class_id) ?? new Set<string>()
     classProfiles.add(row.profile_id)
@@ -179,7 +299,7 @@ export async function loader(args: Route.LoaderArgs) {
     string,
     Array<{ profile_id: string; zoom_registrant_id: string | null; zoom_join_url: string | null; last_sent_at: string | null }>
   >()
-  for (const registrant of registrants ?? []) {
+  for (const registrant of registrants) {
     if (!registrant.class_id || !registrant.profile_id) continue
     const bucket = registrantsByClassId.get(registrant.class_id) ?? []
     bucket.push({
@@ -240,12 +360,13 @@ export async function loader(args: Route.LoaderArgs) {
 
     const registrantProfileIds = new Set(
       classRegistrants
+        .filter(entry => Boolean(entry.zoom_registrant_id && entry.zoom_join_url))
         .map(entry => entry.profile_id)
         .filter(profileId => expectedProfileIds.has(profileId))
     )
     const registrantsReady = registrantProfileIds.size
     const attendanceRowsReady = Array.from(expectedProfileIds).filter(profileId => attendanceProfileIds.has(profileId)).length
-    const remindersSent = classRegistrants.filter(entry => Boolean(entry.last_sent_at)).length
+    const remindersSent = classRegistrants.filter(entry => expectedProfileIds.has(entry.profile_id) && Boolean(entry.last_sent_at)).length
 
     const endsAt = typeof row.ends_at === 'string' ? new Date(row.ends_at) : null
     const classEnded = Boolean(endsAt && Number.isFinite(endsAt.getTime()) && endsAt.getTime() <= Date.now())
@@ -286,6 +407,7 @@ export async function loader(args: Route.LoaderArgs) {
         zoomDurationMinutes: meeting?.duration_minutes ?? null,
       }),
       sync_class: 'Sync class',
+      recover_class: 'Recover class',
       zoom_host_email: meeting?.host_zoom_user_email ?? row.zoom_host_email ?? '',
       zoom_join_url: meeting?.join_url ?? row.zoom_join_url ?? '',
       step_meeting: meetingComplete ? meeting?.start_time ?? 'Generated' : 'Generate',
@@ -316,7 +438,7 @@ export async function loader(args: Route.LoaderArgs) {
     displayColumns.splice(meetingColumnIndex, 0, 'step_attendance_rows')
   }
 
-  displayColumns.push('ends_at', 'sync_class')
+  displayColumns.push('ends_at', 'recover_class', 'sync_class')
 
   const fitAllColumnsMeta = Object.fromEntries(
     displayColumns.map(column => [
@@ -373,6 +495,7 @@ export async function loader(args: Route.LoaderArgs) {
       step_attendance_rows: { label: 'Attendance Rows', filterable: true },
       step_reminder: { label: 'Reminder', filterable: true },
       step_attendance: { label: 'Attendance Sync', filterable: true },
+      recover_class: { label: 'Recover', filterable: false },
       sync_class: { label: 'Sync', filterable: false },
       zoom_host_email: { label: 'Zoom Host', filterable: true, fitContentOnLoad: true },
       zoom_join_url: { label: 'Zoom Join Link', truncate: true },
@@ -479,6 +602,66 @@ export async function action(args: Route.ActionArgs) {
     } satisfies ActionData
   }
 
+  if (intent === 'reconcile-class') {
+    const auth = await requireAuth(args.request)
+    if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+      return new Response('Unauthorized', { status: 403, headers: auth.headers })
+    }
+
+    const classId = String(formData.get('class_id') ?? '')
+    if (!classId) {
+      return { classRecoveryError: 'Missing class id.' } satisfies ActionData
+    }
+
+    const runId = `manual-reconcile-${Date.now().toString(36)}`
+    const result = await provisionClassById(classId, {
+      lockOwnerRunId: runId,
+      lockOwnerKind: 'class_reconcile',
+      auditContext: {
+        runId,
+        triggerSource: 'ui',
+        triggerKind: 'sync_button',
+        actorUserId: auth.user.id,
+        actorRole: auth.claims.role,
+      },
+    })
+
+    const classRecoveryResult = {
+      classId,
+      attendanceRowsEnsured: result.attendanceRowsEnsured,
+      meetingCreated: result.meetingCreated,
+      meetingRecreated: result.meetingRecreated,
+      registrantsCreated: result.registrantsCreated,
+      registrantsUpdated: result.registrantsUpdated,
+      registrantsRemoved: result.registrantsRemoved,
+      registrantsSkipped: result.registrantsSkipped,
+      registrantFailureCount: result.registrantFailures.length,
+      lockWaitMs: result.lockWaitMs,
+      skipped: Boolean(result.skipped),
+      skipReason: result.skipReason ?? null,
+      error: result.error ?? null,
+    }
+
+    if (result.error) {
+      return {
+        classRecoveryError: result.error,
+        classRecoveryResult,
+      } satisfies ActionData
+    }
+
+    if (result.skipped) {
+      return {
+        classRecoveryError: `Recovery skipped (${result.skipReason ?? 'unknown'}).`,
+        classRecoveryResult,
+      } satisfies ActionData
+    }
+
+    return {
+      classRecoverySuccess: `Class recovery completed for ${classId}.`,
+      classRecoveryResult,
+    } satisfies ActionData
+  }
+
   return baseAction(args)
 }
 
@@ -519,6 +702,12 @@ export default function ClassTablePage() {
           ) : null}
           {actionData?.classMeetingError ? (
             <p className="text-sm text-destructive">{actionData.classMeetingError}</p>
+          ) : null}
+          {actionData?.classRecoverySuccess ? (
+            <p className="text-sm text-emerald-700">{actionData.classRecoverySuccess}</p>
+          ) : null}
+          {actionData?.classRecoveryError ? (
+            <p className="text-sm text-destructive">{actionData.classRecoveryError}</p>
           ) : null}
         </div>
       }

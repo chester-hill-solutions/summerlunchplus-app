@@ -177,6 +177,29 @@ type RegisterStudentActionResult = {
   error?: string
 }
 
+type ClassActionResult = {
+  classSyncSuccess?: string
+  classSyncError?: string
+  classMeetingSuccess?: string
+  classMeetingError?: string
+  classRecoverySuccess?: string
+  classRecoveryError?: string
+  classRecoveryResult?: {
+    classId: string
+    attendanceRowsEnsured: number
+    meetingCreated: boolean
+    meetingRecreated: boolean
+    registrantsCreated: number
+    registrantsUpdated: number
+    registrantsRemoved: number
+    registrantsSkipped: number
+    registrantFailureCount: number
+    skipped: boolean
+    skipReason: string | null
+    error: string | null
+  }
+}
+
 type RegisterStatusResponse = {
   state?: 'no_attempt' | 'attempt_found'
   message?: string
@@ -588,13 +611,8 @@ const personLinkForCell = (
     })
   }
   if (tableName === 'class' && column === 'step_registrants' && typeof row.id === 'string' && row.id) {
-    const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
-    const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''
     return withReturnTo('/manage/class-zoom-registrant', {
       f_class_id: row.id,
-      ...(workshopDescription ? { f_workshop_description: workshopDescription } : {}),
-      ...(startsAt ? { f_class_starts_at: formatTimestamp(startsAt) } : {}),
-      ...(typeof row.ends_at === 'string' && row.ends_at ? { f_class_ends_at: formatTimestamp(row.ends_at) } : {}),
     })
   }
   if (tableName === 'class' && column === 'step_attendance_rows' && typeof row.id === 'string' && row.id) {
@@ -609,13 +627,9 @@ const personLinkForCell = (
     })
   }
   if (tableName === 'class' && column === 'step_reminder') {
-    const workshopDescription = typeof row.workshop_description === 'string' ? row.workshop_description : ''
-    const startsAt = typeof row.starts_at === 'string' ? row.starts_at : ''
-    const endsAt = typeof row.ends_at === 'string' ? row.ends_at : ''
+    const classId = typeof row.id === 'string' ? row.id : ''
     return withReturnTo('/manage/class-zoom-registrant', {
-      ...(workshopDescription ? { f_workshop_description: workshopDescription } : {}),
-      ...(startsAt ? { f_class_starts_at: formatTimestamp(startsAt) } : {}),
-      ...(endsAt ? { f_class_ends_at: formatTimestamp(endsAt) } : {}),
+      ...(classId ? { f_class_id: classId } : {}),
     })
   }
   if (tableName === 'class' && column === 'step_attendance') {
@@ -912,7 +926,9 @@ export default function TableDisplay({
   const [workshopEditGiftcardValue, setWorkshopEditGiftcardValue] = useState('')
   const [workshopEditStatusValue, setWorkshopEditStatusValue] = useState('')
   const [workshopEditRidingValue, setWorkshopEditRidingValue] = useState('')
+  const [classActionToast, setClassActionToast] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
   const isClassAttendance = tableName === 'class-attendance'
+  const isClassTable = tableName === 'class'
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
   const supportsFamilyContextHover = isWorkshopEnrollmentTable || isClassAttendance
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
@@ -2151,6 +2167,51 @@ export default function TableDisplay({
     }))
   }, [isClassAttendance, statusFetcher.data])
 
+  useEffect(() => {
+    if (!isClassTable) return
+    const result = statusFetcher.data as ClassActionResult | undefined
+    if (!result) return
+
+    if (result.classRecoveryResult) {
+      const recovery = result.classRecoveryResult
+      const meetingStep = recovery.meetingRecreated ? 'recreated' : recovery.meetingCreated ? 'created' : 'verified'
+      const recoveryMessage = [
+        `Class ${recovery.classId} recovery`,
+        `Meeting ${meetingStep}`,
+        `Attendance +${recovery.attendanceRowsEnsured}`,
+        `Registrants +${recovery.registrantsCreated}/~${recovery.registrantsUpdated}/-${recovery.registrantsRemoved}/=${recovery.registrantsSkipped}`,
+        `Failures ${recovery.registrantFailureCount}`,
+      ].join(' | ')
+
+      setClassActionToast({
+        tone: result.classRecoveryError || recovery.error || recovery.registrantFailureCount > 0 ? 'error' : 'success',
+        message: result.classRecoveryError ?? result.classRecoverySuccess ?? recoveryMessage,
+      })
+      return
+    }
+
+    if (result.classSyncError || result.classMeetingError) {
+      setClassActionToast({
+        tone: 'error',
+        message: result.classSyncError ?? result.classMeetingError ?? 'Class action failed.',
+      })
+      return
+    }
+
+    if (result.classSyncSuccess || result.classMeetingSuccess) {
+      setClassActionToast({
+        tone: 'success',
+        message: result.classSyncSuccess ?? result.classMeetingSuccess ?? 'Class action completed.',
+      })
+    }
+  }, [isClassTable, statusFetcher.data])
+
+  useEffect(() => {
+    if (!classActionToast) return
+    const timer = window.setTimeout(() => setClassActionToast(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [classActionToast])
+
   const tableWidth = useMemo(() => {
     const totalColumnWidth = columns.reduce(
       (sum, column) => sum + (columnWidths[column] ?? (columnMeta[column]?.numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH)),
@@ -2801,6 +2862,17 @@ export default function TableDisplay({
 
   return (
     <div className="-mx-6 flex min-w-0 flex-col gap-4">
+      {classActionToast ? (
+        <div
+          className={`fixed bottom-4 right-4 z-50 max-w-[min(92vw,44rem)] rounded border px-3 py-2 text-sm shadow-md ${
+            classActionToast.tone === 'success'
+              ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+              : 'border-destructive/40 bg-destructive/10 text-destructive'
+          }`}
+        >
+          {classActionToast.message}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3 px-6">
         <div>
           <h1 className="text-2xl font-semibold">{label}</h1>
@@ -3465,7 +3537,10 @@ export default function TableDisplay({
 
                       if (tableName === 'class' && column === 'sync_class') {
                         const classId = typeof row.id === 'string' ? row.id : ''
-                        const isBusy = statusFetcher.state === 'submitting'
+                        const isBusy =
+                          statusFetcher.state === 'submitting' &&
+                          statusFetcher.formData?.get('intent') === 'sync-class' &&
+                          statusFetcher.formData?.get('class_id') === classId
                         return (
                           <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="Run full sync for this class">
                             <button
@@ -3482,6 +3557,33 @@ export default function TableDisplay({
                               className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               {isBusy ? 'Syncing...' : 'Sync'}
+                            </button>
+                          </td>
+                        )
+                      }
+
+                      if (tableName === 'class' && column === 'recover_class') {
+                        const classId = typeof row.id === 'string' ? row.id : ''
+                        const isRecovering =
+                          statusFetcher.state === 'submitting' &&
+                          statusFetcher.formData?.get('intent') === 'reconcile-class' &&
+                          statusFetcher.formData?.get('class_id') === classId
+                        return (
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="Reconcile attendance and registrants for this class">
+                            <button
+                              type="button"
+                              disabled={!classId || isRecovering}
+                              onClick={event => {
+                                event.stopPropagation()
+                                if (!classId) return
+                                const formData = new FormData()
+                                formData.set('intent', 'reconcile-class')
+                                formData.set('class_id', classId)
+                                statusFetcher.submit(formData, { method: 'post' })
+                              }}
+                              className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isRecovering ? 'Recovering...' : 'Recover'}
                             </button>
                           </td>
                         )
