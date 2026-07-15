@@ -68,6 +68,31 @@ type ClassAttendanceEnrichment = {
   profile_hover_parent_address: string
 }
 
+const CLASS_ATTENDANCE_ENRICHMENT_LANES = ['giftcard', 'geo', 'family'] as const
+export type ClassAttendanceEnrichmentLane = (typeof CLASS_ATTENDANCE_ENRICHMENT_LANES)[number]
+
+type ClassAttendanceEnrichmentOptions = {
+  lanes?: ClassAttendanceEnrichmentLane[]
+}
+
+type ClassAttendanceEnrichmentFoundation = {
+  normalizedProfileIds: string[]
+  expandedRelatedProfilesByTarget: Map<string, Set<string>>
+  preferenceSubmissionScopeProfileIds: string[]
+  userIdsByProfileId: Map<string, string>
+  profileIdsByUserId: Map<string, string[]>
+  attendanceProfileByUserId: Map<string, string[]>
+}
+
+const FOUNDATION_CACHE_TTL_MS = 30_000
+const foundationCache = new Map<
+  string,
+  {
+    expiresAt: number
+    promise: Promise<ClassAttendanceEnrichmentFoundation>
+  }
+>()
+
 const fallbackProfileHoverContext: Omit<ClassAttendanceEnrichment, 'latest_geo' | 'giftcard_display'> = {
   profile_hover_top_discrepancy: '',
   profile_hover_more_discrepancies: '',
@@ -142,16 +167,14 @@ const parsePrimaryIp = (ipSelected: unknown, ipAddress: unknown, forwardedFor: u
   return normalizeIp(first)
 }
 
-export async function loadClassAttendanceEnrichment(profileIds: string[]) {
-  const normalizedProfileIds = Array.from(new Set(profileIds.map(value => value.trim()).filter(Boolean)))
-  const byProfileId: Record<string, ClassAttendanceEnrichment> = {}
+const normalizeProfileIds = (profileIds: string[]) =>
+  Array.from(new Set(profileIds.map(value => value.trim()).filter(Boolean)))
 
-  if (!normalizedProfileIds.length) {
-    return byProfileId
-  }
+const profileIdsSignature = (profileIds: string[]) => profileIds.join('|')
 
-  const familyContextByProfileId = await loadFamilyContextByProfileIds(normalizedProfileIds)
-
+const buildClassAttendanceEnrichmentFoundation = async (
+  normalizedProfileIds: string[]
+): Promise<ClassAttendanceEnrichmentFoundation> => {
   const relatedProfilesByTarget = new Map<string, Set<string>>()
   for (const profileId of normalizedProfileIds) {
     relatedProfilesByTarget.set(profileId, new Set([profileId]))
@@ -228,6 +251,54 @@ export async function loadClassAttendanceEnrichment(profileIds: string[]) {
   const preferenceSubmissionScopeProfileIds = Array.from(
     new Set(Array.from(expandedRelatedProfilesByTarget.values()).flatMap(set => Array.from(set)))
   )
+
+  const attendanceProfileByUserId = new Map<string, string[]>()
+  for (const profileId of normalizedProfileIds) {
+    const userId = userIdsByProfileId.get(profileId)
+    if (!userId) continue
+    const bucket = attendanceProfileByUserId.get(userId) ?? []
+    if (!bucket.includes(profileId)) {
+      bucket.push(profileId)
+      attendanceProfileByUserId.set(userId, bucket)
+    }
+  }
+
+  return {
+    normalizedProfileIds,
+    expandedRelatedProfilesByTarget,
+    preferenceSubmissionScopeProfileIds,
+    userIdsByProfileId,
+    profileIdsByUserId,
+    attendanceProfileByUserId,
+  }
+}
+
+const getClassAttendanceEnrichmentFoundation = async (normalizedProfileIds: string[]) => {
+  const key = profileIdsSignature(normalizedProfileIds)
+  const now = Date.now()
+  const cached = foundationCache.get(key)
+  if (cached && cached.expiresAt > now) {
+    return cached.promise
+  }
+
+  const promise = buildClassAttendanceEnrichmentFoundation(normalizedProfileIds)
+  foundationCache.set(key, {
+    expiresAt: now + FOUNDATION_CACHE_TTL_MS,
+    promise,
+  })
+  return promise
+}
+
+const loadGiftCardLane = async (
+  foundation: ClassAttendanceEnrichmentFoundation
+): Promise<Record<string, Partial<ClassAttendanceEnrichment>>> => {
+  const {
+    normalizedProfileIds,
+    expandedRelatedProfilesByTarget,
+    preferenceSubmissionScopeProfileIds,
+    userIdsByProfileId,
+    profileIdsByUserId,
+  } = foundation
 
   const submissionsById = new Map<string, FormSubmissionPreferenceRow>()
   for (const chunk of chunkArray(preferenceSubmissionScopeProfileIds, IN_CLAUSE_BATCH_SIZE)) {
@@ -317,26 +388,18 @@ export async function loadClassAttendanceEnrichment(profileIds: string[]) {
     }
   }
 
-  const profilesByIdRows: ProfileRow[] = []
-  for (const chunk of chunkArray(normalizedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data: profileChunk, error: profileError } = await adminClient
-      .from('profile')
-      .select('id, user_id')
-      .in('id', chunk)
-    if (profileError) throw new Error(profileError.message)
-    profilesByIdRows.push(...((profileChunk ?? []) as ProfileRow[]))
-  }
-
-  const attendanceProfileByUserId = new Map<string, string[]>()
-  for (const profile of profilesByIdRows) {
-    if (typeof profile.user_id !== 'string' || !profile.user_id) continue
-    const bucket = attendanceProfileByUserId.get(profile.user_id) ?? []
-    if (!bucket.includes(profile.id)) {
-      bucket.push(profile.id)
-      attendanceProfileByUserId.set(profile.user_id, bucket)
+  return normalizedProfileIds.reduce<Record<string, Partial<ClassAttendanceEnrichment>>>((acc, profileId) => {
+    acc[profileId] = {
+      giftcard_display: normalizeGiftCardPreference(latestGiftCardPreferenceByTargetProfileId.get(profileId)?.value),
     }
-  }
+    return acc
+  }, {})
+}
 
+const loadGeoLane = async (
+  foundation: ClassAttendanceEnrichmentFoundation
+): Promise<Record<string, Partial<ClassAttendanceEnrichment>>> => {
+  const { normalizedProfileIds, attendanceProfileByUserId } = foundation
   const latestNetworkByProfileId = new Map<string, { occurredAt: string; ip: string }>()
   const setLatestNetwork = (profileId: string, occurredAt: string, ip: string) => {
     if (!profileId || !occurredAt || !ip) return
@@ -363,7 +426,7 @@ export async function loadClassAttendanceEnrichment(profileIds: string[]) {
 
   let formSubmissionSelect = 'profile_id, submitted_at, ip_selected, ip_address, forwarded_for'
   for (const chunk of chunkArray(normalizedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
-    let query = (adminClient.from('form_submission' as any) as any)
+    const query = (adminClient.from('form_submission' as any) as any)
       .select(formSubmissionSelect)
       .in('profile_id', chunk)
       .order('submitted_at', { ascending: false })
@@ -396,7 +459,7 @@ export async function loadClassAttendanceEnrichment(profileIds: string[]) {
   const userIds = Array.from(attendanceProfileByUserId.keys())
   let loginEventSelect = 'user_id, event_at, ip_selected, ip_address, forwarded_for'
   for (const chunk of chunkArray(userIds, IN_CLAUSE_BATCH_SIZE)) {
-    let query = (adminClient.from('login_event' as any) as any)
+    const query = (adminClient.from('login_event' as any) as any)
       .select(loginEventSelect)
       .in('user_id', chunk)
       .order('event_at', { ascending: false })
@@ -440,7 +503,7 @@ export async function loadClassAttendanceEnrichment(profileIds: string[]) {
     })
   )
 
-  for (const profileId of normalizedProfileIds) {
+  return normalizedProfileIds.reduce<Record<string, Partial<ClassAttendanceEnrichment>>>((acc, profileId) => {
     const latestProfileNetwork = latestNetworkByProfileId.get(profileId)
     const latestGeo = (() => {
       const ip = latestProfileNetwork?.ip ?? ''
@@ -449,12 +512,76 @@ export async function loadClassAttendanceEnrichment(profileIds: string[]) {
       if (!geo) return 'Unknown location'
       return formatGeoLabel(geo)
     })()
+    acc[profileId] = {
+      latest_geo: latestGeo,
+    }
+    return acc
+  }, {})
+}
 
-    byProfileId[profileId] = {
+const loadFamilyLane = async (
+  normalizedProfileIds: string[]
+): Promise<Record<string, Partial<ClassAttendanceEnrichment>>> => {
+  const familyContextByProfileId = await loadFamilyContextByProfileIds(normalizedProfileIds)
+  return normalizedProfileIds.reduce<Record<string, Partial<ClassAttendanceEnrichment>>>((acc, profileId) => {
+    acc[profileId] = {
       ...fallbackProfileHoverContext,
       ...(familyContextByProfileId[profileId] ?? {}),
-      latest_geo: latestGeo,
-      giftcard_display: normalizeGiftCardPreference(latestGiftCardPreferenceByTargetProfileId.get(profileId)?.value),
+    }
+    return acc
+  }, {})
+}
+
+export async function loadClassAttendanceEnrichment(
+  profileIds: string[],
+  options: ClassAttendanceEnrichmentOptions = {}
+) {
+  const normalizedProfileIds = normalizeProfileIds(profileIds)
+  const byProfileId: Record<string, ClassAttendanceEnrichment> = {}
+
+  if (!normalizedProfileIds.length) {
+    return byProfileId
+  }
+
+  const lanes = (options.lanes?.length ? options.lanes : [...CLASS_ATTENDANCE_ENRICHMENT_LANES]).filter(
+    (lane, index, array) => CLASS_ATTENDANCE_ENRICHMENT_LANES.includes(lane) && array.indexOf(lane) === index
+  )
+
+  const needsFoundation = lanes.includes('giftcard') || lanes.includes('geo')
+  const foundationPromise = needsFoundation
+    ? getClassAttendanceEnrichmentFoundation(normalizedProfileIds)
+    : Promise.resolve(null)
+
+  const laneResults = await Promise.all(
+    lanes.map(async lane => {
+      if (lane === 'giftcard') {
+        const foundation = await foundationPromise
+        if (!foundation) return {} as Record<string, Partial<ClassAttendanceEnrichment>>
+        return loadGiftCardLane(foundation)
+      }
+      if (lane === 'geo') {
+        const foundation = await foundationPromise
+        if (!foundation) return {} as Record<string, Partial<ClassAttendanceEnrichment>>
+        return loadGeoLane(foundation)
+      }
+      return loadFamilyLane(normalizedProfileIds)
+    })
+  )
+
+  for (const profileId of normalizedProfileIds) {
+    byProfileId[profileId] = {
+      ...fallbackProfileHoverContext,
+      latest_geo: 'N/A',
+      giftcard_display: 'N/A',
+    }
+  }
+
+  for (const laneResult of laneResults) {
+    for (const profileId of normalizedProfileIds) {
+      byProfileId[profileId] = {
+        ...byProfileId[profileId],
+        ...(laneResult[profileId] ?? {}),
+      }
     }
   }
 
