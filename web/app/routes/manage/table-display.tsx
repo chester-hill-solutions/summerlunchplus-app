@@ -1767,9 +1767,16 @@ export default function TableDisplay({
       isClassAttendance && columns.some(column => CLASS_ATTENDANCE_ENRICHMENT_COLUMNS.has(column))
     const shouldLoadFamilyContext = hasActiveFamilyContextFilters || Boolean(openFilterColumn && FAMILY_CONTEXT_COLUMNS.has(openFilterColumn))
     const shouldLoadWorkshopFamilyContext = isWorkshopEnrollmentTable && shouldLoadFamilyContext
-    const shouldLoadClassAttendancePayload = isClassAttendance && (shouldLoadClassAttendanceValues || shouldLoadFamilyContext)
+    const shouldLoadClassAttendanceFamilyContext = isClassAttendance && shouldLoadFamilyContext
 
-    if (!shouldLoadWorkshopValues && !shouldLoadClassAttendancePayload && !shouldLoadWorkshopFamilyContext) return
+    if (
+      !shouldLoadWorkshopValues &&
+      !shouldLoadClassAttendanceValues &&
+      !shouldLoadWorkshopFamilyContext &&
+      !shouldLoadClassAttendanceFamilyContext
+    ) {
+      return
+    }
 
     const enrichmentSeedRows = hasActiveEnrichmentBackedFilters
       ? rows.filter(row => rowMatchesFilters(row, baseFiltersForEnrichmentFetch))
@@ -1798,81 +1805,143 @@ export default function TableDisplay({
     const abortController = new AbortController()
     void (async () => {
       const startedAt = Date.now()
+      const fallbackEnrichment: ProfileEnrichment = {
+        riding_display: 'Not looked up',
+        geo_locations_display: 'N/A',
+        giftcard_display: 'N/A',
+        prior_participation_display: 'N/A',
+        latest_geo: 'N/A',
+        profile_hover_top_discrepancy: '',
+        profile_hover_more_discrepancies: '',
+        profile_hover_name: '',
+        profile_hover_parent_name: '',
+        profile_hover_email: '',
+        profile_hover_student_phone: '',
+        profile_hover_parent_email: '',
+        profile_hover_parent_phone: '',
+        profile_hover_student_geo: '',
+        profile_hover_parent_geo: '',
+        profile_hover_student_submitted_address: '',
+        profile_hover_parent_address: '',
+      }
+
+      const mergeEnrichmentPayload = (
+        payloadByProfileId:
+          | WorkshopEnrollmentEnrichmentResponse['byProfileId']
+          | ClassAttendanceEnrichmentResponse['byProfileId']
+          | FamilyContextEnrichmentResponse['byProfileId']
+      ) => {
+        setEnrichmentByProfileId(prev => {
+          const next = { ...prev }
+          for (const profileId of requestProfileIds) {
+            next[profileId] = {
+              ...fallbackEnrichment,
+              ...(next[profileId] ?? {}),
+              ...(payloadByProfileId?.[profileId] ?? {}),
+            }
+          }
+          return next
+        })
+      }
+
       try {
         const searchParams = new URLSearchParams()
         requestProfileIds.forEach(profileId => searchParams.append('profileId', profileId))
-        const [workshopPayload, classAttendancePayload, familyPayload] = await Promise.all([
-          shouldLoadWorkshopValues
-            ? fetch(`/manage/workshop-enrollment/enrichment?${searchParams.toString()}`, {
-                signal: abortController.signal,
-              }).then(async response =>
+
+        const pendingLaneRequests: Array<Promise<void>> = []
+
+        if (shouldLoadWorkshopValues) {
+          pendingLaneRequests.push(
+            fetch(`/manage/workshop-enrollment/enrichment?${searchParams.toString()}`, {
+              signal: abortController.signal,
+            })
+              .then(async response =>
                 response.ok
                   ? ((await response.json()) as WorkshopEnrollmentEnrichmentResponse)
                   : ({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse)
               )
-            : Promise.resolve({ byProfileId: {} } as WorkshopEnrollmentEnrichmentResponse),
-          shouldLoadClassAttendancePayload
-            ? fetch(`/manage/class-attendance/enrichment?${searchParams.toString()}`, {
-                signal: abortController.signal,
-              }).then(async response =>
+              .then(payload => {
+                mergeEnrichmentPayload(payload.byProfileId)
+              })
+          )
+        }
+
+        if (shouldLoadClassAttendanceValues) {
+          const classAttendanceGiftcardSearch = new URLSearchParams(searchParams)
+          classAttendanceGiftcardSearch.append('lane', 'giftcard')
+          pendingLaneRequests.push(
+            fetch(`/manage/class-attendance/enrichment?${classAttendanceGiftcardSearch.toString()}`, {
+              signal: abortController.signal,
+            })
+              .then(async response =>
                 response.ok
                   ? ((await response.json()) as ClassAttendanceEnrichmentResponse)
                   : ({ byProfileId: {} } as ClassAttendanceEnrichmentResponse)
               )
-            : Promise.resolve({ byProfileId: {} } as ClassAttendanceEnrichmentResponse),
-          shouldLoadWorkshopFamilyContext
-            ? fetch(`/manage/family-context/enrichment?${searchParams.toString()}`, {
-                signal: abortController.signal,
-              }).then(async response =>
+              .then(payload => {
+                mergeEnrichmentPayload(payload.byProfileId)
+              })
+          )
+
+          const classAttendanceGeoSearch = new URLSearchParams(searchParams)
+          classAttendanceGeoSearch.append('lane', 'geo')
+          pendingLaneRequests.push(
+            fetch(`/manage/class-attendance/enrichment?${classAttendanceGeoSearch.toString()}`, {
+              signal: abortController.signal,
+            })
+              .then(async response =>
+                response.ok
+                  ? ((await response.json()) as ClassAttendanceEnrichmentResponse)
+                  : ({ byProfileId: {} } as ClassAttendanceEnrichmentResponse)
+              )
+              .then(payload => {
+                mergeEnrichmentPayload(payload.byProfileId)
+              })
+          )
+        }
+
+        if (shouldLoadClassAttendanceFamilyContext) {
+          const classAttendanceFamilySearch = new URLSearchParams(searchParams)
+          classAttendanceFamilySearch.append('lane', 'family')
+          pendingLaneRequests.push(
+            fetch(`/manage/class-attendance/enrichment?${classAttendanceFamilySearch.toString()}`, {
+              signal: abortController.signal,
+            })
+              .then(async response =>
+                response.ok
+                  ? ((await response.json()) as ClassAttendanceEnrichmentResponse)
+                  : ({ byProfileId: {} } as ClassAttendanceEnrichmentResponse)
+              )
+              .then(payload => {
+                mergeEnrichmentPayload(payload.byProfileId)
+              })
+          )
+        }
+
+        if (shouldLoadWorkshopFamilyContext) {
+          pendingLaneRequests.push(
+            fetch(`/manage/family-context/enrichment?${searchParams.toString()}`, {
+              signal: abortController.signal,
+            })
+              .then(async response =>
                 response.ok
                   ? ((await response.json()) as FamilyContextEnrichmentResponse)
                   : ({ byProfileId: {} } as FamilyContextEnrichmentResponse)
               )
-            : Promise.resolve({ byProfileId: {} } as FamilyContextEnrichmentResponse),
-        ])
-        const fallbackEnrichment: ProfileEnrichment = {
-          riding_display: 'Not looked up',
-          geo_locations_display: 'N/A',
-          giftcard_display: 'N/A',
-          prior_participation_display: 'N/A',
-          latest_geo: 'N/A',
-          profile_hover_top_discrepancy: '',
-          profile_hover_more_discrepancies: '',
-          profile_hover_name: '',
-          profile_hover_parent_name: '',
-          profile_hover_email: '',
-          profile_hover_student_phone: '',
-          profile_hover_parent_email: '',
-          profile_hover_parent_phone: '',
-          profile_hover_student_geo: '',
-          profile_hover_parent_geo: '',
-          profile_hover_student_submitted_address: '',
-          profile_hover_parent_address: '',
+              .then(payload => {
+                mergeEnrichmentPayload(payload.byProfileId)
+              })
+          )
         }
 
-        const resolvedByProfileId = requestProfileIds.reduce<Record<string, ProfileEnrichment>>(
-          (acc, profileId) => {
-            acc[profileId] = {
-              ...fallbackEnrichment,
-              ...(workshopPayload?.byProfileId?.[profileId] ?? {}),
-              ...(classAttendancePayload?.byProfileId?.[profileId] ?? {}),
-              ...(familyPayload?.byProfileId?.[profileId] ?? {}),
-            }
-            return acc
-          },
-          {}
-        )
-
-        setEnrichmentByProfileId(prev => ({
-          ...prev,
-          ...resolvedByProfileId,
-        }))
+        await Promise.all(pendingLaneRequests)
         if (debugPerf) {
           console.info('[table-display] row enrichment loaded', {
             requestedProfiles: requestProfileIds.length,
             workshopValues: shouldLoadWorkshopValues,
-            classAttendanceValues: shouldLoadClassAttendancePayload,
-            familyContext: shouldLoadWorkshopFamilyContext,
+            classAttendanceValues: shouldLoadClassAttendanceValues,
+            classAttendanceFamilyContext: shouldLoadClassAttendanceFamilyContext,
+            workshopFamilyContext: shouldLoadWorkshopFamilyContext,
             ms: Date.now() - startedAt,
           })
         }
