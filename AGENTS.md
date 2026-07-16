@@ -2,7 +2,7 @@
 
 ## Repo shape
 - Monorepo with 3 deployables: `web/` (React Router v7 SSR), `scheduler/` (cron container), `zoom-api/` (FastAPI).
-- Run commands in the relevant subdirectory; root `package.json` has dependencies but no runnable scripts.
+- Run commands in the service directory; root `package.json` has dependencies only (no scripts).
 
 ## Web (`web/`)
 - Core commands: `npm ci`, `npm run dev`, `npm run typecheck`, `npm run build && npm run start`, `npm run test`.
@@ -15,9 +15,11 @@
 
 ## Web tests
 - Playwright is the only test runner here (`npm run test` over `web/tests`).
-- Focused runs: `npm run test:e2e -- tests/e2e/<file>.spec.ts` and `npm run test:unit -- tests/unit/<file>.spec.ts`.
+- For a single spec, use `npm run test -- tests/e2e/<file>.spec.ts` or `npm run test -- tests/unit/<file>.spec.ts`.
+- `npm run test:e2e` and `npm run test:unit` are directory-scoped wrappers, not single-file shortcuts.
 - If `PLAYWRIGHT_BASE_URL` is unset, Playwright starts `npm run dev -- --port 5173` automatically (`web/playwright.config.ts`).
-- Some admin setup specs skip unless `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are present.
+- Admin setup specs skip unless `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are present (loaded from env or `web/.env.local`).
+- CI (`.github/workflows/tests.yml`) runs only web Playwright tests on Node 22 and starts local Supabase first.
 
 ## Supabase / DB
 - Source of truth is declarative SQL in `supabase/schemas/`; migrations are generated from schema changes (see `CODE_STANDARDS.md`).
