@@ -231,6 +231,7 @@ const HOVER_CARD_WIDTH_PX = 480
 const HOVER_CARD_MARGIN_PX = 8
 const HOVER_CARD_OFFSET_PX = 4
 const HOVER_CARD_ESTIMATED_HEIGHT_PX = 260
+const HOVER_CARD_CLOSE_DELAY_MS = 80
 const FILTER_LOAD_CHUNK_SIZE = 300
 const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
@@ -419,6 +420,15 @@ const normalizeHoverCardValue = (value: unknown) => {
   if (typeof value === 'string') return value.trim()
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return ''
+}
+
+const parseHoverCardCellId = (cellId: string) => {
+  const match = /^row-(\d+)-col-(.+)$/.exec(cellId)
+  if (!match) return null
+  return {
+    absoluteRowIndex: Number.parseInt(match[1] ?? '', 10),
+    column: match[2] ?? '',
+  }
 }
 
 const hoverCardDataForCell = (
@@ -911,7 +921,6 @@ export default function TableDisplay({
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Record<string, string>>({})
   const [enrichmentByProfileId, setEnrichmentByProfileId] = useState<Record<string, ProfileEnrichment>>({})
-  const [loadingFamilyContextByProfileId, setLoadingFamilyContextByProfileId] = useState<Record<string, boolean>>({})
   const [districtCountsByRiding, setDistrictCountsByRiding] = useState<Record<string, FederalDistrictCounts>>({})
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [columnMinWidths, setColumnMinWidths] = useState<Record<string, number>>({})
@@ -1214,7 +1223,7 @@ export default function TableDisplay({
     hoverCardCloseTimeoutRef.current = setTimeout(() => {
       setHoveredHoverCardCellId(prev => (prev === cellId ? null : prev))
       hoverCardCloseTimeoutRef.current = null
-    }, 160)
+    }, HOVER_CARD_CLOSE_DELAY_MS)
   }
 
   useEffect(
@@ -1794,6 +1803,54 @@ export default function TableDisplay({
   }, [disablePaginationForTable, serverSideQuery, derivedRows, effectivePage, pageSize])
 
   useEffect(() => {
+    if (!visibleHoverCardCellId) return
+
+    const parsed = parseHoverCardCellId(visibleHoverCardCellId)
+    if (!parsed) return
+
+    const baseRowIndex = (effectivePage - 1) * pageSize
+    const rowIndex = parsed.absoluteRowIndex - baseRowIndex
+    if (rowIndex < 0 || rowIndex >= paginatedRows.length) return
+
+    const row = paginatedRows[rowIndex]
+    if (!row) return
+
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    const isProfileHoverCard =
+      parsed.column === 'profile_display' &&
+      columnMeta[parsed.column]?.hoverCard?.titleField === 'profile_hover_name'
+    const existingFamilyContext = profileId ? enrichmentByProfileId[profileId] : undefined
+    const shouldShowFamilyContextLoading =
+      Boolean(profileId) &&
+      isProfileHoverCard &&
+      (loadingEnrichmentProfileIdsRef.current.has(profileId) ||
+        (!hasHydratedFamilyContext(existingFamilyContext) &&
+          !loadedFamilyContextProfileIdsRef.current.has(profileId)))
+
+    const nextData = hoverCardDataForCell(row, columnMeta[parsed.column]?.hoverCard, {
+      showFamilyContextLoading: shouldShowFamilyContextLoading,
+    })
+
+    if (!nextData) return
+
+    setActiveHoverCard(prev => {
+      if (!prev || prev.cellId !== visibleHoverCardCellId) {
+        return { cellId: visibleHoverCardCellId, data: nextData }
+      }
+      const prevSerialized = JSON.stringify(prev.data)
+      const nextSerialized = JSON.stringify(nextData)
+      return prevSerialized === nextSerialized ? prev : { cellId: visibleHoverCardCellId, data: nextData }
+    })
+  }, [
+    visibleHoverCardCellId,
+    effectivePage,
+    pageSize,
+    paginatedRows,
+    columnMeta,
+    enrichmentByProfileId,
+  ])
+
+  useEffect(() => {
     if (!isWorkshopEnrollmentTable && !isClassAttendance) return
 
     const shouldLoadWorkshopValues =
@@ -2154,11 +2211,6 @@ export default function TableDisplay({
       return
     }
 
-    setLoadingFamilyContextByProfileId(prev => ({
-      ...prev,
-      [profileId]: true,
-    }))
-
     loadingEnrichmentProfileIdsRef.current.add(profileId)
     void (async () => {
       const startedAt = Date.now()
@@ -2216,12 +2268,6 @@ export default function TableDisplay({
         console.error('[table display] family-context hover fetch failed', error)
       } finally {
         loadingEnrichmentProfileIdsRef.current.delete(profileId)
-        setLoadingFamilyContextByProfileId(prev => {
-          if (!prev[profileId]) return prev
-          const next = { ...prev }
-          delete next[profileId]
-          return next
-        })
       }
     })()
   }
@@ -3739,11 +3785,15 @@ export default function TableDisplay({
                       const isProfileHoverCard =
                         column === 'profile_display' &&
                         columnMeta[column]?.hoverCard?.titleField === 'profile_hover_name'
+                      const existingFamilyContext = profileId ? enrichmentByProfileId[profileId] : undefined
+                      const shouldShowFamilyContextLoading =
+                        Boolean(profileId) &&
+                        isProfileHoverCard &&
+                        (loadingEnrichmentProfileIdsRef.current.has(profileId) ||
+                          (!hasHydratedFamilyContext(existingFamilyContext) &&
+                            !loadedFamilyContextProfileIdsRef.current.has(profileId)))
                       const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard, {
-                        showFamilyContextLoading:
-                          Boolean(profileId) &&
-                          isProfileHoverCard &&
-                          loadingFamilyContextByProfileId[profileId] === true,
+                        showFamilyContextLoading: shouldShowFamilyContextLoading,
                       })
                       const hoverCardCellId = `row-${absoluteRowIndex}-col-${column}`
 
