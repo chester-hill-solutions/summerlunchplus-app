@@ -25,6 +25,7 @@ const logManageTeamServerEvent = (event: string, payload: Record<string, unknown
 const TEAM_ALLOWED_MANAGE_PATHS = new Set([
   '/manage',
   '/manage/team',
+  '/manage/person',
   '/manage/class-attendance',
   '/manage/class-attendance-audit',
   '/manage/class-attendance-card-data',

@@ -1,39 +1,43 @@
 # AGENTS.md
 
-## Repo shape
+## Repo layout
 - Monorepo with 3 deployables: `web/` (React Router v7 SSR), `scheduler/` (cron container), `zoom-api/` (FastAPI).
-- Run commands in the relevant subdirectory; root `package.json` has dependencies but no runnable scripts.
+- Run commands inside each service directory; root `package.json` has no scripts.
 
 ## Web (`web/`)
-- Core commands: `npm ci`, `npm run dev`, `npm run typecheck`, `npm run build && npm run start`, `npm run test`.
-- No lint script exists; do not run or add `npm run lint` as a default check.
-- Routes are manually wired in `web/app/routes.ts`; adding a route file alone will 404.
-- After editing `web/app/routes.ts`, run `npm run typecheck` to regenerate `.react-router/types`.
-- `createClient` in `web/app/lib/supabase/server.ts` returns `{ supabase, headers }`; forward `headers` in redirects/responses or auth cookies are lost.
+- Canonical commands: `npm ci`, `npm run dev`, `npm run typecheck`, `npm run build && npm run start`, `npm run test`.
+- There is no lint script; do not assume `npm run lint` exists.
+- Local app bootstrap depends on local Supabase: run `supabase start --debug` from repo root and sync `web/.env.local` from `supabase status -o json` values.
+- Route files are not auto-registered: add new routes in `web/app/routes.ts`.
+- After changing `web/app/routes.ts`, run `npm run typecheck` (runs `react-router typegen` and updates `.react-router/types`).
+- `createClient(request)` in `web/app/lib/supabase/server.ts` returns `{ supabase, headers }`; include `headers` in redirects/responses or auth cookies will be dropped.
+- Staff access under `/manage/*` is allowlisted in `TEAM_ALLOWED_MANAGE_PATHS` in `web/app/routes/manage/team.tsx`; add paths there when introducing new staff-visible manage pages.
 - `ONBOARDING_MODE` is role-based unless env is exactly `permission` (`web/app/lib/auth.server.ts`).
-- Staff manage access is path-allowlisted in `TEAM_ALLOWED_MANAGE_PATHS` (`web/app/routes/manage/team.tsx`); new `/manage/*` routes may be blocked for staff until added.
 
-## Web tests
-- Playwright is the only test runner here (`npm run test` over `web/tests`).
-- Focused runs: `npm run test:e2e -- tests/e2e/<file>.spec.ts` and `npm run test:unit -- tests/unit/<file>.spec.ts`.
-- If `PLAYWRIGHT_BASE_URL` is unset, Playwright starts `npm run dev -- --port 5173` automatically (`web/playwright.config.ts`).
-- Some admin setup specs skip unless `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are present.
+## Web tests (Playwright only)
+- `npm run test` runs Playwright across `web/tests` (there is no Vitest/Jest).
+- Run one spec with `npm run test -- tests/e2e/<file>.spec.ts` (or `tests/unit/<file>.spec.ts`).
+- `npm run test:e2e` and `npm run test:unit` are directory-scoped wrappers, not single-file shortcuts.
+- If `PLAYWRIGHT_BASE_URL` is unset, Playwright auto-starts `npm run dev -- --port 5173` (`web/playwright.config.ts`).
+- Admin setup specs skip unless `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are set (env vars or `web/.env.local`).
+- CI (`.github/workflows/tests.yml`) runs only web Playwright tests on Node 22 and bootstraps local Supabase first.
 
-## Supabase / DB
-- Source of truth is declarative SQL in `supabase/schemas/`; migrations are generated from schema changes (see `CODE_STANDARDS.md`).
-- Standard flow from repo root: edit schema SQL -> `supabase db diff -f <name>` -> `supabase migration up`.
-- Regenerate DB types after schema changes:
+## Supabase and DB workflow
+- Source of truth is declarative SQL in `supabase/schemas/`; do not hand-edit existing files in `supabase/migrations/`.
+- Schema change flow (repo root): edit `supabase/schemas/*.sql` -> `supabase db diff -f <name>` -> `supabase migration up`.
+- After schema changes, regenerate TS DB types:
   `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`
-- `supabase/config.toml` sets `api.max_rows = 1000`; any broad server query must batch or paginate.
-- Local seed mode is sanitized prod snapshot + app seeds (`supabase/seeds/prod-data/active/*-sanitized.sql` then `supabase/seeds/app-data/*.sql`).
+- `supabase/config.toml` sets `api.max_rows = 1000`; large reads must paginate/batch.
+- Local reset seed mode is currently `./seeds/prod-data/active/*-sanitized.sql` + `./seeds/app-data/*.sql` (not dummy fixtures).
 
 ## Scheduler (`scheduler/`)
-- Cron schedule source of truth: `scheduler/crontab`.
-- `INTERNAL_RUNNER_SECRET` must match the `web` secret used by `/internal/*` routes.
-- Local ops from `scheduler/`: `make cron`, `make cron-bg`, `make logs`, `make down`, `make smoke-all`.
+- Schedule source of truth is `scheduler/crontab`.
+- Local runner requires `.env.local`; `make` targets fail fast if it is missing.
+- `INTERNAL_RUNNER_SECRET` must match `web` for `/internal/*` endpoints.
+- Common local commands: `make cron`, `make cron-bg`, `make logs`, `make down`, `make smoke-all`.
 
 ## Zoom API (`zoom-api/`)
-- Read `zoom-api/CLAUDE.md` before editing; it contains required workflow and auth checks.
-- Use Make targets: `make setup`, `make dev`, `make test`.
-- `make setup` installs runtime deps only; install `requirements-dev.txt` before running tests in a fresh venv.
-- Auth must stay on `HTTPBearer` in `app/auth.py`; `tests/test_main.py::test_openapi_declares_security_scheme` enforces OpenAPI security wiring.
+- Read `zoom-api/CLAUDE.md` before edits for service-specific constraints.
+- Use `make setup`, `make dev`, `make test`.
+- `make setup` installs only `requirements.txt`; install `requirements-dev.txt` before tests in a fresh venv.
+- Keep auth on FastAPI `HTTPBearer` in `app/auth.py`; `tests/test_main.py::test_openapi_declares_security_scheme` enforces OpenAPI security wiring.
