@@ -231,6 +231,7 @@ const HOVER_CARD_WIDTH_PX = 480
 const HOVER_CARD_MARGIN_PX = 8
 const HOVER_CARD_OFFSET_PX = 4
 const HOVER_CARD_ESTIMATED_HEIGHT_PX = 260
+const HOVER_CARD_CLOSE_DELAY_MS = 80
 const FILTER_LOAD_CHUNK_SIZE = 300
 const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
@@ -273,16 +274,28 @@ const CLASS_ATTENDANCE_FILTER_ENRICHMENT_COLUMNS = new Set([
   ...Array.from(FAMILY_CONTEXT_COLUMNS),
 ])
 
+const FAMILY_CONTEXT_PLACEHOLDERS = new Set(['', 'n/a'])
+const FAMILY_CONTEXT_LOADING_LABEL = 'Loading profile details...'
+
+const normalizeFamilyContextValue = (value: unknown) =>
+  typeof value === 'string' ? value.trim() : ''
+
+const isMeaningfulFamilyContextValue = (value: unknown) => {
+  const normalized = normalizeFamilyContextValue(value)
+  if (!normalized) return false
+  return !FAMILY_CONTEXT_PLACEHOLDERS.has(normalized.toLowerCase())
+}
+
 const hasHydratedFamilyContext = (enrichment?: ProfileEnrichment) =>
   Boolean(
-    enrichment?.profile_hover_name ||
-      enrichment?.profile_hover_parent_name ||
-      enrichment?.profile_hover_email ||
-      enrichment?.profile_hover_parent_email ||
-      enrichment?.profile_hover_student_geo ||
-      enrichment?.profile_hover_parent_geo ||
-      enrichment?.profile_hover_top_discrepancy ||
-      enrichment?.profile_hover_more_discrepancies
+    isMeaningfulFamilyContextValue(enrichment?.profile_hover_name) ||
+      isMeaningfulFamilyContextValue(enrichment?.profile_hover_parent_name) ||
+      isMeaningfulFamilyContextValue(enrichment?.profile_hover_email) ||
+      isMeaningfulFamilyContextValue(enrichment?.profile_hover_parent_email) ||
+      isMeaningfulFamilyContextValue(enrichment?.profile_hover_student_geo) ||
+      isMeaningfulFamilyContextValue(enrichment?.profile_hover_parent_geo) ||
+      isMeaningfulFamilyContextValue(enrichment?.profile_hover_top_discrepancy) ||
+      isMeaningfulFamilyContextValue(enrichment?.profile_hover_more_discrepancies)
   )
 const DEFAULT_COLUMN_WIDTH = 180
 const DEFAULT_NUMERIC_COLUMN_WIDTH = 120
@@ -409,7 +422,22 @@ const normalizeHoverCardValue = (value: unknown) => {
   return ''
 }
 
-const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardConfig) => {
+const parseHoverCardCellId = (cellId: string) => {
+  const match = /^row-(\d+)-col-(.+)$/.exec(cellId)
+  if (!match) return null
+  return {
+    absoluteRowIndex: Number.parseInt(match[1] ?? '', 10),
+    column: match[2] ?? '',
+  }
+}
+
+const hoverCardDataForCell = (
+  row: Record<string, unknown>,
+  config?: HoverCardConfig,
+  options?: {
+    showFamilyContextLoading?: boolean
+  }
+) => {
   if (!config) return null
 
   const hasListFields = config.fields.length > 0
@@ -429,7 +457,21 @@ const hoverCardDataForCell = (row: Record<string, unknown>, config?: HoverCardCo
     }
   }
 
-  const fields = config.fields.map(normalizeField).filter(field => field.visible)
+  const shouldShowFamilyContextLoading =
+    config.titleField === 'profile_hover_name' && options?.showFamilyContextLoading === true
+
+  const fields = [
+    ...(shouldShowFamilyContextLoading
+      ? [
+          {
+            label: '',
+            value: FAMILY_CONTEXT_LOADING_LABEL,
+            visible: true,
+          },
+        ]
+      : []),
+    ...config.fields.map(normalizeField).filter(field => field.visible),
+  ]
 
   const columnLayout = config.columns
     ? {
@@ -891,6 +933,7 @@ export default function TableDisplay({
   } | null>(null)
   const [hoverCardPosition, setHoverCardPosition] = useState<{ top: number; left: number } | null>(null)
   const loadingEnrichmentProfileIdsRef = useRef<Set<string>>(new Set())
+  const loadedFamilyContextProfileIdsRef = useRef<Set<string>>(new Set())
   const loadingDistrictRidingsRef = useRef<Set<string>>(new Set())
   const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const filterPopoverRef = useRef<HTMLDivElement | null>(null)
@@ -928,9 +971,10 @@ export default function TableDisplay({
   const [workshopEditRidingValue, setWorkshopEditRidingValue] = useState('')
   const [classActionToast, setClassActionToast] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
   const isClassAttendance = tableName === 'class-attendance'
+  const isClassAttendanceRaw = tableName === 'class-attendance-raw'
   const isClassTable = tableName === 'class'
   const isWorkshopEnrollmentTable = tableName === 'class-enrollment'
-  const supportsFamilyContextHover = isWorkshopEnrollmentTable || isClassAttendance
+  const supportsFamilyContextHover = isWorkshopEnrollmentTable || isClassAttendance || isClassAttendanceRaw
   const isFederalDistrictTable = tableName === 'federal-electoral-district'
   const serverSideQuery = Boolean(source?.serverSideQuery)
   const giftCardOptions = Array.isArray(source?.giftCardOptions)
@@ -1179,7 +1223,7 @@ export default function TableDisplay({
     hoverCardCloseTimeoutRef.current = setTimeout(() => {
       setHoveredHoverCardCellId(prev => (prev === cellId ? null : prev))
       hoverCardCloseTimeoutRef.current = null
-    }, 160)
+    }, HOVER_CARD_CLOSE_DELAY_MS)
   }
 
   useEffect(
@@ -1759,6 +1803,54 @@ export default function TableDisplay({
   }, [disablePaginationForTable, serverSideQuery, derivedRows, effectivePage, pageSize])
 
   useEffect(() => {
+    if (!visibleHoverCardCellId) return
+
+    const parsed = parseHoverCardCellId(visibleHoverCardCellId)
+    if (!parsed) return
+
+    const baseRowIndex = (effectivePage - 1) * pageSize
+    const rowIndex = parsed.absoluteRowIndex - baseRowIndex
+    if (rowIndex < 0 || rowIndex >= paginatedRows.length) return
+
+    const row = paginatedRows[rowIndex]
+    if (!row) return
+
+    const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+    const isProfileHoverCard =
+      parsed.column === 'profile_display' &&
+      columnMeta[parsed.column]?.hoverCard?.titleField === 'profile_hover_name'
+    const existingFamilyContext = profileId ? enrichmentByProfileId[profileId] : undefined
+    const shouldShowFamilyContextLoading =
+      Boolean(profileId) &&
+      isProfileHoverCard &&
+      (loadingEnrichmentProfileIdsRef.current.has(profileId) ||
+        (!hasHydratedFamilyContext(existingFamilyContext) &&
+          !loadedFamilyContextProfileIdsRef.current.has(profileId)))
+
+    const nextData = hoverCardDataForCell(row, columnMeta[parsed.column]?.hoverCard, {
+      showFamilyContextLoading: shouldShowFamilyContextLoading,
+    })
+
+    if (!nextData) return
+
+    setActiveHoverCard(prev => {
+      if (!prev || prev.cellId !== visibleHoverCardCellId) {
+        return { cellId: visibleHoverCardCellId, data: nextData }
+      }
+      const prevSerialized = JSON.stringify(prev.data)
+      const nextSerialized = JSON.stringify(nextData)
+      return prevSerialized === nextSerialized ? prev : { cellId: visibleHoverCardCellId, data: nextData }
+    })
+  }, [
+    visibleHoverCardCellId,
+    effectivePage,
+    pageSize,
+    paginatedRows,
+    columnMeta,
+    enrichmentByProfileId,
+  ])
+
+  useEffect(() => {
     if (!isWorkshopEnrollmentTable && !isClassAttendance) return
 
     const shouldLoadWorkshopValues =
@@ -2111,7 +2203,13 @@ export default function TableDisplay({
   const requestFamilyContextForProfile = (profileId: string) => {
     if (!supportsFamilyContextHover || !profileId) return
     const existing = enrichmentByProfileId[profileId]
-    if (hasHydratedFamilyContext(existing) || loadingEnrichmentProfileIdsRef.current.has(profileId)) return
+    if (
+      hasHydratedFamilyContext(existing) ||
+      loadedFamilyContextProfileIdsRef.current.has(profileId) ||
+      loadingEnrichmentProfileIdsRef.current.has(profileId)
+    ) {
+      return
+    }
 
     loadingEnrichmentProfileIdsRef.current.add(profileId)
     void (async () => {
@@ -2159,6 +2257,7 @@ export default function TableDisplay({
             profile_hover_parent_address: resolved.profile_hover_parent_address,
           },
         }))
+        loadedFamilyContextProfileIdsRef.current.add(profileId)
         if (debugPerf) {
           console.info('[table-display] hover family-context loaded', {
             profileId,
@@ -3682,7 +3781,20 @@ export default function TableDisplay({
                           ? `${cellValue.slice(0, maxChars)}...`
                           : cellValue
                       const linkClassName = `underline decoration-dotted underline-offset-2 hover:text-primary ${extraCellClass}`.trim()
-                      const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard)
+                      const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+                      const isProfileHoverCard =
+                        column === 'profile_display' &&
+                        columnMeta[column]?.hoverCard?.titleField === 'profile_hover_name'
+                      const existingFamilyContext = profileId ? enrichmentByProfileId[profileId] : undefined
+                      const shouldShowFamilyContextLoading =
+                        Boolean(profileId) &&
+                        isProfileHoverCard &&
+                        (loadingEnrichmentProfileIdsRef.current.has(profileId) ||
+                          (!hasHydratedFamilyContext(existingFamilyContext) &&
+                            !loadedFamilyContextProfileIdsRef.current.has(profileId)))
+                      const hoverCardData = hoverCardDataForCell(row, columnMeta[column]?.hoverCard, {
+                        showFamilyContextLoading: shouldShowFamilyContextLoading,
+                      })
                       const hoverCardCellId = `row-${absoluteRowIndex}-col-${column}`
 
                       const content = isFormNameLink ? (
@@ -3773,7 +3885,6 @@ export default function TableDisplay({
                           }}
                           onMouseEnter={() => {
                             if (!supportsFamilyContextHover || column !== 'profile_display') return
-                            const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
                             if (!profileId) return
                             requestFamilyContextForProfile(profileId)
                           }}

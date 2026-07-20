@@ -96,16 +96,16 @@ const foundationCache = new Map<
 const fallbackProfileHoverContext: Omit<ClassAttendanceEnrichment, 'latest_geo' | 'giftcard_display'> = {
   profile_hover_top_discrepancy: '',
   profile_hover_more_discrepancies: '',
-  profile_hover_name: 'N/A',
-  profile_hover_parent_name: 'N/A',
-  profile_hover_email: 'N/A',
+  profile_hover_name: '',
+  profile_hover_parent_name: '',
+  profile_hover_email: '',
   profile_hover_student_phone: '',
-  profile_hover_parent_email: 'N/A',
-  profile_hover_parent_phone: 'N/A',
-  profile_hover_student_geo: 'N/A',
-  profile_hover_parent_geo: 'N/A',
-  profile_hover_student_submitted_address: 'N/A',
-  profile_hover_parent_address: 'N/A',
+  profile_hover_parent_email: '',
+  profile_hover_parent_phone: '',
+  profile_hover_student_geo: '',
+  profile_hover_parent_geo: '',
+  profile_hover_student_submitted_address: '',
+  profile_hover_parent_address: '',
 }
 
 const chunkArray = <T,>(items: T[], size: number) => {
