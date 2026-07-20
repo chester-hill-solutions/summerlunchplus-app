@@ -60,11 +60,15 @@ const chunkArray = <T,>(items: T[], size: number) => {
 }
 
 export async function loader(args: Route.LoaderArgs) {
+  const auth = await requireAuth(args.request)
+  if (!isRoleAtLeast(auth.claims.role, 'staff')) {
+    throw new Response('Unauthorized', { status: 403, headers: auth.headers })
+  }
+
   const url = new URL(args.request.url)
   const deferTable = url.searchParams.get('_deferTable') === '1'
 
   if (!deferTable) {
-    await requireAuth(args.request)
     return {
       label: 'Classes',
       tableName: 'class',
