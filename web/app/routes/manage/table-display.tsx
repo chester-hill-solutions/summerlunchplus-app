@@ -1294,7 +1294,17 @@ export default function TableDisplay({
     nextPage: number,
     nextPageSize: number
   ) => {
-    const next = new URLSearchParams()
+    const next = new URLSearchParams(searchParams)
+
+    next.delete('sort')
+    next.delete('dir')
+    next.delete('page')
+    next.delete('pageSize')
+
+    for (const key of Array.from(next.keys())) {
+      if (key.startsWith('f_')) next.delete(key)
+    }
+
     if (nextSortColumn && nextSortStage > 0) {
       next.set('sort', nextSortColumn)
       next.set('dir', nextSortStage === 2 ? 'asc' : 'desc')
