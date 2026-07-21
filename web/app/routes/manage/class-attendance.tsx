@@ -17,7 +17,7 @@ import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
 import { runZoomRegistrantForStudent } from '@/lib/zoom-jobs/runner.server'
 import { Download, Loader2 } from 'lucide-react'
-import { Form, useLoaderData, useLocation, useNavigation } from 'react-router'
+import { Form, Link, useLoaderData, useLocation, useNavigation } from 'react-router'
 import type { Route } from './+types/class-attendance'
 import DeferredTableDisplay from './deferred-table-display'
 
@@ -25,6 +25,10 @@ type AttendanceRow = {
   id: string
   class_id: string
   profile_id: string
+  state: 'active' | 'inactive'
+  inactive_at: string | null
+  inactive_by: string | null
+  inactive_reason: string | null
   status: 'unknown' | 'present' | 'absent' | null
   photo_status: 'uploaded' | 'accepted' | 'rejected' | null
   camera_on: boolean | null
@@ -218,6 +222,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     })
   }
   const scopedClassId = (url.searchParams.get('scopeClassId') ?? '').trim()
+  const attendanceStateParam = (url.searchParams.get('attendanceState') ?? 'active').trim().toLowerCase()
+  const attendanceStateFilter: 'active' | 'inactive' | 'all' =
+    attendanceStateParam === 'inactive' || attendanceStateParam === 'all' ? attendanceStateParam : 'active'
   const isScopedToSingleClass = scopedClassId.length > 0
   profile.mark('require_auth', {
     role: auth.claims.role,
@@ -234,21 +241,25 @@ export async function loader({ request }: Route.LoaderArgs) {
         'workshop_description',
         'class_starts_at',
         'profile_display',
+        'state',
         'status',
         'camera_on',
         'photo_status',
         'history_row',
         'latest_geo',
         'giftcard_display',
+        'state_action',
       ],
       rows: [] as Record<string, unknown>[],
       columnMeta: {
         workshop_description: { label: 'Workshop', filterable: true, fitContentOnLoad: true },
         class_starts_at: { label: 'Class starts', filterable: true, fitContentOnLoad: true },
         profile_display: { label: 'Profile', filterable: true, fitContentOnLoad: true },
+        state: { label: 'State', filterable: true },
         status: { label: 'Attendance', filterable: true },
         camera_on: { label: 'Camera on', filterable: true },
         photo_status: { label: 'Photo status', filterable: true },
+        state_action: { label: 'State action', filterable: false },
         history_row: { label: 'History', filterable: false },
         latest_geo: { label: 'Geo', filterable: true, truncate: true, fitContentOnLoad: true },
         giftcard_display: { label: 'Provider', filterable: true, truncate: true },
@@ -275,22 +286,24 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const attendanceRows: AttendanceRow[] = []
   let classAttendanceSelect =
-    'id, class_id, profile_id, status, photo_status, camera_on, gift_card_blocked, gift_card_block_reason, gift_card_blocked_at, gift_card_blocked_by, recorded_by, created_at, updated_at'
+    'id, class_id, profile_id, state, inactive_at, inactive_by, inactive_reason, status, photo_status, camera_on, gift_card_blocked, gift_card_block_reason, gift_card_blocked_at, gift_card_blocked_by, recorded_by, created_at, updated_at'
   let hasGiftCardSchema = true
   for (let offset = 0; ; offset += CLASS_ATTENDANCE_FETCH_BATCH_SIZE) {
-    let { data, error } = await adminClient
-      .from('class_attendance')
-      .select(classAttendanceSelect)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + CLASS_ATTENDANCE_FETCH_BATCH_SIZE - 1)
+    let query = adminClient.from('class_attendance').select(classAttendanceSelect)
+    if (attendanceStateFilter !== 'all') {
+      query = query.eq('state', attendanceStateFilter)
+    }
+    let { data, error } = await query.order('created_at', { ascending: false }).range(offset, offset + CLASS_ATTENDANCE_FETCH_BATCH_SIZE - 1)
 
     if (error && hasGiftCardSchema && classAttendanceSelect.includes('gift_card_blocked') && isSchemaMismatchError(error)) {
       hasGiftCardSchema = false
       classAttendanceSelect =
-        'id, class_id, profile_id, status, photo_status, camera_on, recorded_by, created_at, updated_at'
-      const fallbackResult = await adminClient
-        .from('class_attendance')
-        .select(classAttendanceSelect)
+        'id, class_id, profile_id, state, inactive_at, inactive_by, inactive_reason, status, photo_status, camera_on, recorded_by, created_at, updated_at'
+      let fallbackQuery = adminClient.from('class_attendance').select(classAttendanceSelect)
+      if (attendanceStateFilter !== 'all') {
+        fallbackQuery = fallbackQuery.eq('state', attendanceStateFilter)
+      }
+      const fallbackResult = await fallbackQuery
         .order('created_at', { ascending: false })
         .range(offset, offset + CLASS_ATTENDANCE_FETCH_BATCH_SIZE - 1)
       data = fallbackResult.data
@@ -302,10 +315,15 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
 
     const chunk = ((data ?? []) as unknown as Array<
-      Omit<AttendanceRow, 'gift_card_blocked' | 'gift_card_block_reason' | 'gift_card_blocked_at' | 'gift_card_blocked_by'> &
+      Omit<AttendanceRow, 'state' | 'inactive_at' | 'inactive_by' | 'inactive_reason' | 'gift_card_blocked' | 'gift_card_block_reason' | 'gift_card_blocked_at' | 'gift_card_blocked_by'> &
+        Partial<Pick<AttendanceRow, 'state' | 'inactive_at' | 'inactive_by' | 'inactive_reason'>> &
         Partial<Pick<AttendanceRow, 'gift_card_blocked' | 'gift_card_block_reason' | 'gift_card_blocked_at' | 'gift_card_blocked_by'>>
     >).map(row => ({
       ...row,
+      state: row.state === 'inactive' ? 'inactive' : 'active',
+      inactive_at: row.inactive_at ?? null,
+      inactive_by: row.inactive_by ?? null,
+      inactive_reason: row.inactive_reason ?? null,
       gift_card_blocked: row.gift_card_blocked === true,
       gift_card_block_reason: row.gift_card_block_reason ?? null,
       gift_card_blocked_at: row.gift_card_blocked_at ?? null,
@@ -745,6 +763,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       latest_sync_payload: latestSyncPayload,
       latest_sync_error: latestSync?.error_message ?? null,
       giftcard_display: '...',
+      state_action: row.state === 'inactive' ? 'Reactivate' : 'Inactivate',
       history_row: 'View history',
       latest_geo: '...',
       gift_card_allocated: giftCardAllocated,
@@ -822,6 +841,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       'workshop_description',
       'class_starts_at',
       'profile_display',
+      'state',
       'status',
       'camera_on',
       'photo_status',
@@ -876,7 +896,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       'class_id',
       'profile_id',
       'id',
-      'delete_row',
+      'state_action',
     ],
     rows,
     columnMeta: {
@@ -975,7 +995,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       class_id: { label: 'Class ID', filterable: true },
       profile_id: { label: 'Profile ID', filterable: true },
       id: { label: 'Attendance ID', filterable: true },
-      delete_row: { label: 'Delete', filterable: false },
+      state: { label: 'State', filterable: true },
+      state_action: { label: 'State action', filterable: false },
     },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
   }
@@ -1287,43 +1308,80 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
-  if (intent === 'delete-attendance-row') {
-    profile.mark('intent_delete_attendance_row_start')
+  if (intent === 'set-attendance-state' || intent === 'delete-attendance-row') {
+    profile.mark('intent_set_attendance_state_start')
     const classId = formData.get('class_id') as string
     const profileId = formData.get('profile_id') as string
     if (!classId || !profileId) {
-      outcome = 'delete_missing_identifiers'
+      outcome = 'set_state_missing_identifiers'
       return new Response('Missing identifiers', { status: 400, headers: auth.headers })
     }
 
+    const requestedStateRaw = String(formData.get('state') ?? '').trim().toLowerCase()
+    const nextState: Database['public']['Enums']['class_attendance_state'] =
+      intent === 'delete-attendance-row'
+        ? 'inactive'
+        : requestedStateRaw === 'inactive'
+          ? 'inactive'
+          : 'active'
+    const reason = (formData.get('inactive_reason') as string | null)?.trim() ?? ''
+    if (nextState === 'inactive' && !reason) {
+      outcome = 'set_state_missing_reason'
+      return new Response('Inactive reason is required.', { status: 400, headers: auth.headers })
+    }
+
     const { supabase } = createClient(request)
-    const deleteStartedAt = nowMs()
-    const { error } = await supabase.from('class_attendance').delete().eq('class_id', classId).eq('profile_id', profileId)
+    const updateStartedAt = nowMs()
+    const nowIso = new Date().toISOString()
+    const { error } = await supabase
+      .from('class_attendance')
+      .update(
+        nextState === 'inactive'
+          ? {
+              state: 'inactive',
+              inactive_at: nowIso,
+              inactive_by: auth.user.id,
+              inactive_reason: reason,
+              recorded_by: auth.user.id,
+            }
+          : {
+              state: 'active',
+              inactive_at: null,
+              inactive_by: null,
+              inactive_reason: null,
+              recorded_by: auth.user.id,
+            }
+      )
+      .eq('class_id', classId)
+      .eq('profile_id', profileId)
     console.info('[class-attendance][mutation]', {
       intent,
-      mutation: 'delete_attendance_row',
+      mutation: 'set_attendance_state',
       classId,
       profileId,
-      duration_ms: nowMs() - deleteStartedAt,
+      nextState,
+      duration_ms: nowMs() - updateStartedAt,
       hasError: Boolean(error),
     })
-    profile.mark('delete_attendance_row_execute', {
+    profile.mark('set_attendance_state_execute', {
       classId,
       profileId,
+      nextState,
       hasError: Boolean(error),
     })
 
     if (error) {
-      outcome = 'delete_error'
+      outcome = 'set_state_error'
       return new Response(error.message, { status: 500, headers: auth.headers })
     }
 
-    outcome = 'delete_success'
+    outcome = 'set_state_success'
     return {
       ok: true,
-      intent: 'delete-attendance-row',
+      intent: 'set-attendance-state',
       class_id: classId,
       profile_id: profileId,
+      state: nextState,
     }
   }
 
@@ -1790,6 +1848,23 @@ export default function ClassAttendancePage() {
   const data = useLoaderData<typeof loader>()
   const location = useLocation()
   const navigation = useNavigation()
+  const currentSearch = new URLSearchParams(location.search)
+  const currentAttendanceState = (() => {
+    const value = (currentSearch.get('attendanceState') ?? 'active').trim().toLowerCase()
+    if (value === 'inactive' || value === 'all') return value
+    return 'active'
+  })()
+  const buildStateHref = (nextState: 'active' | 'inactive' | 'all') => {
+    const params = new URLSearchParams(location.search)
+    if (nextState === 'active') {
+      params.delete('attendanceState')
+    } else {
+      params.set('attendanceState', nextState)
+    }
+    params.delete('page')
+    const search = params.toString()
+    return search ? `${location.pathname}?${search}` : location.pathname
+  }
   const sourcePath = `/manage/class-attendance${location.search}`
   const isCreatingExport = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'create-export'
 
@@ -1798,21 +1873,39 @@ export default function ClassAttendancePage() {
       dataPath="/manage/class-attendance/table-data"
       fallbackData={data}
       paginationActions={
-        <Form method="post" action="/manage/exports" className="flex items-center gap-2">
-          <input type="hidden" name="intent" value="create-export" />
-          <input type="hidden" name="export_type" value={EXPORT_TYPE_CLASS_ATTENDANCE_CSV} />
-          <input type="hidden" name="source_path" value={sourcePath} />
-          <Button
-            type="submit"
-            variant="outline"
-            size="icon-sm"
-            disabled={isCreatingExport}
-            aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
-            title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
-          >
-            {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-          </Button>
-        </Form>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex items-center rounded border border-input bg-background p-0.5 text-xs">
+            {(['active', 'inactive', 'all'] as const).map(value => {
+              const isCurrent = currentAttendanceState === value
+              const label = value === 'active' ? 'Active' : value === 'inactive' ? 'Inactive' : 'All'
+              return (
+                <Link
+                  key={value}
+                  to={buildStateHref(value)}
+                  className={`rounded px-2 py-1 ${isCurrent ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                >
+                  {label}
+                </Link>
+              )
+            })}
+          </div>
+
+          <Form method="post" action="/manage/exports" className="flex items-center gap-2">
+            <input type="hidden" name="intent" value="create-export" />
+            <input type="hidden" name="export_type" value={EXPORT_TYPE_CLASS_ATTENDANCE_CSV} />
+            <input type="hidden" name="source_path" value={sourcePath} />
+            <Button
+              type="submit"
+              variant="outline"
+              size="icon-sm"
+              disabled={isCreatingExport}
+              aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
+              title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
+            >
+              {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+            </Button>
+          </Form>
+        </div>
       }
     />
   )

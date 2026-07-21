@@ -14,6 +14,11 @@ create type public.class_attendance_status as enum (
   'absent'
 );
 
+create type public.class_attendance_state as enum (
+  'active',
+  'inactive'
+);
+
 create type public.class_attendance_photo_status as enum (
   'uploaded',
   'accepted',
@@ -73,6 +78,10 @@ create table public.class_attendance (
   id uuid primary key default gen_random_uuid(),
   class_id uuid not null references public.class (id) on update cascade on delete cascade,
   profile_id uuid not null references public.profile (id) on update cascade on delete cascade,
+  state public.class_attendance_state not null default 'active',
+  inactive_at timestamptz,
+  inactive_by uuid references auth.users (id) on update cascade on delete set null,
+  inactive_reason text,
   status public.class_attendance_status,
   photo_status public.class_attendance_photo_status,
   camera_on boolean,
@@ -84,6 +93,10 @@ create table public.class_attendance (
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  check (
+    (state = 'active' and inactive_at is null and inactive_by is null and inactive_reason is null)
+    or (state = 'inactive' and inactive_at is not null and nullif(btrim(coalesce(inactive_reason, '')), '') is not null)
+  ),
   unique (class_id, profile_id)
 );
 
@@ -158,6 +171,9 @@ create index class_attendance_audit_class_profile_created_idx
 
 create index class_attendance_audit_attendance_created_idx
   on public.class_attendance_audit (class_attendance_id, created_at desc);
+
+create index class_attendance_state_created_idx
+  on public.class_attendance (state, created_at desc);
 
 create table public.workshop_enrollment (
   id uuid primary key default gen_random_uuid(),
@@ -470,7 +486,12 @@ begin
   join public.workshop_enrollment we on we.workshop_id = c.workshop_id
   where c.starts_at <= now() + interval '36 hours'
     and we.status = 'approved'
-  on conflict (class_id, profile_id) do nothing;
+  on conflict (class_id, profile_id)
+  do update
+    set state = 'active',
+        inactive_at = null,
+        inactive_by = null,
+        inactive_reason = null;
 end;
 $$;
 
@@ -501,6 +522,10 @@ begin
     v_class_id := old.class_id;
     v_profile_id := old.profile_id;
     v_changed_fields := jsonb_build_object(
+      'state', jsonb_build_object('old', old.state, 'new', null),
+      'inactive_at', jsonb_build_object('old', old.inactive_at, 'new', null),
+      'inactive_by', jsonb_build_object('old', old.inactive_by, 'new', null),
+      'inactive_reason', jsonb_build_object('old', old.inactive_reason, 'new', null),
       'status', jsonb_build_object('old', old.status, 'new', null),
       'photo_status', jsonb_build_object('old', old.photo_status, 'new', null),
       'camera_on', jsonb_build_object('old', old.camera_on, 'new', null),
@@ -518,6 +543,18 @@ begin
     v_profile_id := new.profile_id;
     if tg_op = 'UPDATE' then
       v_recorded_by_before := old.recorded_by;
+      if new.state is distinct from old.state then
+        v_changed_fields := v_changed_fields || jsonb_build_object('state', jsonb_build_object('old', old.state, 'new', new.state));
+      end if;
+      if new.inactive_at is distinct from old.inactive_at then
+        v_changed_fields := v_changed_fields || jsonb_build_object('inactive_at', jsonb_build_object('old', old.inactive_at, 'new', new.inactive_at));
+      end if;
+      if new.inactive_by is distinct from old.inactive_by then
+        v_changed_fields := v_changed_fields || jsonb_build_object('inactive_by', jsonb_build_object('old', old.inactive_by, 'new', new.inactive_by));
+      end if;
+      if new.inactive_reason is distinct from old.inactive_reason then
+        v_changed_fields := v_changed_fields || jsonb_build_object('inactive_reason', jsonb_build_object('old', old.inactive_reason, 'new', new.inactive_reason));
+      end if;
       if new.status is distinct from old.status then
         v_changed_fields := v_changed_fields || jsonb_build_object('status', jsonb_build_object('old', old.status, 'new', new.status));
       end if;
@@ -556,6 +593,10 @@ begin
       end if;
     else
       v_changed_fields := jsonb_build_object(
+        'state', jsonb_build_object('old', null, 'new', new.state),
+        'inactive_at', jsonb_build_object('old', null, 'new', new.inactive_at),
+        'inactive_by', jsonb_build_object('old', null, 'new', new.inactive_by),
+        'inactive_reason', jsonb_build_object('old', null, 'new', new.inactive_reason),
         'status', jsonb_build_object('old', null, 'new', new.status),
         'photo_status', jsonb_build_object('old', null, 'new', new.photo_status),
         'camera_on', jsonb_build_object('old', null, 'new', new.camera_on),
@@ -874,6 +915,7 @@ create policy workshop_enrollment_read_auth_admin
 -- Grants
 grant usage on type public.workshop_enrollment_status to authenticated, supabase_auth_admin;
 grant usage on type public.class_attendance_status to authenticated, supabase_auth_admin;
+grant usage on type public.class_attendance_state to authenticated, supabase_auth_admin;
 grant usage on type public.class_attendance_photo_status to authenticated, supabase_auth_admin;
 grant usage on type public.class_attendance_photo_upload_status to authenticated, supabase_auth_admin;
 

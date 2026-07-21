@@ -742,6 +742,7 @@ const allocateGiftCards = async (): Promise<AllocationSummary> => {
       const attendanceQuery = adminClient
         .from('class_attendance')
         .select('id, class_id, profile_id, camera_on, photo_status, gift_card_blocked, class:class_id(starts_at, ends_at), profile:profile_id(email)')
+        .eq('state', 'active')
         .or('camera_on.eq.true,photo_status.eq.accepted,photo_status.eq.uploaded')
         .order('id', { ascending: true })
         .limit(PAGE_SIZE)

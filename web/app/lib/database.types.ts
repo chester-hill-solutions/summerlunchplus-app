@@ -7,6 +7,11 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.1"
+  }
   public: {
     Tables: {
       class: {
@@ -54,12 +59,16 @@ export type Database = {
           gift_card_blocked_at: string | null
           gift_card_blocked_by: string | null
           id: string
+          inactive_at: string | null
+          inactive_by: string | null
+          inactive_reason: string | null
           notes: string | null
           photo_status:
             | Database["public"]["Enums"]["class_attendance_photo_status"]
             | null
           profile_id: string
           recorded_by: string | null
+          state: Database["public"]["Enums"]["class_attendance_state"]
           status: Database["public"]["Enums"]["class_attendance_status"] | null
           updated_at: string
         }
@@ -72,12 +81,16 @@ export type Database = {
           gift_card_blocked_at?: string | null
           gift_card_blocked_by?: string | null
           id?: string
+          inactive_at?: string | null
+          inactive_by?: string | null
+          inactive_reason?: string | null
           notes?: string | null
           photo_status?:
             | Database["public"]["Enums"]["class_attendance_photo_status"]
             | null
           profile_id: string
           recorded_by?: string | null
+          state?: Database["public"]["Enums"]["class_attendance_state"]
           status?: Database["public"]["Enums"]["class_attendance_status"] | null
           updated_at?: string
         }
@@ -90,12 +103,16 @@ export type Database = {
           gift_card_blocked_at?: string | null
           gift_card_blocked_by?: string | null
           id?: string
+          inactive_at?: string | null
+          inactive_by?: string | null
+          inactive_reason?: string | null
           notes?: string | null
           photo_status?:
             | Database["public"]["Enums"]["class_attendance_photo_status"]
             | null
           profile_id?: string
           recorded_by?: string | null
+          state?: Database["public"]["Enums"]["class_attendance_state"]
           status?: Database["public"]["Enums"]["class_attendance_status"] | null
           updated_at?: string
         }
@@ -160,6 +177,155 @@ export type Database = {
           source?: string
         }
         Relationships: []
+      }
+      class_attendance_photo: {
+        Row: {
+          byte_size: number | null
+          class_attendance_id: string | null
+          class_id: string
+          created_at: string
+          file_name: string | null
+          id: string
+          metadata: Json
+          mime_type: string | null
+          profile_id: string
+          storage_bucket: string
+          storage_path: string
+          updated_at: string
+          uploaded_at: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          byte_size?: number | null
+          class_attendance_id?: string | null
+          class_id: string
+          created_at?: string
+          file_name?: string | null
+          id?: string
+          metadata?: Json
+          mime_type?: string | null
+          profile_id: string
+          storage_bucket: string
+          storage_path: string
+          updated_at?: string
+          uploaded_at?: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          byte_size?: number | null
+          class_attendance_id?: string | null
+          class_id?: string
+          created_at?: string
+          file_name?: string | null
+          id?: string
+          metadata?: Json
+          mime_type?: string | null
+          profile_id?: string
+          storage_bucket?: string
+          storage_path?: string
+          updated_at?: string
+          uploaded_at?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_attendance_photo_class_attendance_id_fkey"
+            columns: ["class_attendance_id"]
+            isOneToOne: false
+            referencedRelation: "class_attendance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_attendance_photo_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_attendance_photo_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      class_attendance_photo_upload_attempt: {
+        Row: {
+          byte_size: number | null
+          class_attendance_id: string | null
+          class_id: string
+          created_at: string
+          error_message: string | null
+          file_name: string | null
+          id: string
+          mime_type: string | null
+          profile_id: string
+          request_metadata: Json
+          status: Database["public"]["Enums"]["class_attendance_photo_upload_status"]
+          storage_bucket: string | null
+          storage_path: string | null
+          updated_at: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          byte_size?: number | null
+          class_attendance_id?: string | null
+          class_id: string
+          created_at?: string
+          error_message?: string | null
+          file_name?: string | null
+          id?: string
+          mime_type?: string | null
+          profile_id: string
+          request_metadata?: Json
+          status?: Database["public"]["Enums"]["class_attendance_photo_upload_status"]
+          storage_bucket?: string | null
+          storage_path?: string | null
+          updated_at?: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          byte_size?: number | null
+          class_attendance_id?: string | null
+          class_id?: string
+          created_at?: string
+          error_message?: string | null
+          file_name?: string | null
+          id?: string
+          mime_type?: string | null
+          profile_id?: string
+          request_metadata?: Json
+          status?: Database["public"]["Enums"]["class_attendance_photo_upload_status"]
+          storage_bucket?: string | null
+          storage_path?: string | null
+          updated_at?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_attendance_photo_upload_attempt_class_attendance_id_fkey"
+            columns: ["class_attendance_id"]
+            isOneToOne: false
+            referencedRelation: "class_attendance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_attendance_photo_upload_attempt_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_attendance_photo_upload_attempt_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       class_zoom_meeting: {
         Row: {
@@ -404,6 +570,74 @@ export type Database = {
           },
           {
             foreignKeyName: "class_zoom_registrant_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_change_log: {
+        Row: {
+          auth_updated: boolean
+          changed_by: string
+          created_at: string
+          details: Json
+          id: string
+          invite_rows_updated: number
+          invites_updated: boolean
+          new_email: string
+          old_email: string
+          profile_id: string
+          profile_updated: boolean
+          reason: string
+          status: Database["public"]["Enums"]["email_change_status"]
+          updated_at: string
+          user_id: string | null
+          zoom_sync_completed_at: string | null
+          zoom_sync_started_at: string | null
+        }
+        Insert: {
+          auth_updated?: boolean
+          changed_by: string
+          created_at?: string
+          details?: Json
+          id?: string
+          invite_rows_updated?: number
+          invites_updated?: boolean
+          new_email: string
+          old_email: string
+          profile_id: string
+          profile_updated?: boolean
+          reason: string
+          status?: Database["public"]["Enums"]["email_change_status"]
+          updated_at?: string
+          user_id?: string | null
+          zoom_sync_completed_at?: string | null
+          zoom_sync_started_at?: string | null
+        }
+        Update: {
+          auth_updated?: boolean
+          changed_by?: string
+          created_at?: string
+          details?: Json
+          id?: string
+          invite_rows_updated?: number
+          invites_updated?: boolean
+          new_email?: string
+          old_email?: string
+          profile_id?: string
+          profile_updated?: boolean
+          reason?: string
+          status?: Database["public"]["Enums"]["email_change_status"]
+          updated_at?: string
+          user_id?: string | null
+          zoom_sync_completed_at?: string | null
+          zoom_sync_started_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_change_log_profile_id_fkey"
             columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profile"
@@ -1029,93 +1263,6 @@ export type Database = {
           },
         ]
       }
-      gift_card_asset: {
-        Row: {
-          account_number: string
-          allocated_at: string | null
-          asset_url: string
-          assigned_profile_id: string | null
-          created_at: string
-          id: string
-          metadata: Json
-          opened_at: string | null
-          opened_count: number
-          last_opened_at: string | null
-          page_count: number | null
-          pin: string
-          provider: Database["public"]["Enums"]["gift_card_provider"]
-          reminder_sent_at: string | null
-          sent_at: string | null
-          source_index: number | null
-          status: Database["public"]["Enums"]["gift_card_asset_status"]
-          updated_at: string
-          upload_id: string
-          used_at: string | null
-          value: number
-        }
-        Insert: {
-          account_number: string
-          allocated_at?: string | null
-          asset_url: string
-          assigned_profile_id?: string | null
-          created_at?: string
-          id?: string
-          metadata?: Json
-          opened_at?: string | null
-          opened_count?: number
-          last_opened_at?: string | null
-          page_count?: number | null
-          pin: string
-          provider?: Database["public"]["Enums"]["gift_card_provider"]
-          reminder_sent_at?: string | null
-          sent_at?: string | null
-          source_index?: number | null
-          status?: Database["public"]["Enums"]["gift_card_asset_status"]
-          updated_at?: string
-          upload_id: string
-          used_at?: string | null
-          value: number
-        }
-        Update: {
-          account_number?: string
-          allocated_at?: string | null
-          asset_url?: string
-          assigned_profile_id?: string | null
-          created_at?: string
-          id?: string
-          metadata?: Json
-          opened_at?: string | null
-          opened_count?: number
-          last_opened_at?: string | null
-          page_count?: number | null
-          pin?: string
-          provider?: Database["public"]["Enums"]["gift_card_provider"]
-          reminder_sent_at?: string | null
-          sent_at?: string | null
-          source_index?: number | null
-          status?: Database["public"]["Enums"]["gift_card_asset_status"]
-          updated_at?: string
-          upload_id?: string
-          used_at?: string | null
-          value?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "gift_card_asset_assigned_profile_id_fkey"
-            columns: ["assigned_profile_id"]
-            isOneToOne: false
-            referencedRelation: "profile"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "gift_card_asset_upload_id_fkey"
-            columns: ["upload_id"]
-            isOneToOne: false
-            referencedRelation: "gift_card_upload"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       gift_card_allocation: {
         Row: {
           blocked: boolean
@@ -1201,7 +1348,7 @@ export type Database = {
           {
             foreignKeyName: "gift_card_allocation_gift_card_asset_id_fkey"
             columns: ["gift_card_asset_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "gift_card_asset"
             referencedColumns: ["id"]
           },
@@ -1210,6 +1357,100 @@ export type Database = {
             columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gift_card_allocation_reminder_email_message_id_fkey"
+            columns: ["reminder_email_message_id"]
+            isOneToOne: false
+            referencedRelation: "email_message"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gift_card_asset: {
+        Row: {
+          account_number: string
+          allocated_at: string | null
+          asset_url: string
+          assigned_profile_id: string | null
+          created_at: string
+          id: string
+          last_opened_at: string | null
+          metadata: Json
+          opened_at: string | null
+          opened_count: number
+          page_count: number | null
+          pin: string
+          provider: Database["public"]["Enums"]["gift_card_provider"]
+          reminder_sent_at: string | null
+          sent_at: string | null
+          source_index: number | null
+          status: Database["public"]["Enums"]["gift_card_asset_status"]
+          updated_at: string
+          upload_id: string
+          used_at: string | null
+          value: number
+        }
+        Insert: {
+          account_number?: string
+          allocated_at?: string | null
+          asset_url: string
+          assigned_profile_id?: string | null
+          created_at?: string
+          id?: string
+          last_opened_at?: string | null
+          metadata?: Json
+          opened_at?: string | null
+          opened_count?: number
+          page_count?: number | null
+          pin?: string
+          provider?: Database["public"]["Enums"]["gift_card_provider"]
+          reminder_sent_at?: string | null
+          sent_at?: string | null
+          source_index?: number | null
+          status?: Database["public"]["Enums"]["gift_card_asset_status"]
+          updated_at?: string
+          upload_id: string
+          used_at?: string | null
+          value: number
+        }
+        Update: {
+          account_number?: string
+          allocated_at?: string | null
+          asset_url?: string
+          assigned_profile_id?: string | null
+          created_at?: string
+          id?: string
+          last_opened_at?: string | null
+          metadata?: Json
+          opened_at?: string | null
+          opened_count?: number
+          page_count?: number | null
+          pin?: string
+          provider?: Database["public"]["Enums"]["gift_card_provider"]
+          reminder_sent_at?: string | null
+          sent_at?: string | null
+          source_index?: number | null
+          status?: Database["public"]["Enums"]["gift_card_asset_status"]
+          updated_at?: string
+          upload_id?: string
+          used_at?: string | null
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gift_card_asset_assigned_profile_id_fkey"
+            columns: ["assigned_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gift_card_asset_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "gift_card_upload"
             referencedColumns: ["id"]
           },
         ]
@@ -2207,6 +2448,236 @@ export type Database = {
         }
         Relationships: []
       }
+      zoom_job_attempt: {
+        Row: {
+          action_type: string
+          class_id: string | null
+          class_zoom_meeting_id: string | null
+          class_zoom_registrant_id: string | null
+          completed_at: string | null
+          created_at: string
+          duration_ms: number | null
+          error_message: string | null
+          error_payload: Json
+          external_request_payload: Json
+          external_response_payload: Json
+          id: string
+          profile_id: string | null
+          request_payload: Json
+          result_payload: Json
+          run_id: string
+          started_at: string
+          status: string
+          trigger_kind: string
+          trigger_source: string
+          updated_at: string
+          zoom_job_run_id: string | null
+        }
+        Insert: {
+          action_type: string
+          class_id?: string | null
+          class_zoom_meeting_id?: string | null
+          class_zoom_registrant_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          error_payload?: Json
+          external_request_payload?: Json
+          external_response_payload?: Json
+          id?: string
+          profile_id?: string | null
+          request_payload?: Json
+          result_payload?: Json
+          run_id: string
+          started_at?: string
+          status?: string
+          trigger_kind: string
+          trigger_source: string
+          updated_at?: string
+          zoom_job_run_id?: string | null
+        }
+        Update: {
+          action_type?: string
+          class_id?: string | null
+          class_zoom_meeting_id?: string | null
+          class_zoom_registrant_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          error_payload?: Json
+          external_request_payload?: Json
+          external_response_payload?: Json
+          id?: string
+          profile_id?: string | null
+          request_payload?: Json
+          result_payload?: Json
+          run_id?: string
+          started_at?: string
+          status?: string
+          trigger_kind?: string
+          trigger_source?: string
+          updated_at?: string
+          zoom_job_run_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "zoom_job_attempt_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "class"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zoom_job_attempt_class_zoom_meeting_id_fkey"
+            columns: ["class_zoom_meeting_id"]
+            isOneToOne: false
+            referencedRelation: "class_zoom_meeting"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zoom_job_attempt_class_zoom_registrant_id_fkey"
+            columns: ["class_zoom_registrant_id"]
+            isOneToOne: false
+            referencedRelation: "class_zoom_registrant"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zoom_job_attempt_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zoom_job_attempt_zoom_job_run_id_fkey"
+            columns: ["zoom_job_run_id"]
+            isOneToOne: false
+            referencedRelation: "zoom_job_run"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      zoom_job_attempt_event: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          payload: Json
+          status: string
+          zoom_job_attempt_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          payload?: Json
+          status?: string
+          zoom_job_attempt_id: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          payload?: Json
+          status?: string
+          zoom_job_attempt_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "zoom_job_attempt_event_zoom_job_attempt_id_fkey"
+            columns: ["zoom_job_attempt_id"]
+            isOneToOne: false
+            referencedRelation: "zoom_job_attempt"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      zoom_job_lock: {
+        Row: {
+          acquired_at: string
+          expires_at: string
+          last_heartbeat_at: string
+          lock_name: string
+          metadata: Json
+          owner_instance: string | null
+          owner_kind: string
+          owner_run_id: string
+        }
+        Insert: {
+          acquired_at?: string
+          expires_at: string
+          last_heartbeat_at?: string
+          lock_name: string
+          metadata?: Json
+          owner_instance?: string | null
+          owner_kind: string
+          owner_run_id: string
+        }
+        Update: {
+          acquired_at?: string
+          expires_at?: string
+          last_heartbeat_at?: string
+          lock_name?: string
+          metadata?: Json
+          owner_instance?: string | null
+          owner_kind?: string
+          owner_run_id?: string
+        }
+        Relationships: []
+      }
+      zoom_job_run: {
+        Row: {
+          actor_role: string | null
+          actor_user_id: string | null
+          completed_at: string | null
+          context: Json
+          created_at: string
+          error_message: string | null
+          id: string
+          run_id: string
+          started_at: string
+          status: string
+          summary: Json
+          trigger_kind: string
+          trigger_source: string
+          updated_at: string
+        }
+        Insert: {
+          actor_role?: string | null
+          actor_user_id?: string | null
+          completed_at?: string | null
+          context?: Json
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          run_id: string
+          started_at?: string
+          status?: string
+          summary?: Json
+          trigger_kind: string
+          trigger_source: string
+          updated_at?: string
+        }
+        Update: {
+          actor_role?: string | null
+          actor_user_id?: string | null
+          completed_at?: string | null
+          context?: Json
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          run_id?: string
+          started_at?: string
+          status?: string
+          summary?: Json
+          trigger_kind?: string
+          trigger_source?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -2257,6 +2728,22 @@ export type Database = {
       }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
       ensure_class_attendance_rows: { Args: never; Returns: undefined }
+      ensure_class_camera_or_photo_followup_email_draft: {
+        Args: never
+        Returns: undefined
+      }
+      ensure_class_reminder_login_email_draft: {
+        Args: never
+        Returns: undefined
+      }
+      ensure_gift_card_inventory_low_email_draft: {
+        Args: never
+        Returns: undefined
+      }
+      ensure_meal_kit_pickup_reminder_email_draft: {
+        Args: never
+        Returns: undefined
+      }
       has_completed_required_forms: {
         Args: { p_user_id: string }
         Returns: boolean
@@ -2296,6 +2783,42 @@ export type Database = {
       sync_auto_assigned_forms_for_user: {
         Args: { p_user_id: string }
         Returns: undefined
+      }
+      update_class_camera_or_photo_followup_email_copy: {
+        Args: never
+        Returns: undefined
+      }
+      update_class_reminder_login_email_copy: {
+        Args: never
+        Returns: undefined
+      }
+      zoom_advisory_unlock: { Args: { p_lock_name: string }; Returns: boolean }
+      zoom_lock_heartbeat: {
+        Args: {
+          p_lock_name: string
+          p_owner_run_id: string
+          p_ttl_seconds?: number
+        }
+        Returns: boolean
+      }
+      zoom_lock_release: {
+        Args: { p_lock_name: string; p_owner_run_id: string }
+        Returns: boolean
+      }
+      zoom_lock_try_acquire: {
+        Args: {
+          p_lock_name: string
+          p_metadata?: Json
+          p_owner_instance?: string
+          p_owner_kind: string
+          p_owner_run_id: string
+          p_ttl_seconds?: number
+        }
+        Returns: Json
+      }
+      zoom_try_advisory_lock: {
+        Args: { p_lock_name: string }
+        Returns: boolean
       }
     }
     Enums: {
@@ -2369,6 +2892,14 @@ export type Database = {
         | "zlr_click_event.read"
         | "zlr_click_event.update"
         | "zlr_click_event.delete"
+        | "class_attendance_photo.create"
+        | "class_attendance_photo.read"
+        | "class_attendance_photo.update"
+        | "class_attendance_photo.delete"
+        | "class_attendance_photo_upload_attempt.create"
+        | "class_attendance_photo_upload_attempt.read"
+        | "class_attendance_photo_upload_attempt.update"
+        | "class_attendance_photo_upload_attempt.delete"
       app_role:
         | "unassigned"
         | "admin"
@@ -2377,8 +2908,15 @@ export type Database = {
         | "instructor"
         | "student"
         | "guardian"
-      class_attendance_photo_status: "uploaded" | "accepted" | "rejected" | "expired"
+      class_attendance_photo_status:
+        | "uploaded"
+        | "accepted"
+        | "rejected"
+        | "expired"
+      class_attendance_photo_upload_status: "started" | "succeeded" | "failed"
+      class_attendance_state: "active" | "inactive"
       class_attendance_status: "unknown" | "present" | "absent"
+      email_change_status: "pending" | "applied" | "partial" | "failed"
       email_draft_channel: "transactional" | "auth"
       email_draft_status: "draft" | "published" | "archived"
       email_message_status: "queued" | "sent" | "failed" | "skipped"
@@ -2392,13 +2930,13 @@ export type Database = {
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
-        | "number"
         | "single_choice"
         | "multi_choice"
         | "date"
         | "address"
         | "agreement"
         | "checkbox"
+        | "number"
         | "no-input-text"
       gift_card_allocation_status: "allocated" | "sent" | "opened"
       gift_card_asset_status:
@@ -2622,6 +3160,14 @@ export const Constants = {
         "zlr_click_event.read",
         "zlr_click_event.update",
         "zlr_click_event.delete",
+        "class_attendance_photo.create",
+        "class_attendance_photo.read",
+        "class_attendance_photo.update",
+        "class_attendance_photo.delete",
+        "class_attendance_photo_upload_attempt.create",
+        "class_attendance_photo_upload_attempt.read",
+        "class_attendance_photo_upload_attempt.update",
+        "class_attendance_photo_upload_attempt.delete",
       ],
       app_role: [
         "unassigned",
@@ -2632,8 +3178,16 @@ export const Constants = {
         "student",
         "guardian",
       ],
-      class_attendance_photo_status: ["uploaded", "accepted", "rejected", "expired"],
+      class_attendance_photo_status: [
+        "uploaded",
+        "accepted",
+        "rejected",
+        "expired",
+      ],
+      class_attendance_photo_upload_status: ["started", "succeeded", "failed"],
+      class_attendance_state: ["active", "inactive"],
       class_attendance_status: ["unknown", "present", "absent"],
+      email_change_status: ["pending", "applied", "partial", "failed"],
       email_draft_channel: ["transactional", "auth"],
       email_draft_status: ["draft", "published", "archived"],
       email_message_status: ["queued", "sent", "failed", "skipped"],
@@ -2648,13 +3202,13 @@ export const Constants = {
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
-        "number",
         "single_choice",
         "multi_choice",
         "date",
         "address",
         "agreement",
         "checkbox",
+        "number",
         "no-input-text",
       ],
       gift_card_allocation_status: ["allocated", "sent", "opened"],

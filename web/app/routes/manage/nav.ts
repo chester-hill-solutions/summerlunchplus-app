@@ -122,6 +122,11 @@ export const manageSections: ManageNavSection[] = [
         label: 'Raw attendance',
         description: 'Raw class_attendance rows before enrichment and derived debug fields.',
       },
+      {
+        to: '/manage/class-attendance-mismatch',
+        label: 'Attendance mismatch',
+        description: 'Rows where the profile is not approved for the class workshop.',
+      },
       { to: '/manage/class-attendance-photo-upload-attempt', label: 'Photo upload attempts', description: 'Debug class photo upload failures and retries.' },
       { to: '/manage/ip-org-policy', label: 'IP org policy', description: 'Classify network org strings for proxy, ISP, and greylist discrepancy handling.' },
       { to: '/manage/semester-form-requirement', label: 'Semester surveys', description: 'Map one pre/post survey form per semester.' },
