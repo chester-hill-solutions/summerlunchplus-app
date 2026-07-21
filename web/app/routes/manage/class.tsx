@@ -3,7 +3,7 @@ import { Form, useActionData, useLoaderData, useNavigation } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
-import { createClient } from '@/lib/supabase/server'
+import { adminClient } from '@/lib/supabase/adminClient'
 import { provisionClassById } from '@/lib/zoom-jobs/provision.server'
 import { runZoomJobs, runZoomJobsForClass } from '@/lib/zoom-jobs/runner.server'
 import type { Route } from './+types/class'
@@ -117,8 +117,6 @@ export async function loader(args: Route.LoaderArgs) {
 
   if (!classIds.length) return base
 
-  const { supabase } = createClient(args.request)
-
   const fetchMeetingsByClassId = async () => {
     const meetings: Array<{
       id: string
@@ -133,10 +131,10 @@ export async function loader(args: Route.LoaderArgs) {
     }> = []
 
     for (const classIdChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
-      const { data, error } = await supabase
-        .from('class_zoom_meeting')
-        .select('id, class_id, status, join_url, host_zoom_user_email, zoom_meeting_id, start_time, duration_minutes, topic')
-        .in('class_id', classIdChunk)
+        const { data, error } = await adminClient
+          .from('class_zoom_meeting')
+          .select('id, class_id, status, join_url, host_zoom_user_email, zoom_meeting_id, start_time, duration_minutes, topic')
+          .in('class_id', classIdChunk)
       if (error) throw new Response(error.message, { status: 500 })
       meetings.push(...((data ?? []) as typeof meetings))
     }
@@ -155,7 +153,7 @@ export async function loader(args: Route.LoaderArgs) {
 
     for (const classIdChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
       for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
-        const { data, error } = await supabase
+        const { data, error } = await adminClient
           .from('class_zoom_registrant')
           .select('class_id, profile_id, zoom_registrant_id, zoom_join_url, last_sent_at')
           .in('class_id', classIdChunk)
@@ -178,7 +176,7 @@ export async function loader(args: Route.LoaderArgs) {
 
     for (const workshopIdChunk of chunkArray(workshopIds, IN_CLAUSE_BATCH_SIZE)) {
       for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
-        const { data, error } = await supabase
+        const { data, error } = await adminClient
           .from('workshop_enrollment')
           .select('workshop_id, profile_id, status')
           .in('workshop_id', workshopIdChunk)
@@ -199,7 +197,7 @@ export async function loader(args: Route.LoaderArgs) {
     const attendanceRows: Array<{ class_id: string; profile_id: string | null }> = []
     for (const classIdChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
       for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
-        const { data, error } = await supabase
+        const { data, error } = await adminClient
           .from('class_attendance')
           .select('class_id, profile_id')
           .in('class_id', classIdChunk)
@@ -253,7 +251,7 @@ export async function loader(args: Route.LoaderArgs) {
   if (meetingIds.length) {
     for (const meetingIdChunk of chunkArray(meetingIds, IN_CLAUSE_BATCH_SIZE)) {
       for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
-        const { data, error } = await supabase
+        const { data, error } = await adminClient
           .from('class_zoom_participant_sync')
           .select('class_zoom_meeting_id, status, created_at')
           .in('class_zoom_meeting_id', meetingIdChunk)
