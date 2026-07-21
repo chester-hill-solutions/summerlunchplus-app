@@ -284,9 +284,14 @@ export default function ClassAttendanceMismatchPage() {
   const actionData = useActionData<typeof action>() as ActionData | undefined
   const navigation = useNavigation()
   const isSubmitting = navigation.state === 'submitting'
+  const [viewState, setViewState] = useState<'active' | 'inactive'>('active')
+  const visibleMismatches = useMemo(
+    () => mismatches.filter(row => row.state === viewState),
+    [mismatches, viewState]
+  )
   const selectableIds = useMemo(
-    () => mismatches.filter(row => row.state === 'active').map(row => row.id),
-    [mismatches]
+    () => visibleMismatches.filter(row => row.state === 'active').map(row => row.id),
+    [visibleMismatches]
   )
   const [selectedIds, setSelectedIds] = useState<string[]>(selectableIds)
 
@@ -327,6 +332,25 @@ export default function ClassAttendanceMismatchPage() {
         </p>
       </section>
 
+      <section className="rounded-lg border bg-card p-3">
+        <div className="inline-flex items-center rounded border border-input bg-background p-0.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setViewState('active')}
+            className={`rounded px-2 py-1 ${viewState === 'active' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+          >
+            Active mismatches ({activeCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewState('inactive')}
+            className={`rounded px-2 py-1 ${viewState === 'inactive' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+          >
+            Inactive mismatches ({inactiveCount})
+          </button>
+        </div>
+      </section>
+
       {mismatches.length ? (
         <Form method="post" className="space-y-3 rounded-lg border bg-card p-4">
           <input type="hidden" name="intent" value="inactivate-selected" />
@@ -341,18 +365,19 @@ export default function ClassAttendanceMismatchPage() {
                 name="inactive_reason"
                 defaultValue="Profile is not approved for the class workshop"
                 className="h-10 rounded border border-input bg-background px-3"
+                disabled={viewState !== 'active'}
               />
             </label>
             <button
               type="submit"
-              disabled={isSubmitting || activeCount === 0 || selectedIds.length === 0}
+              disabled={isSubmitting || viewState !== 'active' || activeCount === 0 || selectedIds.length === 0}
               className="rounded-md border border-destructive/40 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-60"
             >
               {isSubmitting ? 'Inactivating...' : 'Inactivate selected active rows'}
             </button>
             <button
               type="button"
-              disabled={isSubmitting || activeCount === 0}
+              disabled={isSubmitting || viewState !== 'active' || activeCount === 0}
               onClick={() => setSelectedIds(selectableIds)}
               className="rounded-md border border-input px-3 py-2 text-sm hover:bg-muted disabled:opacity-60"
             >
@@ -360,14 +385,14 @@ export default function ClassAttendanceMismatchPage() {
             </button>
             <button
               type="button"
-              disabled={isSubmitting || selectedIds.length === 0}
+              disabled={isSubmitting || viewState !== 'active' || selectedIds.length === 0}
               onClick={() => setSelectedIds([])}
               className="rounded-md border border-input px-3 py-2 text-sm hover:bg-muted disabled:opacity-60"
             >
               Select none
             </button>
             <p className="text-xs text-muted-foreground">
-              {selectedIds.length} selected
+              {viewState === 'active' ? `${selectedIds.length} selected` : `${visibleMismatches.length} shown`}
             </p>
           </div>
 
@@ -385,7 +410,7 @@ export default function ClassAttendanceMismatchPage() {
                 </tr>
               </thead>
               <tbody>
-                {mismatches.map(row => (
+                {visibleMismatches.map(row => (
                   <tr key={row.id} className="border-t align-top">
                     <td className="px-3 py-2">
                       <input
