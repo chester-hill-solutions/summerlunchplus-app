@@ -139,6 +139,7 @@ const REMINDER_HOUR_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_HOUR_TORONT
 const REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('GIFT_CARD_REMINDER_MINUTE_TORONTO', isProductionRuntime ? 0 : 15)
 const MEAL_KIT_REMINDER_HOUR_TORONTO = parseHourMinuteEnv('MEAL_KIT_REMINDER_HOUR_TORONTO', 9)
 const MEAL_KIT_REMINDER_MINUTE_TORONTO = parseHourMinuteEnv('MEAL_KIT_REMINDER_MINUTE_TORONTO', 0)
+const MEAL_KIT_REMINDER_WINDOW_END_HOUR_TORONTO = parseHourMinuteEnv('MEAL_KIT_REMINDER_WINDOW_END_HOUR_TORONTO', 13)
 
 const torontoPartsForDate = (date: Date) => {
   const parts = torontoDateTimeFormatter.formatToParts(date)
@@ -199,11 +200,16 @@ const reminderSlotIsoForTorontoDate = (year: number, month: number, day: number)
 
 const currentTorontoMealKitReminderSlotIso = (now: Date) => {
   const toronto = torontoPartsForDate(now)
+
+  const isWithinMealKitWindow =
+    toronto.hour > MEAL_KIT_REMINDER_HOUR_TORONTO && toronto.hour < MEAL_KIT_REMINDER_WINDOW_END_HOUR_TORONTO
+
+  const isStartHourWithinWindow =
+    toronto.hour === MEAL_KIT_REMINDER_HOUR_TORONTO && toronto.minute >= MEAL_KIT_REMINDER_MINUTE_TORONTO
+
   if (
     toronto.weekday !== 'Tue' ||
-    toronto.hour !== MEAL_KIT_REMINDER_HOUR_TORONTO ||
-    toronto.minute < MEAL_KIT_REMINDER_MINUTE_TORONTO ||
-    toronto.minute >= MEAL_KIT_REMINDER_MINUTE_TORONTO + 5
+    (!isWithinMealKitWindow && !isStartHourWithinWindow)
   ) {
     return null
   }
