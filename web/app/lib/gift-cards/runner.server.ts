@@ -155,7 +155,7 @@ const torontoPartsForDate = (date: Date) => {
 }
 
 const torontoTimeUtcForDate = (year: number, month: number, day: number, hour: number, minute: number) => {
-  for (const utcHour of [16, 17, 15, 18]) {
+  for (let utcHour = 0; utcHour < 24; utcHour += 1) {
     const candidate = new Date(Date.UTC(year, month - 1, day, utcHour, minute, 0, 0))
     const toronto = torontoPartsForDate(candidate)
     if (
