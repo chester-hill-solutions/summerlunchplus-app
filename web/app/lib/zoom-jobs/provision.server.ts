@@ -272,17 +272,32 @@ const ensureAttendanceRowsForClass = async (classId: string, profileIds: string[
 
   const { data: existingRows, error: existingError } = await adminClient
     .from('class_attendance')
-    .select('profile_id')
+    .select('profile_id, state')
     .eq('class_id', classId)
     .in('profile_id', profileIds)
 
   if (existingError) throw new Error(existingError.message)
 
-  const existingProfileIds = new Set((existingRows ?? []).map(row => row.profile_id).filter((id): id is string => Boolean(id)))
-  const missingProfileIds = profileIds.filter(profileId => !existingProfileIds.has(profileId))
-  if (!missingProfileIds.length) return 0
+  const existingByProfileId = new Map(
+    (existingRows ?? [])
+      .filter((row): row is { profile_id: string; state: 'active' | 'inactive' | null } => Boolean(row.profile_id))
+      .map(row => [row.profile_id, row.state])
+  )
 
-  const rows = missingProfileIds.map(profileId => ({ class_id: classId, profile_id: profileId }))
+  const profileIdsToEnsure = profileIds.filter(profileId => {
+    const existingState = existingByProfileId.get(profileId)
+    return !existingState || existingState === 'inactive'
+  })
+  if (!profileIdsToEnsure.length) return 0
+
+  const rows = profileIdsToEnsure.map(profileId => ({
+    class_id: classId,
+    profile_id: profileId,
+    state: 'active',
+    inactive_at: null,
+    inactive_by: null,
+    inactive_reason: null,
+  }))
   const upsertStartedAt = nowMs()
   const { error } = await adminClient.from('class_attendance').upsert(rows, { onConflict: 'class_id,profile_id' })
   if (error) throw new Error(error.message)
@@ -290,11 +305,11 @@ const ensureAttendanceRowsForClass = async (classId: string, profileIds: string[
     source: 'zoom_provision',
     mutation: 'ensure_attendance_rows',
     classId,
-    rows: missingProfileIds.length,
+    rows: profileIdsToEnsure.length,
     duration_ms: nowMs() - upsertStartedAt,
   })
 
-  return missingProfileIds.length
+  return profileIdsToEnsure.length
 }
 
 const selectAvailableHost = async ({
@@ -655,14 +670,24 @@ const ensureRegistrantsForClass = async ({
       }
 
       await adminClient.from('class_zoom_registrant').delete().eq('id', row.id)
-      const deleteAttendanceStartedAt = nowMs()
-      await adminClient.from('class_attendance').delete().eq('class_id', classRow.id).eq('profile_id', profileId)
+      const inactivateAttendanceStartedAt = nowMs()
+      await adminClient
+        .from('class_attendance')
+        .update({
+          state: 'inactive',
+          inactive_at: new Date().toISOString(),
+          inactive_by: null,
+          inactive_reason: 'Profile is no longer approved for the class workshop',
+          recorded_by: null,
+        })
+        .eq('class_id', classRow.id)
+        .eq('profile_id', profileId)
       console.info('[class-attendance][mutation]', {
         source: 'zoom_provision',
-        mutation: 'remove_stale_attendance_row',
+        mutation: 'inactivate_stale_attendance_row',
         classId: classRow.id,
         profileId,
-        duration_ms: nowMs() - deleteAttendanceStartedAt,
+        duration_ms: nowMs() - inactivateAttendanceStartedAt,
       })
       removed += 1
     }

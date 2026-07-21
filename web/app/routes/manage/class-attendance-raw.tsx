@@ -12,6 +12,10 @@ type RawAttendanceRow = {
   id: string
   class_id: string
   profile_id: string
+  state: 'active' | 'inactive'
+  inactive_at: string | null
+  inactive_by: string | null
+  inactive_reason: string | null
   status: 'unknown' | 'present' | 'absent' | null
   photo_status: 'uploaded' | 'accepted' | 'rejected' | 'expired' | null
   camera_on: boolean | null
@@ -60,7 +64,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   for (let offset = 0; ; offset += CLASS_ATTENDANCE_FETCH_BATCH_SIZE) {
     const { data, error } = await adminClient
       .from('class_attendance')
-      .select('id, class_id, profile_id, status, photo_status, camera_on, recorded_by, created_at, updated_at')
+      .select('id, class_id, profile_id, state, inactive_at, inactive_by, inactive_reason, status, photo_status, camera_on, recorded_by, created_at, updated_at')
       .order('created_at', { ascending: false })
       .range(offset, offset + CLASS_ATTENDANCE_FETCH_BATCH_SIZE - 1)
 
@@ -95,13 +99,32 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const enrichedRows = rows.map(row => ({
     ...row,
+    state: row.state === 'inactive' ? 'inactive' : 'active',
+    inactive_at: row.inactive_at ?? null,
+    inactive_by: row.inactive_by ?? null,
+    inactive_reason: row.inactive_reason ?? null,
     profile_display: displayNameOrId(profileById.get(row.profile_id) ?? null, row.profile_id),
   }))
 
   return {
     label: 'Raw Class Attendance',
     tableName: 'class-attendance-raw',
-    columns: ['class_id', 'profile_display', 'profile_id', 'status', 'photo_status', 'camera_on', 'recorded_by', 'created_at', 'updated_at', 'id'],
+    columns: [
+      'class_id',
+      'profile_display',
+      'profile_id',
+      'state',
+      'inactive_at',
+      'inactive_by',
+      'inactive_reason',
+      'status',
+      'photo_status',
+      'camera_on',
+      'recorded_by',
+      'created_at',
+      'updated_at',
+      'id',
+    ],
     rows: enrichedRows,
     columnMeta: {
       class_id: { label: 'Class ID', filterable: true },
@@ -135,6 +158,10 @@ export async function loader({ request }: Route.LoaderArgs) {
         },
       },
       profile_id: { label: 'Profile ID', filterable: true },
+      state: { label: 'State', filterable: true },
+      inactive_at: { label: 'Inactive at', filterable: true },
+      inactive_by: { label: 'Inactive by (user id)', filterable: true, truncate: true },
+      inactive_reason: { label: 'Inactive reason', filterable: true, truncate: true },
       status: { label: 'Attendance', filterable: true },
       photo_status: { label: 'Photo status', filterable: true },
       camera_on: { label: 'Camera on', filterable: true },

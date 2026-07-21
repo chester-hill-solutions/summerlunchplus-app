@@ -205,11 +205,11 @@ const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
     return { ok: true, classesScanned: classes.length, expectedPairs: 0, inserted: 0 }
   }
 
-  const existingPairs = new Set<string>()
+  const existingStateByPair = new Map<string, string | null>()
   for (const classIdChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
     const { data: attendanceRows, error: attendanceError } = await adminClient
       .from('class_attendance')
-      .select('class_id, profile_id')
+      .select('class_id, profile_id, state')
       .in('class_id', classIdChunk)
     if (attendanceError) {
       return {
@@ -222,11 +222,14 @@ const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
     }
     for (const row of attendanceRows ?? []) {
       if (!row.class_id || !row.profile_id) continue
-      existingPairs.add(`${row.class_id}::${row.profile_id}`)
+      existingStateByPair.set(`${row.class_id}::${row.profile_id}`, row.state ?? null)
     }
   }
 
-  const missingPairs = expectedPairs.filter(row => !existingPairs.has(`${row.class_id}::${row.profile_id}`))
+  const missingPairs = expectedPairs.filter(row => {
+    const existingState = existingStateByPair.get(`${row.class_id}::${row.profile_id}`)
+    return !existingState || existingState === 'inactive'
+  })
   if (!missingPairs.length) {
     return { ok: true, classesScanned: classes.length, expectedPairs: expectedPairs.length, inserted: 0 }
   }
@@ -234,7 +237,14 @@ const backfillAttendanceRowsCoverage = async ({ now }: { now: Date }) => {
   let inserted = 0
   const attendanceBackfillStartedAt = nowMs()
   for (const chunk of chunkArray(missingPairs, IN_CLAUSE_BATCH_SIZE)) {
-    const rows = chunk.map(row => ({ class_id: row.class_id, profile_id: row.profile_id }))
+    const rows = chunk.map(row => ({
+      class_id: row.class_id,
+      profile_id: row.profile_id,
+      state: 'active',
+      inactive_at: null,
+      inactive_by: null,
+      inactive_reason: null,
+    }))
     const { error } = await adminClient.from('class_attendance').upsert(rows, { onConflict: 'class_id,profile_id' })
     if (error) {
       return {
@@ -637,6 +647,7 @@ const sendPostClassCameraOrPhotoFollowupCoverage = async ({ now, onlyClassId }: 
   const attendanceQuery = adminClient
     .from('class_attendance')
     .select('class_id, profile_id, camera_on, photo_status, class:class_id ( ends_at )')
+    .eq('state', 'active')
 
   if (onlyClassId) {
     attendanceQuery.eq('class_id', onlyClassId)
@@ -863,20 +874,31 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
         const approvedProfileIdsList = Array.from(approvedProfileIds)
         const { data: existingRows, error: existingAttendanceError } = await adminClient
           .from('class_attendance')
-          .select('profile_id')
+          .select('profile_id, state')
           .eq('class_id', meeting.class_id)
           .in('profile_id', approvedProfileIdsList)
 
         if (existingAttendanceError) throw new Error(existingAttendanceError.message)
 
-        const existingProfileIds = new Set((existingRows ?? []).map(row => row.profile_id).filter((id): id is string => Boolean(id)))
-        const missingProfileIds = approvedProfileIdsList.filter(profileId => !existingProfileIds.has(profileId))
+        const existingStateByProfileId = new Map(
+          (existingRows ?? [])
+            .filter((row): row is { profile_id: string; state: 'active' | 'inactive' | null } => Boolean(row.profile_id))
+            .map(row => [row.profile_id, row.state])
+        )
+        const missingProfileIds = approvedProfileIdsList.filter(profileId => {
+          const existingState = existingStateByProfileId.get(profileId)
+          return !existingState || existingState === 'inactive'
+        })
 
         if (missingProfileIds.length) {
           const attendanceSeedStartedAt = nowMs()
           const attendanceSeedRows = missingProfileIds.map(profileId => ({
             class_id: meeting.class_id,
             profile_id: profileId,
+            state: 'active',
+            inactive_at: null,
+            inactive_by: null,
+            inactive_reason: null,
           }))
           const { error: attendanceSeedError } = await adminClient
             .from('class_attendance')
@@ -1007,6 +1029,7 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
               .from('class_attendance')
               .update({ status: 'present', recorded_by: null }, { count: 'exact' })
               .eq('class_id', meeting.class_id)
+              .eq('state', 'active')
               .in('profile_id', profileChunk)
               .is('status', null)
             if (attendanceUpdateError) {
@@ -1034,6 +1057,7 @@ const syncPostClassAttendance = async ({ now, onlyClassId }: { now: Date; onlyCl
             .from('class_attendance')
             .update({ status: 'absent', recorded_by: null }, { count: 'exact' })
             .eq('class_id', meeting.class_id)
+            .eq('state', 'active')
             .in('profile_id', missingProfileIds)
             .is('status', null)
           if (absentNullError) throw new Error(absentNullError.message)

@@ -2651,15 +2651,28 @@ export default function TableDisplay({
     }
   }
 
-  const deleteAttendanceRow = (row: Record<string, unknown>) => {
+  const setAttendanceRowState = (row: Record<string, unknown>, nextState: 'active' | 'inactive') => {
     if (!isClassAttendance || !canEditStatus) return
     const classId = typeof row.class_id === 'string' ? row.class_id : ''
     const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
     if (!classId || !profileId) return
+
+    let inactiveReason = ''
+    if (nextState === 'inactive') {
+      const entered = window.prompt('Reason for inactivating this attendance row?', '')
+      if (entered == null) return
+      inactiveReason = entered.trim()
+      if (!inactiveReason) return
+    }
+
     const formData = new FormData()
-    formData.set('intent', 'delete-attendance-row')
+    formData.set('intent', 'set-attendance-state')
     formData.set('class_id', classId)
     formData.set('profile_id', profileId)
+    formData.set('state', nextState)
+    if (nextState === 'inactive') {
+      formData.set('inactive_reason', inactiveReason)
+    }
     statusFetcher.submit(formData, { method: 'post' })
   }
 
@@ -3486,28 +3499,33 @@ export default function TableDisplay({
                         )
                       }
 
-                      if (isClassAttendance && column === 'delete_row' && canEditStatus) {
+                      if (isClassAttendance && column === 'state_action' && canEditStatus) {
                         const classId = typeof row.class_id === 'string' ? row.class_id : ''
                         const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
-                        const isDeleting =
+                        const currentState = typeof row.state === 'string' && row.state === 'inactive' ? 'inactive' : 'active'
+                        const nextState = currentState === 'inactive' ? 'active' : 'inactive'
+                        const isSubmitting =
                           statusFetcher.state === 'submitting' &&
-                          statusFetcher.formData?.get('intent') === 'delete-attendance-row' &&
+                          statusFetcher.formData?.get('intent') === 'set-attendance-state' &&
                           statusFetcher.formData?.get('class_id') === classId &&
                           statusFetcher.formData?.get('profile_id') === profileId
 
                         return (
-                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="Delete attendance row">
+                          <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title="Change attendance row state">
                             <button
                               type="button"
-                              disabled={!classId || !profileId || isDeleting}
+                              disabled={!classId || !profileId || isSubmitting}
                               onClick={event => {
                                 event.stopPropagation()
-                                if (!window.confirm('Delete this class attendance row?')) return
-                                deleteAttendanceRow(row)
+                                setAttendanceRowState(row, nextState)
                               }}
-                              className="rounded border border-destructive/40 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
+                              className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60 ${
+                                nextState === 'inactive'
+                                  ? 'border-destructive/40 text-destructive hover:bg-destructive/10'
+                                  : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                              }`}
                             >
-                              {isDeleting ? 'Deleting...' : 'Delete'}
+                              {isSubmitting ? 'Saving...' : nextState === 'inactive' ? 'Inactivate' : 'Reactivate'}
                             </button>
                           </td>
                         )
