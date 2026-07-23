@@ -2,8 +2,8 @@ import { adminClient } from '@/lib/supabase/adminClient'
 import { parseGiftCardProviderFromDisplay } from '@/lib/gift-cards/inventory.server'
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
-const IN_CLAUSE_BATCH_SIZE = 100
-const RELATIONSHIP_BATCH_SIZE = 100
+const IN_CLAUSE_BATCH_SIZE = 40
+const RELATIONSHIP_BATCH_SIZE = 40
 
 export type ForecastWindowDays = 7 | 14
 export type GiftCardProvider = 'PC' | 'Sobeys'
@@ -387,19 +387,32 @@ const loadFamilyIdByProfileId = async (profileIds: string[]): Promise<Map<string
 
   while (queue.length) {
     const batch = queue.splice(0, Math.min(queue.length, RELATIONSHIP_BATCH_SIZE))
-    const inClause = batch.join(',')
-    if (!inClause) continue
+    if (!batch.length) continue
 
-    const { data, error } = await adminClient
-      .from('person_guardian_child')
-      .select('guardian_profile_id, child_profile_id')
-      .or(`guardian_profile_id.in.(${inClause}),child_profile_id.in.(${inClause})`)
+    const [guardianQuery, childQuery] = await Promise.all([
+      adminClient
+        .from('person_guardian_child')
+        .select('guardian_profile_id, child_profile_id')
+        .in('guardian_profile_id', batch),
+      adminClient
+        .from('person_guardian_child')
+        .select('guardian_profile_id, child_profile_id')
+        .in('child_profile_id', batch),
+    ])
 
-    if (error) {
-      throw new Error(`Failed to load family edges: ${error.message}`)
+    if (guardianQuery.error) {
+      throw new Error(`Failed to load family edges by guardian profile: ${guardianQuery.error.message}`)
+    }
+    if (childQuery.error) {
+      throw new Error(`Failed to load family edges by child profile: ${childQuery.error.message}`)
     }
 
-    for (const edge of (data ?? []) as FamilyEdgeRow[]) {
+    const merged = [...(guardianQuery.data ?? []), ...(childQuery.data ?? [])] as FamilyEdgeRow[]
+    const seenEdges = new Set<string>()
+    for (const edge of merged) {
+      const edgeKey = `${edge.guardian_profile_id}::${edge.child_profile_id}`
+      if (seenEdges.has(edgeKey)) continue
+      seenEdges.add(edgeKey)
       edges.push(edge)
       if (!seen.has(edge.guardian_profile_id)) {
         seen.add(edge.guardian_profile_id)
