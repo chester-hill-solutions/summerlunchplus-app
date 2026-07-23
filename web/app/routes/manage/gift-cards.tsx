@@ -419,8 +419,8 @@ export default function GiftCardsPage() {
     const inventory = data.inventorySnapshot.providers[provider]
     const acceptedFamilies7 = d7.accepted.byPreference[provider].families
     const acceptedFamilies14 = d14.accepted.byPreference[provider].families
-    const needAllocation7 = d7.allocation[provider].pendingFamilyClassRows
-    const needAllocation14 = d14.allocation[provider].pendingFamilyClassRows
+    const needAllocation7 = d7.allocation[provider].pendingProfiles
+    const needAllocation14 = d14.allocation[provider].pendingProfiles
 
     return {
       label: provider,
@@ -428,7 +428,7 @@ export default function GiftCardsPage() {
       available: inventory.available,
       acceptedFamilies: acceptedFamilies14,
       needAllocation: needAllocation14,
-      difference: inventory.available - needAllocation14,
+      missing14: Math.max(0, needAllocation14 - inventory.available),
       allocated: inventory.statusCounts.allocated,
       sent: inventory.statusCounts.sent,
       opened: inventory.statusCounts.opened,
@@ -436,11 +436,7 @@ export default function GiftCardsPage() {
       invalid: inventory.statusCounts.invalid,
       acceptedFamilies7,
       needAllocation7,
-      difference7: inventory.available - needAllocation7,
-      allocatedProfiles14: d14.allocation[provider].allocatedProfiles,
-      pendingProfiles14: d14.allocation[provider].pendingProfiles,
-      pendingFamilies14: d14.allocation[provider].pendingFamilies,
-      pendingAttendanceRows14: d14.allocation[provider].pendingAttendanceRows,
+      missing7: Math.max(0, needAllocation7 - inventory.available),
       leftAfterPending14: d14.inventory[provider].leftAfterPending,
       shortfallNow14: d14.inventory[provider].shortfallNow,
     }
@@ -453,7 +449,7 @@ export default function GiftCardsPage() {
       available: acc.available + row.available,
       acceptedFamilies: acc.acceptedFamilies + row.acceptedFamilies,
       needAllocation: acc.needAllocation + row.needAllocation,
-      difference: acc.difference + row.difference,
+      missing14: acc.missing14 + row.missing14,
       allocated: acc.allocated + row.allocated,
       sent: acc.sent + row.sent,
       opened: acc.opened + row.opened,
@@ -461,11 +457,7 @@ export default function GiftCardsPage() {
       invalid: acc.invalid + row.invalid,
       acceptedFamilies7: acc.acceptedFamilies7 + row.acceptedFamilies7,
       needAllocation7: acc.needAllocation7 + row.needAllocation7,
-      difference7: acc.difference7 + row.difference7,
-      allocatedProfiles14: acc.allocatedProfiles14 + row.allocatedProfiles14,
-      pendingProfiles14: acc.pendingProfiles14 + row.pendingProfiles14,
-      pendingFamilies14: acc.pendingFamilies14 + row.pendingFamilies14,
-      pendingAttendanceRows14: acc.pendingAttendanceRows14 + row.pendingAttendanceRows14,
+      missing7: acc.missing7 + row.missing7,
       leftAfterPending14: acc.leftAfterPending14 + row.leftAfterPending14,
       shortfallNow14: acc.shortfallNow14 + row.shortfallNow14,
     }),
@@ -475,7 +467,7 @@ export default function GiftCardsPage() {
       available: 0,
       acceptedFamilies: 0,
       needAllocation: 0,
-      difference: 0,
+      missing14: 0,
       allocated: 0,
       sent: 0,
       opened: 0,
@@ -483,11 +475,7 @@ export default function GiftCardsPage() {
       invalid: 0,
       acceptedFamilies7: 0,
       needAllocation7: 0,
-      difference7: 0,
-      allocatedProfiles14: 0,
-      pendingProfiles14: 0,
-      pendingFamilies14: 0,
-      pendingAttendanceRows14: 0,
+      missing7: 0,
       leftAfterPending14: 0,
       shortfallNow14: 0,
     }
@@ -496,7 +484,7 @@ export default function GiftCardsPage() {
   const summaryRows = [...providerSummaryRows, totalSummaryRow]
 
   const formatCount = (value: number) => value.toLocaleString()
-  const differenceClass = (value: number) => (value < 0 ? 'text-red-700' : 'text-foreground')
+  const missingClass = (value: number) => (value > 0 ? 'text-red-700 font-semibold' : 'text-foreground')
 
   return (
     <TableDisplay
@@ -512,20 +500,16 @@ export default function GiftCardsPage() {
                   <th className="px-3 py-2 font-semibold">Total Gift Cards</th>
                   <th className="px-3 py-2 font-semibold">Available</th>
                   <th className="px-3 py-2 font-semibold">Accepted Families (7d)</th>
-                  <th className="px-3 py-2 font-semibold">Need Allocation (7d family-class)</th>
-                  <th className="px-3 py-2 font-semibold">Difference (7d)</th>
+                  <th className="px-3 py-2 font-semibold">People needing allocation (7d)</th>
+                  <th className="px-3 py-2 font-semibold">Missing (7d)</th>
                   <th className="px-3 py-2 font-semibold">Accepted Families (14d)</th>
-                  <th className="px-3 py-2 font-semibold">Need Allocation (14d family-class)</th>
-                  <th className="px-3 py-2 font-semibold">Difference (14d)</th>
+                  <th className="px-3 py-2 font-semibold">People needing allocation (14d)</th>
+                  <th className="px-3 py-2 font-semibold">Missing (14d)</th>
                   <th className="px-3 py-2 font-semibold">Allocated</th>
                   <th className="px-3 py-2 font-semibold">Sent</th>
                   <th className="px-3 py-2 font-semibold">Opened</th>
                   <th className="px-3 py-2 font-semibold">Used</th>
                   <th className="px-3 py-2 font-semibold">Invalid</th>
-                  <th className="px-3 py-2 font-semibold">Allocated Profiles (14d)</th>
-                  <th className="px-3 py-2 font-semibold">Pending Profiles (14d)</th>
-                  <th className="px-3 py-2 font-semibold">Pending Families (14d unique)</th>
-                  <th className="px-3 py-2 font-semibold">Pending Attendance Rows (14d)</th>
                   <th className="px-3 py-2 font-semibold">Left After Pending (14d)</th>
                   <th className="px-3 py-2 font-semibold">Shortfall Now (14d)</th>
                 </tr>
@@ -538,21 +522,17 @@ export default function GiftCardsPage() {
                     <td className="px-3 py-2">{formatCount(row.available)}</td>
                     <td className="px-3 py-2">{formatCount(row.acceptedFamilies7)}</td>
                     <td className="px-3 py-2">{formatCount(row.needAllocation7)}</td>
-                    <td className={`px-3 py-2 ${differenceClass(row.difference7)}`}>{formatCount(row.difference7)}</td>
+                    <td className={`px-3 py-2 ${missingClass(row.missing7)}`}>{formatCount(row.missing7)}</td>
                     <td className="px-3 py-2">{formatCount(row.acceptedFamilies)}</td>
                     <td className="px-3 py-2">{formatCount(row.needAllocation)}</td>
-                    <td className={`px-3 py-2 ${differenceClass(row.difference)}`}>{formatCount(row.difference)}</td>
+                    <td className={`px-3 py-2 ${missingClass(row.missing14)}`}>{formatCount(row.missing14)}</td>
                     <td className="px-3 py-2">{formatCount(row.allocated)}</td>
                     <td className="px-3 py-2">{formatCount(row.sent)}</td>
                     <td className="px-3 py-2">{formatCount(row.opened)}</td>
                     <td className="px-3 py-2">{formatCount(row.used)}</td>
                     <td className="px-3 py-2">{formatCount(row.invalid)}</td>
-                    <td className="px-3 py-2">{formatCount(row.allocatedProfiles14)}</td>
-                    <td className="px-3 py-2">{formatCount(row.pendingProfiles14)}</td>
-                    <td className="px-3 py-2">{formatCount(row.pendingFamilies14)}</td>
-                    <td className="px-3 py-2">{formatCount(row.pendingAttendanceRows14)}</td>
-                    <td className={`px-3 py-2 ${differenceClass(row.leftAfterPending14)}`}>{formatCount(row.leftAfterPending14)}</td>
-                    <td className={`px-3 py-2 ${differenceClass(-row.shortfallNow14)}`}>{formatCount(row.shortfallNow14)}</td>
+                    <td className={`px-3 py-2 ${missingClass(Math.max(0, -row.leftAfterPending14))}`}>{formatCount(row.leftAfterPending14)}</td>
+                    <td className={`px-3 py-2 ${missingClass(row.shortfallNow14)}`}>{formatCount(row.shortfallNow14)}</td>
                   </tr>
                 ))}
               </tbody>

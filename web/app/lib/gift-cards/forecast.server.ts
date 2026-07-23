@@ -598,7 +598,6 @@ const buildWindowSnapshot = async (days: ForecastWindowDays): Promise<WindowSnap
     for (const row of providerAttendanceRows) {
       if (!row.profile_id) continue
 
-      const hasAttendanceEvidence = row.camera_on === true || row.photo_status === 'accepted' || row.photo_status === 'uploaded'
       const isActive = row.state === 'active'
       const key = allocationKey(row.class_id, row.profile_id)
 
@@ -606,7 +605,7 @@ const buildWindowSnapshot = async (days: ForecastWindowDays): Promise<WindowSnap
         blockedEligibleProfiles.add(row.profile_id)
       }
 
-      if (!isActive || !hasAttendanceEvidence || row.gift_card_blocked) continue
+      if (!isActive || row.gift_card_blocked) continue
 
       eligibleProfiles.add(row.profile_id)
       if (allocatedPairs.has(key)) {
