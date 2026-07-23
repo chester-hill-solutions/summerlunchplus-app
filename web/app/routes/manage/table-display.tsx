@@ -902,6 +902,10 @@ export default function TableDisplay({
     tableName === 'class-enrollment' ||
     tableName === 'workshop-enrollment' ||
     tableName === 'class-attendance'
+  const hasStickyColumnHeaders =
+    hasStickyTopBar ||
+    tableName === 'form-answers' ||
+    tableName === 'federal-electoral-district'
   const location = useLocation()
 
   const statusFetcher = useFetcher()
@@ -3181,7 +3185,7 @@ export default function TableDisplay({
                   <th
                     key={`head-${column}`}
                     title={columnMeta[column]?.headerTooltip}
-                    className={`${isNumericColumn(column) ? 'w-24' : ''} relative px-4 py-2 text-left ${hasStickyTopBar ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''}`}
+                    className={`${isNumericColumn(column) ? 'w-24' : ''} relative px-4 py-2 text-left ${hasStickyColumnHeaders ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''}`}
                   >
                     <div className="relative flex items-center gap-1">
                       <button
@@ -3248,7 +3252,7 @@ export default function TableDisplay({
               })}
               {canInlineUpdate ? (
                 <th
-                  className={`px-4 py-2 text-left ${hasStickyTopBar ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''}`}
+                  className={`px-4 py-2 text-left ${hasStickyColumnHeaders ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''}`}
                 >
                   actions
                 </th>
