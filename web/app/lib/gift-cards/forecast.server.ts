@@ -2,7 +2,7 @@ import { adminClient } from '@/lib/supabase/adminClient'
 import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
-const IN_CLAUSE_BATCH_SIZE = 250
+const IN_CLAUSE_BATCH_SIZE = 100
 const RELATIONSHIP_BATCH_SIZE = 100
 
 export type ForecastWindowDays = 7 | 14
