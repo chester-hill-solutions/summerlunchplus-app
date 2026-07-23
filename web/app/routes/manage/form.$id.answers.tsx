@@ -37,6 +37,17 @@ const chunkArray = <T,>(items: T[], size: number): T[][] => {
   return chunks
 }
 
+const toAnswerDisplayValue = (value: unknown) => {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value
+      .map(item => (typeof item === 'string' ? item : JSON.stringify(item as Json)))
+      .join(', ')
+  }
+  if (value === null || typeof value === 'undefined') return ''
+  return JSON.stringify(value as Json)
+}
+
 const safeReturnTo = (input: string | null) => {
   if (!input) return '/manage/form'
   if (!input.startsWith('/')) return '/manage/form'
@@ -124,8 +135,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const answersBySubmission = (answerRowsRaw ?? []).reduce<Record<string, Record<string, string>>>((acc, row) => {
     if (!acc[row.submission_id]) acc[row.submission_id] = {}
-    acc[row.submission_id][row.question_code] =
-      typeof row.value === 'string' ? row.value : JSON.stringify(row.value as Json)
+    acc[row.submission_id][row.question_code] = toAnswerDisplayValue(row.value)
     return acc
   }, {})
 
