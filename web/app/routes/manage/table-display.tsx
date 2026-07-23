@@ -905,7 +905,8 @@ export default function TableDisplay({
   const hasStickyColumnHeaders =
     hasStickyTopBar ||
     tableName === 'form-answers' ||
-    tableName === 'federal-electoral-district'
+    tableName === 'federal-electoral-district' ||
+    tableName === 'gift-cards'
   const location = useLocation()
 
   const statusFetcher = useFetcher()

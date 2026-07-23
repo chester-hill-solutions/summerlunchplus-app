@@ -2,8 +2,8 @@ import { adminClient } from '@/lib/supabase/adminClient'
 import { parseGiftCardProviderFromDisplay } from '@/lib/gift-cards/inventory.server'
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
-const IN_CLAUSE_BATCH_SIZE = 40
-const RELATIONSHIP_BATCH_SIZE = 40
+const IN_CLAUSE_BATCH_SIZE = 10
+const RELATIONSHIP_BATCH_SIZE = 10
 
 export type ForecastWindowDays = 7 | 14
 export type GiftCardProvider = 'PC' | 'Sobeys'
@@ -29,8 +29,10 @@ export type WindowSnapshot = {
       allocatedProfiles: number
       allocatedFamilies: number
       blockedProfiles: number
+      pendingAttendanceRows: number
       pendingProfiles: number
       pendingFamilies: number
+      pendingFamilyClassRows: number
     }
   >
   inventory: Record<
@@ -64,11 +66,17 @@ type EnrollmentRow = {
   profile_id: string | null
 }
 
-type AllocationRow = {
+type AttendanceRow = {
+  class_id: string
   profile_id: string | null
+  state: 'active' | 'inactive' | null
+  camera_on: boolean | null
+  photo_status: 'uploaded' | 'accepted' | 'rejected' | 'expired' | null
+  gift_card_blocked: boolean | null
 }
 
-type BlockedAttendanceRow = {
+type AllocationRow = {
+  class_id: string
   profile_id: string | null
 }
 
@@ -131,8 +139,10 @@ const emptyProviderAllocation = () => ({
   allocatedProfiles: 0,
   allocatedFamilies: 0,
   blockedProfiles: 0,
+  pendingAttendanceRows: 0,
   pendingProfiles: 0,
   pendingFamilies: 0,
+  pendingFamilyClassRows: 0,
 })
 
 const emptyProviderInventory = () => ({
@@ -467,51 +477,46 @@ const loadFamilyIdByProfileId = async (profileIds: string[]): Promise<Map<string
   return familyIdByProfileId
 }
 
-const loadAllocatedProfileIds = async (classIds: string[], profileIds: string[]): Promise<Set<string>> => {
-  const allocated = new Set<string>()
-  if (!classIds.length || !profileIds.length) return allocated
+const allocationKey = (classId: string, profileId: string) => `${classId}::${profileId}`
 
-  const eligibleProfileSet = new Set(profileIds)
+const loadAttendanceRows = async (classIds: string[]): Promise<AttendanceRow[]> => {
+  if (!classIds.length) return []
+
+  const rows: AttendanceRow[] = []
   for (const classChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient.from('gift_card_allocation').select('profile_id').in('class_id', classChunk)
+    const { data, error } = await adminClient
+      .from('class_attendance')
+      .select('class_id, profile_id, state, camera_on, photo_status, gift_card_blocked')
+      .in('class_id', classChunk)
+
+    if (error) {
+      throw new Error(`Failed to load attendance rows: ${error.message}`)
+    }
+
+    rows.push(...((data ?? []) as AttendanceRow[]))
+  }
+
+  return rows
+}
+
+const loadAllocatedPairs = async (classIds: string[]): Promise<Set<string>> => {
+  const allocated = new Set<string>()
+  if (!classIds.length) return allocated
+
+  for (const classChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient.from('gift_card_allocation').select('class_id, profile_id').in('class_id', classChunk)
+
     if (error) {
       throw new Error(`Failed to load gift card allocations: ${error.message}`)
     }
 
     for (const row of (data ?? []) as AllocationRow[]) {
-      if (row.profile_id && eligibleProfileSet.has(row.profile_id)) {
-        allocated.add(row.profile_id)
-      }
+      if (!row.profile_id) continue
+      allocated.add(allocationKey(row.class_id, row.profile_id))
     }
   }
 
   return allocated
-}
-
-const loadBlockedProfileIds = async (classIds: string[], profileIds: string[]): Promise<Set<string>> => {
-  const blocked = new Set<string>()
-  if (!classIds.length || !profileIds.length) return blocked
-
-  const eligibleProfileSet = new Set(profileIds)
-  for (const classChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('class_attendance')
-      .select('profile_id')
-      .in('class_id', classChunk)
-      .eq('gift_card_blocked', true)
-
-    if (error) {
-      throw new Error(`Failed to load blocked attendance rows: ${error.message}`)
-    }
-
-    for (const row of (data ?? []) as BlockedAttendanceRow[]) {
-      if (row.profile_id && eligibleProfileSet.has(row.profile_id)) {
-        blocked.add(row.profile_id)
-      }
-    }
-  }
-
-  return blocked
 }
 
 const loadInventoryCounts = async (): Promise<AssetCountResult> => {
@@ -545,10 +550,14 @@ const loadInventoryCounts = async (): Promise<AssetCountResult> => {
 const buildWindowSnapshot = async (days: ForecastWindowDays): Promise<WindowSnapshot> => {
   const { classIds, workshopIds } = await loadWindowScope(days)
   const approvedProfiles = await loadApprovedProfiles(workshopIds)
-  const preferenceByProfileId = await loadPreferenceByProfileId(approvedProfiles)
-  const familyIdByProfileId = await loadFamilyIdByProfileId(approvedProfiles)
-  const allocatedProfiles = await loadAllocatedProfileIds(classIds, approvedProfiles)
-  const blockedProfiles = await loadBlockedProfileIds(classIds, approvedProfiles)
+  const attendanceRows = await loadAttendanceRows(classIds)
+  const allocatedPairs = await loadAllocatedPairs(classIds)
+  const attendanceProfileIds = unique(
+    attendanceRows.map(row => row.profile_id).filter((profileId): profileId is string => Boolean(profileId))
+  )
+  const relevantProfileIds = unique([...approvedProfiles, ...attendanceProfileIds])
+  const preferenceByProfileId = await loadPreferenceByProfileId(relevantProfileIds)
+  const familyIdByProfileId = await loadFamilyIdByProfileId(relevantProfileIds)
   const inventoryCounts = await loadInventoryCounts()
 
   const profilesByPreference = buildPreferenceSets(approvedProfiles, preferenceByProfileId)
@@ -560,27 +569,57 @@ const buildWindowSnapshot = async (days: ForecastWindowDays): Promise<WindowSnap
     }
   }
 
+  const attendanceRowsByProvider: Record<GiftCardProvider, AttendanceRow[]> = {
+    PC: [],
+    Sobeys: [],
+  }
+
+  for (const row of attendanceRows) {
+    if (!row.profile_id) continue
+    const bucket = preferenceByProfileId.get(row.profile_id) ?? 'PC'
+    if (bucket === 'meal_kit') continue
+    attendanceRowsByProvider[bucket].push(row)
+  }
+
   const allocation: WindowSnapshot['allocation'] = {
     PC: emptyProviderAllocation(),
     Sobeys: emptyProviderAllocation(),
   }
 
   for (const provider of ['PC', 'Sobeys'] as const) {
-    const eligibleProfiles = profilesByPreference[provider]
+    const providerAttendanceRows = attendanceRowsByProvider[provider]
+    const eligibleProfiles = new Set<string>()
     const allocatedEligibleProfiles = new Set<string>()
     const blockedEligibleProfiles = new Set<string>()
-
-    for (const profileId of eligibleProfiles) {
-      if (allocatedProfiles.has(profileId)) allocatedEligibleProfiles.add(profileId)
-      if (blockedProfiles.has(profileId)) blockedEligibleProfiles.add(profileId)
-    }
-
     const pendingProfiles = new Set<string>()
-    for (const profileId of eligibleProfiles) {
-      if (!allocatedEligibleProfiles.has(profileId)) {
-        pendingProfiles.add(profileId)
+    const pendingAttendanceRows = new Set<string>()
+    const pendingFamilyClassRows = new Set<string>()
+
+    for (const row of providerAttendanceRows) {
+      if (!row.profile_id) continue
+
+      const hasAttendanceEvidence = row.camera_on === true || row.photo_status === 'accepted' || row.photo_status === 'uploaded'
+      const isActive = row.state === 'active'
+      const key = allocationKey(row.class_id, row.profile_id)
+
+      if (row.gift_card_blocked) {
+        blockedEligibleProfiles.add(row.profile_id)
       }
+
+      if (!isActive || !hasAttendanceEvidence || row.gift_card_blocked) continue
+
+      eligibleProfiles.add(row.profile_id)
+      if (allocatedPairs.has(key)) {
+        allocatedEligibleProfiles.add(row.profile_id)
+        continue
+      }
+
+      pendingProfiles.add(row.profile_id)
+      pendingAttendanceRows.add(key)
+      const familyId = familyIdByProfileId.get(row.profile_id) ?? row.profile_id
+      pendingFamilyClassRows.add(`${familyId}::${row.class_id}`)
     }
+
 
     allocation[provider] = {
       eligibleProfiles: eligibleProfiles.size,
@@ -588,8 +627,10 @@ const buildWindowSnapshot = async (days: ForecastWindowDays): Promise<WindowSnap
       allocatedProfiles: allocatedEligibleProfiles.size,
       allocatedFamilies: toFamilySet(allocatedEligibleProfiles, familyIdByProfileId).size,
       blockedProfiles: blockedEligibleProfiles.size,
+      pendingAttendanceRows: pendingAttendanceRows.size,
       pendingProfiles: pendingProfiles.size,
       pendingFamilies: toFamilySet(pendingProfiles, familyIdByProfileId).size,
+      pendingFamilyClassRows: pendingFamilyClassRows.size,
     }
   }
 
@@ -600,7 +641,7 @@ const buildWindowSnapshot = async (days: ForecastWindowDays): Promise<WindowSnap
 
   for (const provider of ['PC', 'Sobeys'] as const) {
     const available = inventoryCounts[provider].available
-    const pending = allocation[provider].pendingProfiles
+    const pending = allocation[provider].pendingAttendanceRows
     inventory[provider] = {
       available,
       allocated: inventoryCounts[provider].allocated,

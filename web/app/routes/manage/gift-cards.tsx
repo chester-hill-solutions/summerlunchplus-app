@@ -34,7 +34,7 @@ type ProfileRow = {
 
 const GIFT_CARD_STATUS_ORDER: GiftCardAssetRow['status'][] = ['available', 'allocated', 'sent', 'opened', 'used', 'invalid']
 const GIFT_CARD_PROVIDERS = ['PC', 'Sobeys'] as const
-const IN_CLAUSE_BATCH_SIZE = 40
+const IN_CLAUSE_BATCH_SIZE = 10
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
 
@@ -275,8 +275,10 @@ const buildGiftCardShellData = () => {
             allocatedProfiles: 0,
             allocatedFamilies: 0,
             blockedProfiles: 0,
+            pendingAttendanceRows: 0,
             pendingProfiles: 0,
             pendingFamilies: 0,
+            pendingFamilyClassRows: 0,
           },
           Sobeys: {
             eligibleProfiles: 0,
@@ -284,8 +286,10 @@ const buildGiftCardShellData = () => {
             allocatedProfiles: 0,
             allocatedFamilies: 0,
             blockedProfiles: 0,
+            pendingAttendanceRows: 0,
             pendingProfiles: 0,
             pendingFamilies: 0,
+            pendingFamilyClassRows: 0,
           },
         },
         inventory: {
@@ -311,8 +315,10 @@ const buildGiftCardShellData = () => {
             allocatedProfiles: 0,
             allocatedFamilies: 0,
             blockedProfiles: 0,
+            pendingAttendanceRows: 0,
             pendingProfiles: 0,
             pendingFamilies: 0,
+            pendingFamilyClassRows: 0,
           },
           Sobeys: {
             eligibleProfiles: 0,
@@ -320,8 +326,10 @@ const buildGiftCardShellData = () => {
             allocatedProfiles: 0,
             allocatedFamilies: 0,
             blockedProfiles: 0,
+            pendingAttendanceRows: 0,
             pendingProfiles: 0,
             pendingFamilies: 0,
+            pendingFamilyClassRows: 0,
           },
         },
         inventory: {
@@ -404,82 +412,172 @@ export default function GiftCardsPage() {
     <span className="rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">{rowLoadingMessage}</span>
   ) : undefined
 
+  const d7 = data.forecastSnapshot.windows.d7
+  const d14 = data.forecastSnapshot.windows.d14
+
+  const providerSummaryRows = GIFT_CARD_PROVIDERS.map(provider => {
+    const inventory = data.inventorySnapshot.providers[provider]
+    const acceptedFamilies7 = d7.accepted.byPreference[provider].families
+    const acceptedFamilies14 = d14.accepted.byPreference[provider].families
+    const needAllocation7 = d7.allocation[provider].pendingFamilyClassRows
+    const needAllocation14 = d14.allocation[provider].pendingFamilyClassRows
+
+    return {
+      label: provider,
+      totalGiftCards: inventory.total,
+      available: inventory.available,
+      acceptedFamilies: acceptedFamilies14,
+      needAllocation: needAllocation14,
+      difference: inventory.available - needAllocation14,
+      allocated: inventory.statusCounts.allocated,
+      sent: inventory.statusCounts.sent,
+      opened: inventory.statusCounts.opened,
+      used: inventory.statusCounts.used,
+      invalid: inventory.statusCounts.invalid,
+      acceptedFamilies7,
+      needAllocation7,
+      difference7: inventory.available - needAllocation7,
+      allocatedProfiles14: d14.allocation[provider].allocatedProfiles,
+      pendingProfiles14: d14.allocation[provider].pendingProfiles,
+      pendingFamilies14: d14.allocation[provider].pendingFamilies,
+      pendingAttendanceRows14: d14.allocation[provider].pendingAttendanceRows,
+      leftAfterPending14: d14.inventory[provider].leftAfterPending,
+      shortfallNow14: d14.inventory[provider].shortfallNow,
+    }
+  })
+
+  const totalSummaryRow = providerSummaryRows.reduce(
+    (acc, row) => ({
+      label: 'Total',
+      totalGiftCards: acc.totalGiftCards + row.totalGiftCards,
+      available: acc.available + row.available,
+      acceptedFamilies: acc.acceptedFamilies + row.acceptedFamilies,
+      needAllocation: acc.needAllocation + row.needAllocation,
+      difference: acc.difference + row.difference,
+      allocated: acc.allocated + row.allocated,
+      sent: acc.sent + row.sent,
+      opened: acc.opened + row.opened,
+      used: acc.used + row.used,
+      invalid: acc.invalid + row.invalid,
+      acceptedFamilies7: acc.acceptedFamilies7 + row.acceptedFamilies7,
+      needAllocation7: acc.needAllocation7 + row.needAllocation7,
+      difference7: acc.difference7 + row.difference7,
+      allocatedProfiles14: acc.allocatedProfiles14 + row.allocatedProfiles14,
+      pendingProfiles14: acc.pendingProfiles14 + row.pendingProfiles14,
+      pendingFamilies14: acc.pendingFamilies14 + row.pendingFamilies14,
+      pendingAttendanceRows14: acc.pendingAttendanceRows14 + row.pendingAttendanceRows14,
+      leftAfterPending14: acc.leftAfterPending14 + row.leftAfterPending14,
+      shortfallNow14: acc.shortfallNow14 + row.shortfallNow14,
+    }),
+    {
+      label: 'Total',
+      totalGiftCards: 0,
+      available: 0,
+      acceptedFamilies: 0,
+      needAllocation: 0,
+      difference: 0,
+      allocated: 0,
+      sent: 0,
+      opened: 0,
+      used: 0,
+      invalid: 0,
+      acceptedFamilies7: 0,
+      needAllocation7: 0,
+      difference7: 0,
+      allocatedProfiles14: 0,
+      pendingProfiles14: 0,
+      pendingFamilies14: 0,
+      pendingAttendanceRows14: 0,
+      leftAfterPending14: 0,
+      shortfallNow14: 0,
+    }
+  )
+
+  const summaryRows = [...providerSummaryRows, totalSummaryRow]
+
+  const formatCount = (value: number) => value.toLocaleString()
+  const differenceClass = (value: number) => (value < 0 ? 'text-red-700' : 'text-foreground')
+
   return (
     <TableDisplay
       data={data}
       paginationActions={paginationActions}
       headerActions={
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex flex-wrap items-center gap-2 rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Totals</span>
-            <span className="rounded border bg-background px-2 py-1 text-foreground">all: {data.totalAssetCount}</span>
-            {data.statusTotals.map(item => (
-              <span key={item.status} className="rounded border bg-background px-2 py-1 text-foreground">
-                {item.status}: {item.count}
-              </span>
-            ))}
+        <div className="space-y-3">
+          <div className="overflow-x-auto rounded border bg-card">
+            <table className="min-w-full text-xs">
+              <thead className="bg-muted/40 text-left uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Provider</th>
+                  <th className="px-3 py-2 font-semibold">Total Gift Cards</th>
+                  <th className="px-3 py-2 font-semibold">Available</th>
+                  <th className="px-3 py-2 font-semibold">Accepted Families (7d)</th>
+                  <th className="px-3 py-2 font-semibold">Need Allocation (7d family-class)</th>
+                  <th className="px-3 py-2 font-semibold">Difference (7d)</th>
+                  <th className="px-3 py-2 font-semibold">Accepted Families (14d)</th>
+                  <th className="px-3 py-2 font-semibold">Need Allocation (14d family-class)</th>
+                  <th className="px-3 py-2 font-semibold">Difference (14d)</th>
+                  <th className="px-3 py-2 font-semibold">Allocated</th>
+                  <th className="px-3 py-2 font-semibold">Sent</th>
+                  <th className="px-3 py-2 font-semibold">Opened</th>
+                  <th className="px-3 py-2 font-semibold">Used</th>
+                  <th className="px-3 py-2 font-semibold">Invalid</th>
+                  <th className="px-3 py-2 font-semibold">Allocated Profiles (14d)</th>
+                  <th className="px-3 py-2 font-semibold">Pending Profiles (14d)</th>
+                  <th className="px-3 py-2 font-semibold">Pending Families (14d unique)</th>
+                  <th className="px-3 py-2 font-semibold">Pending Attendance Rows (14d)</th>
+                  <th className="px-3 py-2 font-semibold">Left After Pending (14d)</th>
+                  <th className="px-3 py-2 font-semibold">Shortfall Now (14d)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summaryRows.map(row => (
+                  <tr key={row.label} className="border-t align-top">
+                    <th className="px-3 py-2 text-left font-semibold text-foreground">{row.label}</th>
+                    <td className="px-3 py-2">{formatCount(row.totalGiftCards)}</td>
+                    <td className="px-3 py-2">{formatCount(row.available)}</td>
+                    <td className="px-3 py-2">{formatCount(row.acceptedFamilies7)}</td>
+                    <td className="px-3 py-2">{formatCount(row.needAllocation7)}</td>
+                    <td className={`px-3 py-2 ${differenceClass(row.difference7)}`}>{formatCount(row.difference7)}</td>
+                    <td className="px-3 py-2">{formatCount(row.acceptedFamilies)}</td>
+                    <td className="px-3 py-2">{formatCount(row.needAllocation)}</td>
+                    <td className={`px-3 py-2 ${differenceClass(row.difference)}`}>{formatCount(row.difference)}</td>
+                    <td className="px-3 py-2">{formatCount(row.allocated)}</td>
+                    <td className="px-3 py-2">{formatCount(row.sent)}</td>
+                    <td className="px-3 py-2">{formatCount(row.opened)}</td>
+                    <td className="px-3 py-2">{formatCount(row.used)}</td>
+                    <td className="px-3 py-2">{formatCount(row.invalid)}</td>
+                    <td className="px-3 py-2">{formatCount(row.allocatedProfiles14)}</td>
+                    <td className="px-3 py-2">{formatCount(row.pendingProfiles14)}</td>
+                    <td className="px-3 py-2">{formatCount(row.pendingFamilies14)}</td>
+                    <td className="px-3 py-2">{formatCount(row.pendingAttendanceRows14)}</td>
+                    <td className={`px-3 py-2 ${differenceClass(row.leftAfterPending14)}`}>{formatCount(row.leftAfterPending14)}</td>
+                    <td className={`px-3 py-2 ${differenceClass(-row.shortfallNow14)}`}>{formatCount(row.shortfallNow14)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div className="flex flex-wrap items-center gap-2 rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Inventory watch</span>
-            {GIFT_CARD_PROVIDERS.map(provider => {
-              const summary = data.inventorySnapshot.providers[provider]
-              return (
-                <span
-                  key={provider}
-                  className={`rounded border bg-background px-2 py-1 text-foreground ${summary.isLow ? 'border-red-300 text-red-700' : ''}`}
-                >
-                  {provider} available: {summary.available} | needed next {data.inventorySnapshot.horizonDays} days:{' '}
-                  {summary.projectedDemand}
-                </span>
-              )
-            })}
-          </div>
-          <div className="flex flex-wrap items-start gap-2 rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Allocation forecast</span>
-
-            {(['d7', 'd14'] as const).map(windowKey => {
-              const windowSnapshot = data.forecastSnapshot.windows[windowKey]
-              return (
-                <div key={windowKey} className="flex flex-wrap items-center gap-2 rounded border bg-background px-2 py-1 text-foreground">
-                  <span className="font-semibold">{windowSnapshot.days}d</span>
-
-                  <span>
-                    families accepted - PC: {windowSnapshot.accepted.byPreference.PC.families} | Sobeys:{' '}
-                    {windowSnapshot.accepted.byPreference.Sobeys.families} | Meal kit:{' '}
-                    {windowSnapshot.accepted.byPreference.meal_kit.families}
-                  </span>
-
-                  <span>
-                    PC allocated/pending: {windowSnapshot.allocation.PC.allocatedProfiles}/{windowSnapshot.allocation.PC.pendingProfiles}
-                  </span>
-
-                  <span>
-                    Sobeys allocated/pending: {windowSnapshot.allocation.Sobeys.allocatedProfiles}/{windowSnapshot.allocation.Sobeys.pendingProfiles}
-                  </span>
-
-                  <span className={windowSnapshot.inventory.PC.shortfallNow > 0 ? 'text-red-700' : ''}>
-                    PC left: {windowSnapshot.inventory.PC.leftAfterPending} (shortfall {windowSnapshot.inventory.PC.shortfallNow})
-                  </span>
-
-                  <span className={windowSnapshot.inventory.Sobeys.shortfallNow > 0 ? 'text-red-700' : ''}>
-                    Sobeys left: {windowSnapshot.inventory.Sobeys.leftAfterPending} (shortfall {windowSnapshot.inventory.Sobeys.shortfallNow})
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          <div className="rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            {data.eligibilityTimingEnabled ? (
-              <>
-                <span className="font-medium text-foreground">Availability rule</span> Available and reminder eligible after 6
-                hours qualified and past class-week Friday noon (Toronto).
-              </>
-            ) : (
-              <>
-                <span className="font-medium text-foreground">System timing</span>{' '}
-                (timezone: {data.systemTiming.timezone}) - Available: {data.systemTiming.release} - Reminder: {data.systemTiming.reminder}
-              </>
-            )}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              all rows: <span className="font-medium text-foreground">{formatCount(data.totalAssetCount)}</span>
+            </div>
+            <div className="rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              {data.eligibilityTimingEnabled ? (
+                <>
+                  <span className="font-medium text-foreground">Availability rule</span> Available and reminder eligible after 6
+                  hours qualified and past class-week Friday noon (Toronto).
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-foreground">System timing</span>{' '}
+                  (timezone: {data.systemTiming.timezone}) - Available: {data.systemTiming.release} - Reminder: {data.systemTiming.reminder}
+                </>
+              )}
+            </div>
+            <div className="rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              horizon: {data.inventorySnapshot.horizonDays} days
+            </div>
           </div>
           <Button asChild>
             <Link to="/manage/gift-cards/upload">Upload gift cards</Link>
