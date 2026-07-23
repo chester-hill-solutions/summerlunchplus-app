@@ -1,11 +1,13 @@
-import { Link, redirect, useLoaderData } from 'react-router'
+import { Form, Link, redirect, useLoaderData, useLocation, useNavigation } from 'react-router'
 
 import type { LoaderFunctionArgs } from 'react-router'
+import { Download, Loader2 } from 'lucide-react'
 
 import TableDisplay from './table-display'
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import type { Json } from '@/lib/database.types'
+import { EXPORT_TYPE_FORM_ID_ANSWERS_CSV } from '@/lib/exports/types'
 import { isRoleAtLeast } from '@/lib/roles'
 import { createClient } from '@/lib/supabase/server'
 
@@ -158,12 +160,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
 export default function ManageFormAnswersPage() {
   const { form, returnTo } = useLoaderData() as LoaderData
+  const location = useLocation()
+  const navigation = useNavigation()
   const backLabel = returnTo.startsWith('/manage/person') ? 'Back to person' : 'Back to forms'
+  const sourcePath = `${location.pathname}${location.search}`
+  const isCreatingExport = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'create-export'
 
   return (
     <TableDisplay
       headerActions={
         <div className="flex items-center gap-2">
+          <Form method="post" action="/manage/exports" className="flex items-center gap-2">
+            <input type="hidden" name="intent" value="create-export" />
+            <input type="hidden" name="export_type" value={EXPORT_TYPE_FORM_ID_ANSWERS_CSV} />
+            <input type="hidden" name="source_path" value={sourcePath} />
+            <Button
+              type="submit"
+              variant="outline"
+              size="icon-sm"
+              disabled={isCreatingExport}
+              aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
+              title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
+            >
+              {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+            </Button>
+          </Form>
           <Button asChild variant="outline" size="sm">
             <Link
               to={{

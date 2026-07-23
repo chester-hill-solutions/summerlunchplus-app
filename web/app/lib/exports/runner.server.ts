@@ -13,6 +13,7 @@ import {
   EXPORT_DEFAULT_TTL_DAYS,
   EXPORT_STORAGE_BUCKET,
   EXPORT_TYPE_FORM_ANSWER_CSV,
+  EXPORT_TYPE_FORM_ID_ANSWERS_CSV,
   EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV,
 } from './types'
 import { materializeWorkshopEnrollmentExportRows } from './workshop-enrollment-export-row.server'
@@ -35,6 +36,7 @@ const SUPPORTED_EXPORT_TYPES = new Set([
   EXPORT_TYPE_EMAIL_MESSAGE_CSV,
   EXPORT_TYPE_CLASS_ATTENDANCE_CSV,
   EXPORT_TYPE_FORM_ANSWER_CSV,
+  EXPORT_TYPE_FORM_ID_ANSWERS_CSV,
 ])
 
 const normalizeWorkshopExportColumns = (columns: string[]) => {
