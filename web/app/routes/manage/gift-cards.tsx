@@ -3,6 +3,7 @@ import { Link, useFetcher, useLoaderData, useLocation } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
+import { loadGiftCardAllocationForecastSnapshot } from '@/lib/gift-cards/forecast.server'
 import { loadGiftCardInventorySnapshot } from '@/lib/gift-cards/inventory.server'
 import { isEligibilityTimingEnabled } from '@/lib/gift-cards/release.server'
 import { isRoleAtLeast } from '@/lib/roles'
@@ -94,9 +95,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     return buildGiftCardShellData()
   }
 
-  const [tableRowsData, inventorySnapshot] = await Promise.all([
+  const [tableRowsData, inventorySnapshot, forecastSnapshot] = await Promise.all([
     loadGiftCardTableRows(request),
     loadGiftCardInventorySnapshot(),
+    loadGiftCardAllocationForecastSnapshot(),
   ])
 
   const statusTotals = GIFT_CARD_STATUS_ORDER.map(status => ({ status, count: inventorySnapshot.statusTotals[status] }))
@@ -105,6 +107,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     ...buildGiftCardShellData(),
     ...tableRowsData,
     inventorySnapshot,
+    forecastSnapshot,
     statusTotals,
   }
 }
@@ -238,6 +241,85 @@ const buildGiftCardShellData = () => {
     },
   }
 
+  const emptyForecastSnapshot = {
+    generatedAt: new Date().toISOString(),
+    timezone: TORONTO_TIME_ZONE,
+    windows: {
+      d7: {
+        days: 7,
+        accepted: {
+          totalProfiles: 0,
+          totalFamilies: 0,
+          byPreference: {
+            PC: { profiles: 0, families: 0 },
+            Sobeys: { profiles: 0, families: 0 },
+            meal_kit: { profiles: 0, families: 0 },
+          },
+        },
+        allocation: {
+          PC: {
+            eligibleProfiles: 0,
+            eligibleFamilies: 0,
+            allocatedProfiles: 0,
+            allocatedFamilies: 0,
+            blockedProfiles: 0,
+            pendingProfiles: 0,
+            pendingFamilies: 0,
+          },
+          Sobeys: {
+            eligibleProfiles: 0,
+            eligibleFamilies: 0,
+            allocatedProfiles: 0,
+            allocatedFamilies: 0,
+            blockedProfiles: 0,
+            pendingProfiles: 0,
+            pendingFamilies: 0,
+          },
+        },
+        inventory: {
+          PC: { available: 0, allocated: 0, sent: 0, opened: 0, leftAfterPending: 0, shortfallNow: 0 },
+          Sobeys: { available: 0, allocated: 0, sent: 0, opened: 0, leftAfterPending: 0, shortfallNow: 0 },
+        },
+      },
+      d14: {
+        days: 14,
+        accepted: {
+          totalProfiles: 0,
+          totalFamilies: 0,
+          byPreference: {
+            PC: { profiles: 0, families: 0 },
+            Sobeys: { profiles: 0, families: 0 },
+            meal_kit: { profiles: 0, families: 0 },
+          },
+        },
+        allocation: {
+          PC: {
+            eligibleProfiles: 0,
+            eligibleFamilies: 0,
+            allocatedProfiles: 0,
+            allocatedFamilies: 0,
+            blockedProfiles: 0,
+            pendingProfiles: 0,
+            pendingFamilies: 0,
+          },
+          Sobeys: {
+            eligibleProfiles: 0,
+            eligibleFamilies: 0,
+            allocatedProfiles: 0,
+            allocatedFamilies: 0,
+            blockedProfiles: 0,
+            pendingProfiles: 0,
+            pendingFamilies: 0,
+          },
+        },
+        inventory: {
+          PC: { available: 0, allocated: 0, sent: 0, opened: 0, leftAfterPending: 0, shortfallNow: 0 },
+          Sobeys: { available: 0, allocated: 0, sent: 0, opened: 0, leftAfterPending: 0, shortfallNow: 0 },
+        },
+      },
+    },
+  }
+
   return {
     label: 'Gift card assets',
     tableName: 'gift-cards',
@@ -248,6 +330,7 @@ const buildGiftCardShellData = () => {
     },
     eligibilityTimingEnabled: isEligibilityTimingEnabled(),
     inventorySnapshot: emptyInventorySnapshot,
+    forecastSnapshot: emptyForecastSnapshot,
     statusTotals: GIFT_CARD_STATUS_ORDER.map(status => ({ status, count: 0 })),
     totalAssetCount: 0,
     columns: ['provider', 'account_number', 'pin', 'value', 'status', 'asset_url', 'profile_display', 'upload_id', 'created_at'],
@@ -336,6 +419,40 @@ export default function GiftCardsPage() {
                   {provider} available: {summary.available} | needed next {data.inventorySnapshot.horizonDays} days:{' '}
                   {summary.projectedDemand}
                 </span>
+              )
+            })}
+          </div>
+          <div className="flex flex-wrap items-start gap-2 rounded border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Allocation forecast</span>
+
+            {(['d7', 'd14'] as const).map(windowKey => {
+              const windowSnapshot = data.forecastSnapshot.windows[windowKey]
+              return (
+                <div key={windowKey} className="flex flex-wrap items-center gap-2 rounded border bg-background px-2 py-1 text-foreground">
+                  <span className="font-semibold">{windowSnapshot.days}d</span>
+
+                  <span>
+                    families accepted - PC: {windowSnapshot.accepted.byPreference.PC.families} | Sobeys:{' '}
+                    {windowSnapshot.accepted.byPreference.Sobeys.families} | Meal kit:{' '}
+                    {windowSnapshot.accepted.byPreference.meal_kit.families}
+                  </span>
+
+                  <span>
+                    PC allocated/pending: {windowSnapshot.allocation.PC.allocatedProfiles}/{windowSnapshot.allocation.PC.pendingProfiles}
+                  </span>
+
+                  <span>
+                    Sobeys allocated/pending: {windowSnapshot.allocation.Sobeys.allocatedProfiles}/{windowSnapshot.allocation.Sobeys.pendingProfiles}
+                  </span>
+
+                  <span className={windowSnapshot.inventory.PC.shortfallNow > 0 ? 'text-red-700' : ''}>
+                    PC left: {windowSnapshot.inventory.PC.leftAfterPending} (shortfall {windowSnapshot.inventory.PC.shortfallNow})
+                  </span>
+
+                  <span className={windowSnapshot.inventory.Sobeys.shortfallNow > 0 ? 'text-red-700' : ''}>
+                    Sobeys left: {windowSnapshot.inventory.Sobeys.leftAfterPending} (shortfall {windowSnapshot.inventory.Sobeys.shortfallNow})
+                  </span>
+                </div>
               )
             })}
           </div>
