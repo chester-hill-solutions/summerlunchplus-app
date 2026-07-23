@@ -26,6 +26,7 @@ type LoaderData = {
 }
 
 const ANSWER_BATCH_SIZE = 200
+const ANSWER_PAGE_SIZE = 1000
 
 const chunkArray = <T,>(items: T[], size: number): T[][] => {
   if (size <= 0 || !items.length) return []
@@ -99,16 +100,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const submissionIds = (submissionRows ?? []).map(row => row.id)
   const answerRowsRaw: Array<{ submission_id: string; question_code: string; value: unknown }> = []
   for (const submissionChunk of chunkArray(submissionIds, ANSWER_BATCH_SIZE)) {
-    const { data, error: answerError } = await supabase
-      .from('form_answer')
-      .select('submission_id, question_code, value')
-      .in('submission_id', submissionChunk)
+    let from = 0
+    while (true) {
+      const to = from + ANSWER_PAGE_SIZE - 1
+      const { data, error: answerError } = await supabase
+        .from('form_answer')
+        .select('submission_id, question_code, value')
+        .in('submission_id', submissionChunk)
+        .order('id', { ascending: true })
+        .range(from, to)
 
-    if (answerError) {
-      throw new Response(answerError.message, { status: 500, headers })
+      if (answerError) {
+        throw new Response(answerError.message, { status: 500, headers })
+      }
+
+      const pageRows = data ?? []
+      if (!pageRows.length) break
+      answerRowsRaw.push(...pageRows)
+      if (pageRows.length < ANSWER_PAGE_SIZE) break
+      from += ANSWER_PAGE_SIZE
     }
-
-    answerRowsRaw.push(...(data ?? []))
   }
 
   const answersBySubmission = (answerRowsRaw ?? []).reduce<Record<string, Record<string, string>>>((acc, row) => {
