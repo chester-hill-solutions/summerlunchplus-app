@@ -34,6 +34,7 @@ type ProfileRow = {
 
 const GIFT_CARD_STATUS_ORDER: GiftCardAssetRow['status'][] = ['available', 'allocated', 'sent', 'opened', 'used', 'invalid']
 const GIFT_CARD_PROVIDERS = ['PC', 'Sobeys'] as const
+const IN_CLAUSE_BATCH_SIZE = 40
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
 
@@ -81,6 +82,15 @@ const formatTorontoClock = (hour: number, minute: number) => {
     minute: '2-digit',
     hour12: true,
   }).format(probe)
+}
+
+const chunkArray = <T,>(items: T[], size: number): T[][] => {
+  if (size <= 0 || !items.length) return []
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -133,17 +143,19 @@ const loadGiftCardTableRows = async (request: Request) => {
 
   const profileById = new Map<string, ProfileRow>()
   if (assignedProfileIds.length) {
-    const { data: profiles, error: profileError } = await supabase
-      .from('profile')
-      .select('id, firstname, surname, email')
-      .in('id', assignedProfileIds)
+    for (const chunk of chunkArray(assignedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
+      const { data: profiles, error: profileError } = await supabase
+        .from('profile')
+        .select('id, firstname, surname, email')
+        .in('id', chunk)
 
-    if (profileError) {
-      throw new Response(profileError.message, { status: 500 })
-    }
+      if (profileError) {
+        throw new Response(profileError.message, { status: 500 })
+      }
 
-    for (const profile of (profiles ?? []) as ProfileRow[]) {
-      profileById.set(profile.id, profile)
+      for (const profile of (profiles ?? []) as ProfileRow[]) {
+        profileById.set(profile.id, profile)
+      }
     }
   }
 

@@ -4,7 +4,7 @@ export type GiftCardProvider = 'PC' | 'Sobeys'
 
 type GiftCardAssetStatus = 'available' | 'allocated' | 'sent' | 'opened' | 'used' | 'invalid'
 
-const IN_CLAUSE_BATCH_SIZE = 200
+const IN_CLAUSE_BATCH_SIZE = 40
 const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
 const PROVIDERS: GiftCardProvider[] = ['PC', 'Sobeys']
 const ASSET_STATUS_ORDER: GiftCardAssetStatus[] = ['available', 'allocated', 'sent', 'opened', 'used', 'invalid']
