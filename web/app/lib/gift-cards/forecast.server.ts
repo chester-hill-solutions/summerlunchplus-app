@@ -1,5 +1,5 @@
 import { adminClient } from '@/lib/supabase/adminClient'
-import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
+import { parseGiftCardProviderFromDisplay } from '@/lib/gift-cards/inventory.server'
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
 const IN_CLAUSE_BATCH_SIZE = 100
@@ -77,6 +77,29 @@ type FamilyEdgeRow = {
   child_profile_id: string
 }
 
+type ProfileUserRow = {
+  id: string
+  user_id: string | null
+  federal_electoral_district_name: string | null
+}
+
+type RidingRow = {
+  name: string
+  meal_kit: boolean
+}
+
+type FormSubmissionRow = {
+  id: string
+  profile_id: string | null
+  user_id: string | null
+  submitted_at: string | null
+}
+
+type FormAnswerRow = {
+  submission_id: string
+  value: unknown
+}
+
 type AssetStatus = 'available' | 'allocated' | 'sent' | 'opened'
 type AssetCountResult = Record<GiftCardProvider, Record<AssetStatus, number>>
 
@@ -126,6 +149,11 @@ const mapGiftCardDisplayToBucket = (giftcardDisplay: string | null | undefined):
   if (normalized.includes('meal kit')) return 'meal_kit'
   if (normalized.includes('sobeys')) return 'Sobeys'
   return 'PC'
+}
+
+const toValidDateMs = (value: string | null | undefined) => {
+  const parsed = Date.parse((value ?? '').trim())
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 const toFamilySet = (profileIds: Iterable<string>, familyIdByProfileId: Map<string, string>): Set<string> => {
@@ -203,9 +231,146 @@ const loadPreferenceByProfileId = async (profileIds: string[]): Promise<Map<stri
   const byProfileId = new Map<string, GiftCardPreferenceBucket>()
   if (!profileIds.length) return byProfileId
 
-  const enrichment = await loadWorkshopEnrollmentEnrichment(profileIds)
-  for (const profileId of profileIds) {
-    byProfileId.set(profileId, mapGiftCardDisplayToBucket(enrichment[profileId]?.giftcard_display ?? null))
+  const normalizedProfileIds = unique(profileIds.filter(Boolean))
+  const profiles: ProfileUserRow[] = []
+  for (const chunk of chunkArray(normalizedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('profile')
+      .select('id, user_id, federal_electoral_district_name')
+      .in('id', chunk)
+
+    if (error) {
+      throw new Error(`Failed to load profiles for gift-card preference buckets: ${error.message}`)
+    }
+
+    profiles.push(...((data ?? []) as ProfileUserRow[]))
+  }
+
+  const ridingNames = unique(
+    profiles
+      .map(profile => (profile.federal_electoral_district_name ?? '').trim())
+      .filter(Boolean)
+  )
+
+  const mealKitRidingNames = new Set<string>()
+  for (const chunk of chunkArray(ridingNames, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('federal_electoral_district')
+      .select('name, meal_kit')
+      .in('name', chunk)
+
+    if (error) {
+      throw new Error(`Failed to load federal district meal-kit flags: ${error.message}`)
+    }
+
+    for (const row of (data ?? []) as RidingRow[]) {
+      if (row.meal_kit) mealKitRidingNames.add(row.name)
+    }
+  }
+
+  const profilesByUserId = new Map<string, string[]>()
+  const targetProfileIdSet = new Set(normalizedProfileIds)
+  const mealKitProfiles = new Set<string>()
+  for (const profile of profiles) {
+    if (profile.user_id) {
+      const bucket = profilesByUserId.get(profile.user_id) ?? []
+      if (!bucket.includes(profile.id)) {
+        bucket.push(profile.id)
+        profilesByUserId.set(profile.user_id, bucket)
+      }
+    }
+
+    const ridingName = (profile.federal_electoral_district_name ?? '').trim()
+    if (ridingName && mealKitRidingNames.has(ridingName)) {
+      mealKitProfiles.add(profile.id)
+    }
+  }
+
+  const submissionsById = new Map<string, FormSubmissionRow>()
+  for (const chunk of chunkArray(normalizedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('form_submission')
+      .select('id, profile_id, user_id, submitted_at')
+      .in('profile_id', chunk)
+
+    if (error) {
+      throw new Error(`Failed to load profile form submissions for gift-card preference buckets: ${error.message}`)
+    }
+
+    for (const row of (data ?? []) as FormSubmissionRow[]) {
+      submissionsById.set(row.id, row)
+    }
+  }
+
+  const userIds = Array.from(profilesByUserId.keys())
+  for (const chunk of chunkArray(userIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('form_submission')
+      .select('id, profile_id, user_id, submitted_at')
+      .in('user_id', chunk)
+
+    if (error) {
+      throw new Error(`Failed to load user form submissions for gift-card preference buckets: ${error.message}`)
+    }
+
+    for (const row of (data ?? []) as FormSubmissionRow[]) {
+      submissionsById.set(row.id, row)
+    }
+  }
+
+  const latestValueByProfileId = new Map<string, { value: string; submittedAtMs: number }>()
+  const submissionIds = Array.from(submissionsById.keys())
+  for (const chunk of chunkArray(submissionIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: answerRows, error: answerError } = await adminClient
+      .from('form_answer')
+      .select('submission_id, value')
+      .eq('question_code', 'gift_card_store_preference')
+      .in('submission_id', chunk)
+
+    if (answerError) {
+      throw new Error(`Failed to load gift-card preference answers for buckets: ${answerError.message}`)
+    }
+
+    for (const answer of (answerRows ?? []) as FormAnswerRow[]) {
+      const submission = submissionsById.get(answer.submission_id)
+      if (!submission) continue
+
+      const value = typeof answer.value === 'string' ? answer.value.trim() : ''
+      if (!value) continue
+
+      const submittedAtMs = toValidDateMs(submission.submitted_at)
+      const associatedProfileIds = new Set<string>()
+
+      if (submission.profile_id && targetProfileIdSet.has(submission.profile_id)) {
+        associatedProfileIds.add(submission.profile_id)
+      }
+
+      if (submission.user_id) {
+        for (const relatedProfileId of profilesByUserId.get(submission.user_id) ?? []) {
+          if (targetProfileIdSet.has(relatedProfileId)) {
+            associatedProfileIds.add(relatedProfileId)
+          }
+        }
+      }
+
+      for (const associatedProfileId of associatedProfileIds) {
+        const existing = latestValueByProfileId.get(associatedProfileId)
+        if (!existing || submittedAtMs > existing.submittedAtMs) {
+          latestValueByProfileId.set(associatedProfileId, { value, submittedAtMs })
+        }
+      }
+    }
+  }
+
+  for (const profileId of normalizedProfileIds) {
+    if (mealKitProfiles.has(profileId)) {
+      byProfileId.set(profileId, 'meal_kit')
+      continue
+    }
+
+    const preferenceValue = latestValueByProfileId.get(profileId)?.value ?? null
+    const provider = parseGiftCardProviderFromDisplay(preferenceValue)
+    byProfileId.set(profileId, provider ? provider : 'meal_kit')
   }
 
   return byProfileId
