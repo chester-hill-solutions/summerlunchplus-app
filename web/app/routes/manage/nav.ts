@@ -129,6 +129,11 @@ export const manageSections: ManageNavSection[] = [
       },
       { to: '/manage/class-attendance-photo-upload-attempt', label: 'Photo upload attempts', description: 'Debug class photo upload failures and retries.' },
       { to: '/manage/ip-org-policy', label: 'IP org policy', description: 'Classify network org strings for proxy, ISP, and greylist discrepancy handling.' },
+      {
+        to: '/manage/family-multi-approved',
+        label: 'Family multi-approved',
+        description: 'Families with multiple approved profiles/enrollments in the next 7 and 14 days.',
+      },
       { to: '/manage/semester-form-requirement', label: 'Semester surveys', description: 'Map one pre/post survey form per semester.' },
       { to: '/manage/role-permission', label: 'Role permissions', description: 'Permissions assigned to each role.' },
       { to: '/manage/request-metadata', label: 'Request metadata', description: 'Validate proxy headers and extracted request metadata.' },
