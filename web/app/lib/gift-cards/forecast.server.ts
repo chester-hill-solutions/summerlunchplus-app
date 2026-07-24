@@ -6,7 +6,7 @@ const TORONTO_TIME_ZONE = 'America/Toronto'
 const IN_CLAUSE_BATCH_SIZE = 10
 const RELATIONSHIP_BATCH_SIZE = 10
 
-export type ForecastWindowDays = 7 | 14
+export type ForecastWindowDays = 2 | 7 | 14
 export type GiftCardProvider = 'PC' | 'Sobeys'
 export type GiftCardPreferenceBucket = GiftCardProvider | 'meal_kit'
 
@@ -53,6 +53,7 @@ export type GiftCardAllocationForecastSnapshot = {
   generatedAt: string
   timezone: typeof TORONTO_TIME_ZONE
   windows: {
+    d2: WindowSnapshot
     d7: WindowSnapshot
     d14: WindowSnapshot
   }
@@ -675,12 +676,13 @@ const buildWindowSnapshot = async (days: ForecastWindowDays): Promise<WindowSnap
 }
 
 export const loadGiftCardAllocationForecastSnapshot = async (): Promise<GiftCardAllocationForecastSnapshot> => {
-  const [d7, d14] = await Promise.all([buildWindowSnapshot(7), buildWindowSnapshot(14)])
+  const [d2, d7, d14] = await Promise.all([buildWindowSnapshot(2), buildWindowSnapshot(7), buildWindowSnapshot(14)])
 
   return {
     generatedAt: new Date().toISOString(),
     timezone: TORONTO_TIME_ZONE,
     windows: {
+      d2,
       d7,
       d14,
     },
