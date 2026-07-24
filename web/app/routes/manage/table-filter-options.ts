@@ -1,6 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import {
+  GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
+  loadEditableQuestionOptions,
+} from '@/lib/admin-form-answers.server'
+import {
   matchesFilterClause,
   parseFilterClausesFromSearchParams,
   type FilterClause,
@@ -32,7 +36,8 @@ const CLASS_ENROLLMENT_FAMILY_CONTEXT_COLUMNS = new Set([
   'profile_hover_student_submitted_address',
   'profile_hover_parent_address',
 ])
-const GIFT_CARD_FILTER_FAST_OPTIONS = ['N/A', '...', 'PC', 'Sobeys', 'Meal Kit'] as const
+const GIFT_CARD_FILTER_BASE_OPTIONS = ['N/A', '...', 'Meal Kit'] as const
+const GIFT_CARD_FILTER_PROVIDER_FALLBACK_OPTIONS = ['PC', 'Sobeys'] as const
 
 const parseTopLevelSelectColumns = (select: string) => {
   const columns: string[] = []
@@ -246,7 +251,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
     column === 'giftcard_display' &&
     (tableName === 'class-enrollment' || tableName === 'class-attendance')
   ) {
-    const allOptions = sortFilterOptions([...GIFT_CARD_FILTER_FAST_OPTIONS])
+    let configuredOptions: string[] = []
+    try {
+      configuredOptions = await loadEditableQuestionOptions(GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+    } catch (error) {
+      console.error('[table-filter-options] failed to load gift card question options', error)
+    }
+
+    const optionSet = new Set<string>(GIFT_CARD_FILTER_BASE_OPTIONS)
+    const normalizedConfiguredOptions = configuredOptions.map(option => option.trim()).filter(Boolean)
+    if (normalizedConfiguredOptions.length > 0) {
+      for (const option of normalizedConfiguredOptions) {
+        optionSet.add(option)
+      }
+    } else {
+      for (const fallbackOption of GIFT_CARD_FILTER_PROVIDER_FALLBACK_OPTIONS) {
+        optionSet.add(fallbackOption)
+      }
+    }
+
+    const allOptions = sortFilterOptions(Array.from(optionSet))
     return Response.json(
       {
         status: 'loaded',
