@@ -415,20 +415,29 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('gift_card_allocation')
-      .select('id, class_id, profile_id, gift_card_asset_id, status, blocked, blocked_reason, reminder_sent_at, first_opened_at, last_opened_at, open_count, metadata')
-      .in('class_id', chunk)
+    for (let offset = 0; ; offset += RELATED_FETCH_BATCH_SIZE) {
+      const { data, error } = await adminClient
+        .from('gift_card_allocation')
+        .select('id, class_id, profile_id, gift_card_asset_id, status, blocked, blocked_reason, reminder_sent_at, first_opened_at, last_opened_at, open_count, metadata')
+        .in('class_id', chunk)
+        .order('class_id', { ascending: true })
+        .order('profile_id', { ascending: true })
+        .range(offset, offset + RELATED_FETCH_BATCH_SIZE - 1)
 
-    if (error) {
-      if (isSchemaMismatchError(error)) {
-        giftCardSchemaAvailable = false
-        break
+      if (error) {
+        if (isSchemaMismatchError(error)) {
+          giftCardSchemaAvailable = false
+          break
+        }
+        throw new Response(error.message, { status: 500 })
       }
-      throw new Response(error.message, { status: 500 })
+
+      const rows = (data ?? []) as GiftCardAllocationRow[]
+      allocationRowsRaw.push(...rows)
+      if (rows.length < RELATED_FETCH_BATCH_SIZE) break
     }
 
-    allocationRowsRaw.push(...((data ?? []) as GiftCardAllocationRow[]))
+    if (!giftCardSchemaAvailable) break
   }
   profile.mark('fetch_class_related_records', {
     classIds: classIds.length,
@@ -1471,7 +1480,7 @@ export async function action({ request }: Route.ActionArgs) {
         class_id: classId,
         profile_id: profileId,
         already_allocated: true,
-        message: 'Gift card already allocated for this class/profile.',
+        message: 'Gift card already allocated for this class/profile (possibly allocated in another session).',
       }
     }
 

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useFetcher, useLoaderData, useLocation, useSearchParams } from 'react-router'
+import { Link, useFetcher, useLoaderData, useLocation, useRevalidator, useSearchParams } from 'react-router'
 import { Filter, Plus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -919,6 +919,7 @@ export default function TableDisplay({
     tableName === 'federal-electoral-district' ||
     tableName === 'gift-cards'
   const location = useLocation()
+  const revalidator = useRevalidator()
 
   const statusFetcher = useFetcher()
   const editorFetcher = useFetcher<{ error?: string; success?: boolean }>()
@@ -2324,11 +2325,13 @@ export default function TableDisplay({
     const key = `${result.class_id}::${result.profile_id}`
     if (!key) return
 
+    revalidator.revalidate()
+
     if (result.ok) {
       const successMessage =
         result.message ??
         (result.already_allocated
-          ? 'Gift card already allocated for this class/profile.'
+          ? 'Gift card already allocated for this class/profile (possibly allocated in another session).'
           : result.gift_card_provider
             ? `Gift card allocated (${result.gift_card_provider}).`
             : 'Gift card allocated.')
@@ -2343,7 +2346,7 @@ export default function TableDisplay({
       ...prev,
       [key]: { type: 'error', message: result.error ?? result.message ?? 'Gift card allocation failed.' },
     }))
-  }, [isClassAttendance, statusFetcher.data])
+  }, [isClassAttendance, revalidator, statusFetcher.data])
 
   useEffect(() => {
     if (!isClassTable) return
