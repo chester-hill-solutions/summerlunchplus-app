@@ -1942,26 +1942,11 @@ export default function TableDisplay({
         }
 
         if (shouldLoadClassAttendanceValues) {
-          const classAttendanceGiftcardSearch = new URLSearchParams(searchParams)
-          classAttendanceGiftcardSearch.append('lane', 'giftcard')
+          const classAttendanceSearch = new URLSearchParams(searchParams)
+          classAttendanceSearch.append('lane', 'giftcard')
+          classAttendanceSearch.append('lane', 'geo')
           pendingLaneRequests.push(
-            fetch(`/manage/class-attendance/enrichment?${classAttendanceGiftcardSearch.toString()}`, {
-              signal: abortController.signal,
-            })
-              .then(async response =>
-                response.ok
-                  ? ((await response.json()) as ClassAttendanceEnrichmentResponse)
-                  : ({ byProfileId: {} } as ClassAttendanceEnrichmentResponse)
-              )
-              .then(payload => {
-                mergeEnrichmentPayload(payload.byProfileId)
-              })
-          )
-
-          const classAttendanceGeoSearch = new URLSearchParams(searchParams)
-          classAttendanceGeoSearch.append('lane', 'geo')
-          pendingLaneRequests.push(
-            fetch(`/manage/class-attendance/enrichment?${classAttendanceGeoSearch.toString()}`, {
+            fetch(`/manage/class-attendance/enrichment?${classAttendanceSearch.toString()}`, {
               signal: abortController.signal,
             })
               .then(async response =>
