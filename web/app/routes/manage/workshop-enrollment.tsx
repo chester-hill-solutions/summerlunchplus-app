@@ -75,6 +75,16 @@ export async function loader(args: Route.LoaderArgs) {
     deferTable,
   })
 
+  let giftCardOptions: string[] = []
+  try {
+    giftCardOptions = await loadEditableQuestionOptions(GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+  } catch (error) {
+    console.error('[workshop enrollment] unable to load gift card question options', error)
+  }
+  profile.mark('load_gift_card_options', {
+    optionCount: giftCardOptions.length,
+  })
+
   if (!deferTable) {
     const auth = await requireAuth(args.request)
     const shell = {
@@ -102,6 +112,7 @@ export async function loader(args: Route.LoaderArgs) {
         prior_participation_display: { label: 'been before?', filterable: true },
       },
       canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
+      giftCardOptions,
     }
 
     profile.complete({
@@ -128,16 +139,7 @@ export async function loader(args: Route.LoaderArgs) {
     totalRows: base.totalRows ?? base.rows.length,
   })
 
-  let giftCardOptions: string[] = []
   let federalDistrictOptions: Array<{ value: string; label: string }> = []
-  try {
-    giftCardOptions = await loadEditableQuestionOptions(GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
-  } catch (error) {
-    console.error('[workshop enrollment] unable to load gift card question options', error)
-  }
-  profile.mark('load_gift_card_options', {
-    optionCount: giftCardOptions.length,
-  })
 
   try {
     const { data, error } = await adminClient

@@ -5,6 +5,10 @@ import { Constants, type Database } from '@/lib/database.types'
 import { EXPORT_TYPE_CLASS_ATTENDANCE_CSV } from '@/lib/exports/types'
 import { createLoaderProfile } from '@/lib/loader-profile.server'
 import {
+  GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE,
+  loadEditableQuestionOptions,
+} from '@/lib/admin-form-answers.server'
+import {
   eligibleAfterIso,
   isEligibilityTimingEnabled,
   nextReleaseAtIso,
@@ -210,6 +214,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request)
   const url = new URL(request.url)
   const deferTable = url.searchParams.get('_deferTable') === '1'
+  let giftCardOptions: string[] = []
+  try {
+    giftCardOptions = await loadEditableQuestionOptions(GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
+  } catch (error) {
+    console.error('[class attendance] unable to load gift card question options', error)
+  }
   if (shouldLogClassAttendanceInstrumentation) {
     console.info('[manage-class-attendance-loader]', {
       event: 'start',
@@ -265,6 +275,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         giftcard_display: { label: 'Provider', filterable: true, truncate: true },
       },
       canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
+      giftCardOptions,
     }
     profile.complete({
       deferredShell: true,
@@ -1008,6 +1019,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       state_action: { label: 'State action', filterable: false },
     },
     canEditStatus: isRoleAtLeast(auth.claims.role, 'staff'),
+    giftCardOptions,
   }
 }
 
