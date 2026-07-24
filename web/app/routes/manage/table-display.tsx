@@ -177,6 +177,17 @@ type RegisterStudentActionResult = {
   error?: string
 }
 
+type AllocateGiftCardActionResult = {
+  ok: boolean
+  intent: 'allocate-gift-card'
+  class_id: string
+  profile_id: string
+  already_allocated?: boolean
+  gift_card_provider?: string
+  message?: string
+  error?: string
+}
+
 type ClassActionResult = {
   classSyncSuccess?: string
   classSyncError?: string
@@ -953,6 +964,9 @@ export default function TableDisplay({
   const [openFilterCacheEntry, setOpenFilterCacheEntry] = useState<FilterOptionsCacheEntry | null>(null)
   const [attendanceJoinUrlOverrides, setAttendanceJoinUrlOverrides] = useState<Record<string, string>>({})
   const [attendanceRegisterFeedback, setAttendanceRegisterFeedback] = useState<
+    Record<string, { type: 'success' | 'error'; message: string }>
+  >({})
+  const [attendanceAllocationFeedback, setAttendanceAllocationFeedback] = useState<
     Record<string, { type: 'success' | 'error'; message: string }>
   >({})
   const [attendanceRegisterStatusByKey, setAttendanceRegisterStatusByKey] = useState<
@@ -2304,6 +2318,34 @@ export default function TableDisplay({
   }, [isClassAttendance, statusFetcher.data])
 
   useEffect(() => {
+    if (!isClassAttendance) return
+    const result = statusFetcher.data as AllocateGiftCardActionResult | undefined
+    if (!result || result.intent !== 'allocate-gift-card') return
+    const key = `${result.class_id}::${result.profile_id}`
+    if (!key) return
+
+    if (result.ok) {
+      const successMessage =
+        result.message ??
+        (result.already_allocated
+          ? 'Gift card already allocated for this class/profile.'
+          : result.gift_card_provider
+            ? `Gift card allocated (${result.gift_card_provider}).`
+            : 'Gift card allocated.')
+      setAttendanceAllocationFeedback(prev => ({
+        ...prev,
+        [key]: { type: 'success', message: successMessage },
+      }))
+      return
+    }
+
+    setAttendanceAllocationFeedback(prev => ({
+      ...prev,
+      [key]: { type: 'error', message: result.error ?? result.message ?? 'Gift card allocation failed.' },
+    }))
+  }, [isClassAttendance, statusFetcher.data])
+
+  useEffect(() => {
     if (!isClassTable) return
     const result = statusFetcher.data as ClassActionResult | undefined
     if (!result) return
@@ -2681,6 +2723,13 @@ export default function TableDisplay({
     formData.set('intent', 'allocate-gift-card')
     formData.set('class_id', classId)
     formData.set('profile_id', profileId)
+    const key = `${classId}::${profileId}`
+    setAttendanceAllocationFeedback(prev => {
+      if (!prev[key]) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
     if (preferredProvider) {
       formData.set('gift_card_preferred_provider', preferredProvider)
     }
@@ -3547,8 +3596,10 @@ export default function TableDisplay({
                       if (isClassAttendance && column === 'gift_card_allocated' && canEditStatus) {
                         const classId = typeof row.class_id === 'string' ? row.class_id : ''
                         const profileId = typeof row.profile_id === 'string' ? row.profile_id : ''
+                        const key = `${classId}::${profileId}`
                         const allocated = row.gift_card_allocated === true || row.gift_card_allocated === 'true'
                         const blocked = row.gift_card_blocked === true || row.gift_card_blocked === 'true'
+                        const feedback = attendanceAllocationFeedback[key]
                         const isSubmitting =
                           statusFetcher.state === 'submitting' &&
                           statusFetcher.formData?.get('intent') === 'allocate-gift-card' &&
@@ -3557,21 +3608,28 @@ export default function TableDisplay({
 
                         return (
                           <td key={`cell-${absoluteRowIndex}-${column}`} className="px-4 py-2" title={allocated ? 'gift card allocated' : 'gift card not allocated'}>
-                            {allocated ? (
-                              <span className="font-mono text-xs">true</span>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={!classId || !profileId || blocked || isSubmitting}
-                                onClick={event => {
-                                  event.stopPropagation()
-                                  allocateAttendanceGiftCard(row)
-                                }}
-                                className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {isSubmitting ? 'Allocating...' : blocked ? 'Blocked' : 'Allocate'}
-                              </button>
-                            )}
+                            <div className="space-y-1">
+                              {allocated ? (
+                                <span className="font-mono text-xs">true</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={!classId || !profileId || blocked || isSubmitting}
+                                  onClick={event => {
+                                    event.stopPropagation()
+                                    allocateAttendanceGiftCard(row)
+                                  }}
+                                  className="rounded border border-input px-2 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isSubmitting ? 'Allocating...' : blocked ? 'Blocked' : 'Allocate'}
+                                </button>
+                              )}
+                              {feedback ? (
+                                <p className={`max-w-64 whitespace-normal text-[11px] ${feedback.type === 'error' ? 'text-destructive' : 'text-emerald-700'}`}>
+                                  {feedback.message}
+                                </p>
+                              ) : null}
+                            </div>
                           </td>
                         )
                       }

@@ -1395,9 +1395,24 @@ export async function action({ request }: Route.ActionArgs) {
     const preferredProvider =
       preferredProviderRaw === 'sobeys' ? 'Sobeys' : preferredProviderRaw === 'pc' ? 'PC' : null
 
+    const allocationErrorResponse = (status: number, errorMessage: string) => {
+      const headers = new Headers(auth.headers)
+      headers.set('content-type', 'application/json; charset=utf-8')
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          intent: 'allocate-gift-card',
+          class_id: classId,
+          profile_id: profileId,
+          error: errorMessage,
+        }),
+        { status, headers }
+      )
+    }
+
     if (!classId || !profileId) {
       outcome = 'allocate_missing_identifiers'
-      return new Response('Missing identifiers', { status: 400, headers: auth.headers })
+      return allocationErrorResponse(400, 'Missing identifiers')
     }
 
     const { supabase } = createClient(request)
@@ -1427,25 +1442,25 @@ export async function action({ request }: Route.ActionArgs) {
 
     if (attendanceResult.error) {
       outcome = 'allocate_attendance_error'
-      return new Response(attendanceResult.error.message, { status: 500, headers: auth.headers })
+      return allocationErrorResponse(500, attendanceResult.error.message)
     }
     if (allocationResult.error) {
       outcome = 'allocate_existing_allocation_error'
-      return new Response(allocationResult.error.message, { status: 500, headers: auth.headers })
+      return allocationErrorResponse(500, allocationResult.error.message)
     }
     if (classResult.error) {
       outcome = 'allocate_class_error'
-      return new Response(classResult.error.message, { status: 500, headers: auth.headers })
+      return allocationErrorResponse(500, classResult.error.message)
     }
 
     const attendance = attendanceResult.data
     if (!attendance?.id) {
       outcome = 'allocate_attendance_missing'
-      return new Response('Class attendance row not found for class/profile', { status: 409, headers: auth.headers })
+      return allocationErrorResponse(409, 'Class attendance row not found for class/profile')
     }
     if (attendance.gift_card_blocked) {
       outcome = 'allocate_blocked'
-      return new Response('Gift card is blocked for this attendance row', { status: 409, headers: auth.headers })
+      return allocationErrorResponse(409, 'Gift card is blocked for this attendance row')
     }
 
     if (allocationResult.data?.id) {
@@ -1456,6 +1471,7 @@ export async function action({ request }: Route.ActionArgs) {
         class_id: classId,
         profile_id: profileId,
         already_allocated: true,
+        message: 'Gift card already allocated for this class/profile.',
       }
     }
 
@@ -1482,7 +1498,7 @@ export async function action({ request }: Route.ActionArgs) {
     for (const provider of providerFallbackOrder) {
       const { data, error } = await pickAvailableAsset(provider)
       if (error) {
-        return new Response(error.message, { status: 500, headers: auth.headers })
+        return allocationErrorResponse(500, error.message)
       }
       if (data?.id) {
         selectedAsset = data
@@ -1492,7 +1508,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     if (!selectedAsset) {
       outcome = 'allocate_no_asset_available'
-      return new Response('No available gift card asset found for allocation', { status: 409, headers: auth.headers })
+      return allocationErrorResponse(409, 'No available gift card asset found for allocation')
     }
 
     const nowIso = new Date().toISOString()
@@ -1510,7 +1526,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     if (claimError || !claimedAsset?.id) {
       outcome = 'allocate_asset_claim_failed'
-      return new Response(claimError?.message ?? 'Gift card asset claim failed', { status: 409, headers: auth.headers })
+      return allocationErrorResponse(409, claimError?.message ?? 'Gift card asset claim failed')
     }
 
     const classAt = classResult.data?.starts_at ?? classResult.data?.ends_at ?? null
@@ -1572,7 +1588,7 @@ export async function action({ request }: Route.ActionArgs) {
         .eq('id', claimedAsset.id)
 
       outcome = 'allocate_insert_error'
-      return new Response(insertError.message, { status: 500, headers: auth.headers })
+      return allocationErrorResponse(500, insertError.message)
     }
 
     outcome = 'allocate_success'
@@ -1583,6 +1599,7 @@ export async function action({ request }: Route.ActionArgs) {
       profile_id: profileId,
       gift_card_allocated: true,
       gift_card_provider: claimedAsset.provider,
+      message: `Gift card allocated (${claimedAsset.provider}).`,
     }
   }
 
