@@ -443,9 +443,9 @@ const loadFamilyLane = async (
 export async function loadClassAttendanceEnrichment(
   profileIds: string[],
   options: ClassAttendanceEnrichmentOptions = {}
-) {
+): Promise<Record<string, Partial<ClassAttendanceEnrichment>>> {
   const normalizedProfileIds = normalizeProfileIds(profileIds)
-  const byProfileId: Record<string, ClassAttendanceEnrichment> = {}
+  const byProfileId: Record<string, Partial<ClassAttendanceEnrichment>> = {}
 
   if (!normalizedProfileIds.length) {
     return byProfileId
@@ -477,10 +477,19 @@ export async function loadClassAttendanceEnrichment(
   )
 
   for (const profileId of normalizedProfileIds) {
+    const laneScopedFallback: Partial<ClassAttendanceEnrichment> = {}
+    if (lanes.includes('giftcard')) {
+      laneScopedFallback.giftcard_display = 'N/A'
+    }
+    if (lanes.includes('geo')) {
+      laneScopedFallback.latest_geo = 'N/A'
+    }
+    if (lanes.includes('family')) {
+      Object.assign(laneScopedFallback, fallbackProfileHoverContext)
+    }
+
     byProfileId[profileId] = {
-      ...fallbackProfileHoverContext,
-      latest_geo: 'N/A',
-      giftcard_display: 'N/A',
+      ...laneScopedFallback,
     }
   }
 
