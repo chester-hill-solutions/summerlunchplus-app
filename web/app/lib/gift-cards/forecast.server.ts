@@ -1,5 +1,6 @@
 import { adminClient } from '@/lib/supabase/adminClient'
 import { parseGiftCardProviderFromDisplay } from '@/lib/gift-cards/inventory.server'
+import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
 const IN_CLAUSE_BATCH_SIZE = 10
@@ -559,7 +560,14 @@ const buildWindowSnapshot = async (days: ForecastWindowDays): Promise<WindowSnap
     attendanceRows.map(row => row.profile_id).filter((profileId): profileId is string => Boolean(profileId))
   )
   const relevantProfileIds = unique([...approvedProfiles, ...attendanceProfileIds])
-  const preferenceByProfileId = await loadPreferenceByProfileId(relevantProfileIds)
+  const enrichmentByProfileId = await loadWorkshopEnrollmentEnrichment(relevantProfileIds)
+  const preferenceByProfileId = new Map<string, GiftCardPreferenceBucket>()
+  for (const profileId of relevantProfileIds) {
+    preferenceByProfileId.set(
+      profileId,
+      mapGiftCardDisplayToBucket(enrichmentByProfileId[profileId]?.giftcard_display)
+    )
+  }
   const familyIdByProfileId = await loadFamilyIdByProfileId(relevantProfileIds)
   const inventoryCounts = await loadInventoryCounts()
 
