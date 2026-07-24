@@ -9,6 +9,7 @@ import { triggerExportRunner } from '@/lib/exports/dispatch.server'
 import { buildClassAttendanceSnapshot } from '@/lib/exports/class-attendance-snapshot.server'
 import { buildEmailMessageSnapshot } from '@/lib/exports/email-message-snapshot.server'
 import { buildFederalElectoralDistrictSnapshot } from '@/lib/exports/federal-electoral-district-snapshot.server'
+import { buildFormIdAnswersSnapshot } from '@/lib/exports/form-id-answers-snapshot.server'
 import { buildFormAnswerSnapshot } from '@/lib/exports/form-answer-snapshot.server'
 import { processExportJobById } from '@/lib/exports/runner.server'
 import {
@@ -24,6 +25,7 @@ import {
   EXPORT_TYPE_EMAIL_MESSAGE_CSV,
   EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV,
   EXPORT_TYPE_FORM_ANSWER_CSV,
+  EXPORT_TYPE_FORM_ID_ANSWERS_CSV,
   EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV,
 } from '@/lib/exports/types'
 import { isRoleAtLeast } from '@/lib/roles'
@@ -93,7 +95,22 @@ const toActionErrorMessage = async (error: unknown) => {
   }
 }
 
-const EXPORT_CONFIG = {
+const isManageFormAnswersPath = (pathname: string) => /^\/manage\/form\/[^/]+\/answers$/.test(pathname)
+
+type ExportConfig = {
+  sourcePathname?: string
+  sourcePathMatcher?: (pathname: string) => boolean
+  sourceTable: string
+  buildSnapshot: ({ request }: { request: Request }) => Promise<{
+    columns: string[]
+    rows: Record<string, unknown>[]
+    filters: Record<string, unknown>
+    sort: Record<string, unknown>
+    queryParams: Record<string, unknown>
+  }>
+}
+
+const EXPORT_CONFIG: Record<string, ExportConfig> = {
   [EXPORT_TYPE_WORKSHOP_ENROLLMENT_CSV]: {
     sourcePathname: '/manage/workshop-enrollment',
     sourceTable: 'workshop_enrollment',
@@ -119,7 +136,12 @@ const EXPORT_CONFIG = {
     sourceTable: 'form_answer',
     buildSnapshot: buildFormAnswerSnapshot,
   },
-} as const
+  [EXPORT_TYPE_FORM_ID_ANSWERS_CSV]: {
+    sourcePathMatcher: isManageFormAnswersPath,
+    sourceTable: 'form_answer',
+    buildSnapshot: buildFormIdAnswersSnapshot,
+  },
+}
 
 const triggerExportRunnerWithFallback = async ({ request, jobId }: { request: Request; jobId: string }) => {
   const triggerResult = await triggerExportRunner({ request })
@@ -213,7 +235,11 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     const sourceUrl = new URL(sourcePath, request.url)
-    if (sourceUrl.pathname !== exportConfig.sourcePathname) {
+    const sourcePathMatches =
+      (typeof exportConfig.sourcePathname === 'string' && sourceUrl.pathname === exportConfig.sourcePathname) ||
+      (typeof exportConfig.sourcePathMatcher === 'function' && exportConfig.sourcePathMatcher(sourceUrl.pathname))
+
+    if (!sourcePathMatches) {
       return { error: 'Invalid export source path.' } satisfies ActionData
     }
     const sourceRequest = new Request(sourceUrl.toString(), {

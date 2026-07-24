@@ -2,7 +2,7 @@ import { resolveIpGeolocation } from '@/lib/geoip.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 
 const RELATIONSHIP_BATCH_SIZE = 100
-const IN_CLAUSE_BATCH_SIZE = 250
+const IN_CLAUSE_BATCH_SIZE = 100
 const PRIOR_PARTICIPATION_QUESTION_CODES = [
   'onboarding_prior_participation',
   'child_prior_participation',
@@ -289,21 +289,29 @@ export async function loadFamilyContextByProfileIds(profileIds: string[]) {
     }
   }
 
-  const { data: discrepancyRowsRaw, error: discrepancyRowsError } = await (adminClient.from('suspicious_signal') as any)
-    .select('id, family_profile_ids, severity, summary, priority_score, created_at')
-    .eq('status', 'open')
-    .overlaps('family_profile_ids', normalizedProfileIds)
-    .order('priority_score', { ascending: false })
-    .order('created_at', { ascending: false })
+  const discrepancyRowsById = new Map<string, OpenDiscrepancyRow>()
+  for (const profileChunk of chunkArray(normalizedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data: discrepancyRowsRaw, error: discrepancyRowsError } = await (adminClient.from('suspicious_signal') as any)
+      .select('id, family_profile_ids, severity, summary, priority_score, created_at')
+      .eq('status', 'open')
+      .overlaps('family_profile_ids', profileChunk)
+      .order('priority_score', { ascending: false })
+      .order('created_at', { ascending: false })
 
-  if (discrepancyRowsError) {
-    console.error('[family-context] failed to load discrepancy rows', {
-      profileCount: normalizedProfileIds.length,
-      error: discrepancyRowsError.message,
-    })
+    if (discrepancyRowsError) {
+      console.error('[family-context] failed to load discrepancy rows', {
+        profileCount: profileChunk.length,
+        error: discrepancyRowsError.message,
+      })
+      continue
+    }
+
+    for (const signal of (discrepancyRowsRaw ?? []) as OpenDiscrepancyRow[]) {
+      discrepancyRowsById.set(signal.id, signal)
+    }
   }
 
-  for (const signal of (discrepancyRowsRaw ?? []) as OpenDiscrepancyRow[]) {
+  for (const signal of discrepancyRowsById.values()) {
     for (const familyProfileId of signal.family_profile_ids ?? []) {
       if (!normalizedProfileIds.includes(familyProfileId)) continue
       const existing = discrepancyRowsByProfileId.get(familyProfileId) ?? []

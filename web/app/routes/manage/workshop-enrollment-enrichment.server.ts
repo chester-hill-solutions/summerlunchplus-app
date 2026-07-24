@@ -8,7 +8,7 @@ const PRIOR_PARTICIPATION_QUESTION_CODES = [
   'child_prior_participation',
 ] as const
 const RELATIONSHIP_BATCH_SIZE = 100
-const IN_CLAUSE_BATCH_SIZE = 250
+const IN_CLAUSE_BATCH_SIZE = 100
 
 type RidingProfileRow = {
   id: string
