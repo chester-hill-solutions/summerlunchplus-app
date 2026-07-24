@@ -8,7 +8,7 @@ import { isRoleAtLeast } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
 import type { Route } from './+types/team'
-import { manageSections, overviewPage } from './nav'
+import { manageSections, overviewPage, teamPages } from './nav'
 
 const shouldLogManageTeamServerInstrumentation =
   process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
@@ -43,6 +43,41 @@ const TEAM_ALLOWED_MANAGE_PREFIXES = Array.from(TEAM_ALLOWED_MANAGE_PATHS).filte
 const isTeamAllowedManagePath = (pathname: string) => {
   if (TEAM_ALLOWED_MANAGE_PATHS.has(pathname)) return true
   return TEAM_ALLOWED_MANAGE_PREFIXES.some(prefix => pathname.startsWith(`${prefix}/`))
+}
+
+const MANAGE_TITLE_SUFFIX = ' | Summer Lunch Plus'
+
+const toTitleCase = (value: string) =>
+  value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+
+const personSubpageTitleByPath: Record<string, string> = {
+  '/manage/person': 'Person',
+  '/manage/person/family': 'Person - Family',
+  '/manage/person/enrollments': 'Person - Enrollments',
+  '/manage/person/form-submissions': 'Person - Form Submissions',
+  '/manage/person/activity': 'Person - Activity and IP Logs',
+  '/manage/person/attendance': 'Person - Attendance',
+  '/manage/person/discrepancies': 'Person - Discrepancies',
+}
+
+const resolveManagePageTitle = (pathname: string) => {
+  if (personSubpageTitleByPath[pathname]) {
+    return personSubpageTitleByPath[pathname]
+  }
+
+  const bestMatch = teamPages
+    .filter(item => pathname === item.to || pathname.startsWith(`${item.to}/`))
+    .sort((left, right) => right.to.length - left.to.length)[0]
+
+  if (bestMatch) {
+    return toTitleCase(bestMatch.label)
+  }
+
+  return 'Manage'
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -167,6 +202,11 @@ export default function TeamLayout() {
       navFromRef.current = ''
     }
   }, [location.pathname, location.search, navigation.location, navigation.state])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.title = `${resolveManagePageTitle(location.pathname)}${MANAGE_TITLE_SUFFIX}`
+  }, [location.pathname])
 
   const logSidebarNavClick = (target: string) => {
     logManageTeamClientEvent('sidebar_nav_click', {
