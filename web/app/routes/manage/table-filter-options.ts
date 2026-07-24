@@ -32,6 +32,7 @@ const CLASS_ENROLLMENT_FAMILY_CONTEXT_COLUMNS = new Set([
   'profile_hover_student_submitted_address',
   'profile_hover_parent_address',
 ])
+const GIFT_CARD_FILTER_FAST_OPTIONS = ['N/A', '...', 'PC', 'Sobeys', 'Meal Kit'] as const
 
 const parseTopLevelSelectColumns = (select: string) => {
   const columns: string[] = []
@@ -240,6 +241,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const { supabase, headers } = createClient(request)
+
+  if (
+    column === 'giftcard_display' &&
+    (tableName === 'class-enrollment' || tableName === 'class-attendance')
+  ) {
+    const allOptions = sortFilterOptions([...GIFT_CARD_FILTER_FAST_OPTIONS])
+    return Response.json(
+      {
+        status: 'loaded',
+        allOptions,
+        totalCount: allOptions.length,
+      },
+      { headers }
+    )
+  }
+
   const selectableColumns = new Set(parseTopLevelSelectColumns(definition.select))
   const parsedFilters = parseFilterClausesFromSearchParams(url.searchParams, definition.columns)
 
