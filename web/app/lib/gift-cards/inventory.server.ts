@@ -123,7 +123,15 @@ export const loadGiftCardInventorySnapshot = async (): Promise<GiftCardInventory
 
   const upcomingApprovedProfiles = await loadApprovedEnrollmentProfilesForWorkshops(upcomingWorkshopIds)
   const upcomingProfileIds = Array.from(upcomingApprovedProfiles)
-  const providerByProfileId = await resolveProviderByProfileIds(upcomingProfileIds)
+  let providerByProfileId = new Map<string, GiftCardProvider | null>()
+  try {
+    providerByProfileId = await resolveProviderByProfileIds(upcomingProfileIds)
+  } catch (error) {
+    console.error('[gift-cards] failed to resolve provider preferences for inventory snapshot', {
+      profileCount: upcomingProfileIds.length,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
 
   const nearTermDemandByProvider: Record<GiftCardProvider, number> = { PC: 0, Sobeys: 0 }
 
