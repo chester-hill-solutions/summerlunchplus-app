@@ -3,6 +3,7 @@ import { isIP } from 'node:net'
 import { loadFamilyContextByProfileIds } from '@/lib/family-context.server'
 import { resolveIpGeolocation } from '@/lib/geoip.server'
 import { adminClient } from '@/lib/supabase/adminClient'
+import { loadWorkshopEnrollmentEnrichment } from './workshop-enrollment-enrichment.server'
 
 const GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE = 'gift_card_store_preference'
 const IN_CLAUSE_BATCH_SIZE = 150
@@ -292,105 +293,12 @@ const getClassAttendanceEnrichmentFoundation = async (normalizedProfileIds: stri
 const loadGiftCardLane = async (
   foundation: ClassAttendanceEnrichmentFoundation
 ): Promise<Record<string, Partial<ClassAttendanceEnrichment>>> => {
-  const {
-    normalizedProfileIds,
-    expandedRelatedProfilesByTarget,
-    preferenceSubmissionScopeProfileIds,
-    userIdsByProfileId,
-    profileIdsByUserId,
-  } = foundation
-
-  const submissionsById = new Map<string, FormSubmissionPreferenceRow>()
-  for (const chunk of chunkArray(preferenceSubmissionScopeProfileIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data: submissionRows, error } = await adminClient
-      .from('form_submission')
-      .select('id, profile_id, user_id, submitted_at')
-      .in('profile_id', chunk)
-    if (error) throw new Error(error.message)
-    for (const row of (submissionRows ?? []) as FormSubmissionPreferenceRow[]) {
-      submissionsById.set(row.id, row)
-    }
-  }
-
-  const preferenceUserIds = Array.from(
-    new Set(
-      preferenceSubmissionScopeProfileIds
-        .map(profileId => userIdsByProfileId.get(profileId) ?? '')
-        .filter(Boolean)
-    )
-  )
-  for (const chunk of chunkArray(preferenceUserIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data: submissionRows, error } = await adminClient
-      .from('form_submission')
-      .select('id, profile_id, user_id, submitted_at')
-      .in('user_id', chunk)
-    if (error) throw new Error(error.message)
-    for (const row of (submissionRows ?? []) as FormSubmissionPreferenceRow[]) {
-      submissionsById.set(row.id, row)
-    }
-  }
-
-  const latestGiftCardPreferenceByProfileId = new Map<string, { value: string; submittedAtMs: number }>()
-  const submissionIds = Array.from(submissionsById.keys())
-  for (const chunk of chunkArray(submissionIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data: answerRows, error } = await adminClient
-      .from('form_answer')
-      .select('submission_id, value')
-      .eq('question_code', GIFT_CARD_STORE_PREFERENCE_QUESTION_CODE)
-      .in('submission_id', chunk)
-    if (error) throw new Error(error.message)
-
-    for (const row of (answerRows ?? []) as FormAnswerPreferenceRow[]) {
-      const submission = submissionsById.get(row.submission_id)
-      if (!submission) continue
-      const value = typeof row.value === 'string' ? row.value.trim() : ''
-      if (!value) continue
-      const submittedAtMs = Number.isFinite(Date.parse(submission.submitted_at ?? ''))
-        ? Date.parse(submission.submitted_at ?? '')
-        : 0
-
-      const associatedProfileIds = new Set<string>()
-      if (
-        typeof submission.profile_id === 'string' &&
-        submission.profile_id &&
-        preferenceSubmissionScopeProfileIds.includes(submission.profile_id)
-      ) {
-        associatedProfileIds.add(submission.profile_id)
-      }
-      if (typeof submission.user_id === 'string' && submission.user_id) {
-        for (const profileId of profileIdsByUserId.get(submission.user_id) ?? []) {
-          associatedProfileIds.add(profileId)
-        }
-      }
-
-      for (const profileId of associatedProfileIds) {
-        const existing = latestGiftCardPreferenceByProfileId.get(profileId)
-        if (!existing || submittedAtMs > existing.submittedAtMs) {
-          latestGiftCardPreferenceByProfileId.set(profileId, {
-            value,
-            submittedAtMs,
-          })
-        }
-      }
-    }
-  }
-
-  const latestGiftCardPreferenceByTargetProfileId = new Map<string, { value: string; submittedAtMs: number }>()
-  for (const targetProfileId of normalizedProfileIds) {
-    const relatedIds = expandedRelatedProfilesByTarget.get(targetProfileId) ?? new Set([targetProfileId])
-    for (const relatedId of relatedIds) {
-      const candidate = latestGiftCardPreferenceByProfileId.get(relatedId)
-      if (!candidate) continue
-      const existing = latestGiftCardPreferenceByTargetProfileId.get(targetProfileId)
-      if (!existing || candidate.submittedAtMs > existing.submittedAtMs) {
-        latestGiftCardPreferenceByTargetProfileId.set(targetProfileId, candidate)
-      }
-    }
-  }
+  const { normalizedProfileIds } = foundation
+  const workshopEnrichmentByProfileId = await loadWorkshopEnrollmentEnrichment(normalizedProfileIds)
 
   return normalizedProfileIds.reduce<Record<string, Partial<ClassAttendanceEnrichment>>>((acc, profileId) => {
     acc[profileId] = {
-      giftcard_display: normalizeGiftCardPreference(latestGiftCardPreferenceByTargetProfileId.get(profileId)?.value),
+      giftcard_display: workshopEnrichmentByProfileId[profileId]?.giftcard_display ?? 'N/A',
     }
     return acc
   }, {})

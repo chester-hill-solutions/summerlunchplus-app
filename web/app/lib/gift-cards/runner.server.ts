@@ -690,9 +690,15 @@ const resolveRecipientEmail = async (profileId: string, fallbackEmail: string | 
 const requestedProviderFromDisplay = (value: string | null | undefined) => {
   const normalized = (value ?? '').trim().toLowerCase()
   if (!normalized) return null
+
+  const compact = normalized.replace(/[^a-z0-9]+/g, '')
+  if (compact.includes('mealkit')) return 'meal_kit'
+  if (compact.includes('sobeys')) return 'Sobeys'
+  if (compact.includes('pc') || compact.includes('presidentschoice')) return 'PC'
+
   if (normalized.includes('meal kit')) return 'meal_kit'
-  if (normalized.includes('sobeys')) return 'Sobeys'
-  if (normalized.includes('pc')) return 'PC'
+  if (normalized.includes('sobeys') || normalized.includes("sobey's")) return 'Sobeys'
+  if (normalized.includes('pc') || normalized.includes('president')) return 'PC'
   return null
 }
 
