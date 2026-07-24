@@ -2,7 +2,7 @@ import { resolveIpGeolocation } from '@/lib/geoip.server'
 import { adminClient } from '@/lib/supabase/adminClient'
 
 const RELATIONSHIP_BATCH_SIZE = 100
-const IN_CLAUSE_BATCH_SIZE = 100
+const IN_CLAUSE_BATCH_SIZE = 40
 const PRIOR_PARTICIPATION_QUESTION_CODES = [
   'onboarding_prior_participation',
   'child_prior_participation',

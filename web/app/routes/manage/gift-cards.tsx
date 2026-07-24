@@ -35,6 +35,7 @@ type ProfileRow = {
 const GIFT_CARD_STATUS_ORDER: GiftCardAssetRow['status'][] = ['available', 'allocated', 'sent', 'opened', 'used', 'invalid']
 const GIFT_CARD_PROVIDERS = ['PC', 'Sobeys'] as const
 const IN_CLAUSE_BATCH_SIZE = 10
+const GIFT_CARD_ASSET_FETCH_BATCH_SIZE = 1000
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
 
@@ -124,18 +125,27 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 const loadGiftCardTableRows = async (request: Request) => {
   const { supabase } = createClient(request)
-  const { data: assets, error } = await supabase
-    .from('gift_card_asset')
-    .select('id, provider, account_number, pin, value, asset_url, status, assigned_profile_id, upload_id, created_at')
-    .order('created_at', { ascending: false })
+  const assets: GiftCardAssetRow[] = []
 
-  if (error) {
-    throw new Response(error.message, { status: 500 })
+  for (let offset = 0; ; offset += GIFT_CARD_ASSET_FETCH_BATCH_SIZE) {
+    const { data: chunk, error } = await supabase
+      .from('gift_card_asset')
+      .select('id, provider, account_number, pin, value, asset_url, status, assigned_profile_id, upload_id, created_at')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + GIFT_CARD_ASSET_FETCH_BATCH_SIZE - 1)
+
+    if (error) {
+      throw new Response(error.message, { status: 500 })
+    }
+
+    const typedChunk = (chunk ?? []) as GiftCardAssetRow[]
+    assets.push(...typedChunk)
+    if (typedChunk.length < GIFT_CARD_ASSET_FETCH_BATCH_SIZE) break
   }
 
   const assignedProfileIds = Array.from(
     new Set(
-      ((assets ?? []) as GiftCardAssetRow[])
+      assets
         .map(asset => (typeof asset.assigned_profile_id === 'string' ? asset.assigned_profile_id : ''))
         .filter(Boolean)
     )
@@ -159,7 +169,7 @@ const loadGiftCardTableRows = async (request: Request) => {
     }
   }
 
-  const rows = ((assets ?? []) as GiftCardAssetRow[]).map(asset => ({
+  const rows = assets.map(asset => ({
     provider: asset.provider,
     account_number: mask(asset.account_number),
     pin: mask(asset.pin),

@@ -20,8 +20,14 @@ const parseNonNegativeIntEnv = (name: string, fallback: number) => {
 export const parseGiftCardProviderFromDisplay = (value: string | null | undefined): GiftCardProvider | null => {
   const normalized = (value ?? '').trim().toLowerCase()
   if (!normalized) return 'PC'
+
+  const compact = normalized.replace(/[^a-z0-9]+/g, '')
+  if (compact.includes('mealkit')) return null
+  if (compact.includes('sobeys')) return 'Sobeys'
+  if (compact.includes('pc') || compact.includes('presidentschoice')) return 'PC'
+
   if (normalized.includes('meal kit')) return null
-  if (normalized.includes('sobeys')) return 'Sobeys'
+  if (normalized.includes('sobeys') || normalized.includes("sobey's")) return 'Sobeys'
   if (normalized.includes('pc') || normalized.includes('president')) return 'PC'
   return 'PC'
 }

@@ -156,8 +156,11 @@ const emptyProviderInventory = () => ({
 
 const mapGiftCardDisplayToBucket = (giftcardDisplay: string | null | undefined): GiftCardPreferenceBucket => {
   const normalized = (giftcardDisplay ?? '').trim().toLowerCase()
+  const compact = normalized.replace(/[^a-z0-9]+/g, '')
+  if (compact.includes('mealkit')) return 'meal_kit'
+  if (compact.includes('sobeys')) return 'Sobeys'
   if (normalized.includes('meal kit')) return 'meal_kit'
-  if (normalized.includes('sobeys')) return 'Sobeys'
+  if (normalized.includes('sobeys') || normalized.includes("sobey's")) return 'Sobeys'
   return 'PC'
 }
 
