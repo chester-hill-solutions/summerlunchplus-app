@@ -1565,32 +1565,19 @@ export default function TableDisplay({
                 : Promise.resolve({ byProfileId: {} } as FamilyContextEnrichmentResponse),
             ])
 
-            const fallbackEnrichment: ProfileEnrichment = {
-              riding_display: 'Not looked up',
-              geo_locations_display: 'N/A',
-              giftcard_display: 'N/A',
-              prior_participation_display: 'N/A',
-              latest_geo: 'N/A',
-              profile_hover_top_discrepancy: '',
-              profile_hover_more_discrepancies: '',
-              profile_hover_name: '',
-              profile_hover_parent_name: '',
-              profile_hover_email: '',
-              profile_hover_student_phone: '',
-              profile_hover_parent_email: '',
-              profile_hover_parent_phone: '',
-              profile_hover_student_geo: '',
-              profile_hover_parent_geo: '',
-              profile_hover_student_submitted_address: '',
-              profile_hover_parent_address: '',
-            }
-
             requestProfileIds.forEach(profileId => {
+              const workshopEnrichment = workshopPayload?.byProfileId?.[profileId]
+              const classAttendanceEnrichment = classAttendancePayload?.byProfileId?.[profileId]
+              const familyEnrichment = familyPayload?.byProfileId?.[profileId]
+              if (!workshopEnrichment && !classAttendanceEnrichment && !familyEnrichment) {
+                return
+              }
+
               fetchedByProfileId[profileId] = {
-                ...fallbackEnrichment,
-                ...(workshopPayload?.byProfileId?.[profileId] ?? {}),
-                ...(classAttendancePayload?.byProfileId?.[profileId] ?? {}),
-                ...(familyPayload?.byProfileId?.[profileId] ?? {}),
+                ...(mergedEnrichmentByProfileId[profileId] ?? {}),
+                ...(workshopEnrichment ?? {}),
+                ...(classAttendanceEnrichment ?? {}),
+                ...(familyEnrichment ?? {}),
               }
             })
 
@@ -1912,26 +1899,6 @@ export default function TableDisplay({
     const abortController = new AbortController()
     void (async () => {
       const startedAt = Date.now()
-      const fallbackEnrichment: ProfileEnrichment = {
-        riding_display: 'Not looked up',
-        geo_locations_display: 'N/A',
-        giftcard_display: 'N/A',
-        prior_participation_display: 'N/A',
-        latest_geo: 'N/A',
-        profile_hover_top_discrepancy: '',
-        profile_hover_more_discrepancies: '',
-        profile_hover_name: '',
-        profile_hover_parent_name: '',
-        profile_hover_email: '',
-        profile_hover_student_phone: '',
-        profile_hover_parent_email: '',
-        profile_hover_parent_phone: '',
-        profile_hover_student_geo: '',
-        profile_hover_parent_geo: '',
-        profile_hover_student_submitted_address: '',
-        profile_hover_parent_address: '',
-      }
-
       const mergeEnrichmentPayload = (
         payloadByProfileId:
           | WorkshopEnrollmentEnrichmentResponse['byProfileId']
@@ -1941,10 +1908,11 @@ export default function TableDisplay({
         setEnrichmentByProfileId(prev => {
           const next = { ...prev }
           for (const profileId of requestProfileIds) {
+            const payload = payloadByProfileId?.[profileId]
+            if (!payload) continue
             next[profileId] = {
-              ...fallbackEnrichment,
               ...(next[profileId] ?? {}),
-              ...(payloadByProfileId?.[profileId] ?? {}),
+              ...payload,
             }
           }
           return next
