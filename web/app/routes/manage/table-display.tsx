@@ -248,7 +248,6 @@ const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
 const FILTER_OPTION_MAX_VISIBLE_LIST = 1500
 const FILTER_EMPTY_LABEL = '(empty)'
-const GIFT_CARD_FILTER_FAST_OPTIONS = ['N/A', '...', 'PC', 'Sobeys', 'Meal Kit'] as const
 const ENABLE_PERSISTED_COLUMN_WIDTHS = false
 const WORKSHOP_ENRICHMENT_BATCH_SIZE = 40
 const WORKSHOP_ENRICHMENT_FILTER_BOOTSTRAP_BATCH_SIZE = 200
@@ -1006,17 +1005,6 @@ export default function TableDisplay({
         option => option && typeof option.value === 'string' && typeof option.label === 'string'
       )
     : []
-  const fastGiftCardFilterOptions = useMemo(() => {
-    const base: string[] = [...GIFT_CARD_FILTER_FAST_OPTIONS]
-    for (const option of giftCardOptions) {
-      const trimmed = option.trim()
-      if (!trimmed) continue
-      if (!base.includes(trimmed)) {
-        base.push(trimmed)
-      }
-    }
-    return sortFilterOptions(base)
-  }, [giftCardOptions])
   const debugPerf = searchParams.get('debugPerf') === '1'
   const timezoneOptions = useMemo(() => {
     const supported =
@@ -1438,21 +1426,6 @@ export default function TableDisplay({
       return
     }
 
-    if (
-      openFilterColumn === 'giftcard_display' &&
-      (tableName === 'class-enrollment' || tableName === 'class-attendance')
-    ) {
-      const loadedEntry: FilterOptionsCacheEntry = {
-        status: 'loaded',
-        allOptions: fastGiftCardFilterOptions,
-        totalCount: fastGiftCardFilterOptions.length,
-        updatedAt: Date.now(),
-      }
-      writeFilterCache(openFilterCacheKey, loadedEntry)
-      setOpenFilterCacheEntry(loadedEntry)
-      return
-    }
-
     const cached = readFilterCache(openFilterCacheKey)
     if (cached) {
       setOpenFilterCacheEntry(cached)
@@ -1695,7 +1668,6 @@ export default function TableDisplay({
     isWorkshopEnrollmentTable,
     openFilterCacheKey,
     openFilterColumn,
-    fastGiftCardFilterOptions,
     rowsWithEnrichment,
     serverSideQuery,
     tableName,
