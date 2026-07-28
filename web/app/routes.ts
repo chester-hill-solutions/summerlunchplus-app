@@ -84,6 +84,7 @@ export default [
     route("table-filter-options", "routes/manage/table-filter-options.ts"),
     route("workshop-enrollment/enrichment", "routes/manage/workshop-enrollment.enrichment.ts"),
     route("form", "routes/manage/form.tsx"),
+    route("form/:formID/answers/table-data", "routes/manage/form.$id.answers.table-data.ts"),
     route("form/:formID/answers", "routes/manage/form.$id.answers.tsx"),
     route("form/:formID", "routes/manage/form.$id.tsx"),
     route("form-question", "routes/manage/form-question.tsx"),
