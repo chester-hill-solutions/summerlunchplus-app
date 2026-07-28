@@ -248,8 +248,6 @@ const FILTER_CACHE_MAX_ENTRIES = 40
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
 const FILTER_OPTION_MAX_VISIBLE_LIST = 1500
 const FILTER_EMPTY_LABEL = '(empty)'
-const GIFT_CARD_FILTER_BASE_OPTIONS = ['N/A', '...', 'Meal Kit'] as const
-const GIFT_CARD_FILTER_PROVIDER_FALLBACK_OPTIONS = ['PC', 'Sobeys'] as const
 const ENABLE_PERSISTED_COLUMN_WIDTHS = false
 const WORKSHOP_ENRICHMENT_BATCH_SIZE = 40
 const WORKSHOP_ENRICHMENT_FILTER_BOOTSTRAP_BATCH_SIZE = 200
@@ -1007,24 +1005,6 @@ export default function TableDisplay({
         option => option && typeof option.value === 'string' && typeof option.label === 'string'
       )
     : []
-  const fastGiftCardFilterOptions = useMemo(() => {
-    const base = new Set<string>(GIFT_CARD_FILTER_BASE_OPTIONS)
-    const normalizedQuestionOptions = giftCardOptions
-      .map(option => option.trim())
-      .filter(option => Boolean(option))
-
-    if (normalizedQuestionOptions.length > 0) {
-      for (const option of normalizedQuestionOptions) {
-        base.add(option)
-      }
-    } else {
-      for (const fallbackOption of GIFT_CARD_FILTER_PROVIDER_FALLBACK_OPTIONS) {
-        base.add(fallbackOption)
-      }
-    }
-
-    return sortFilterOptions(Array.from(base))
-  }, [giftCardOptions])
   const debugPerf = searchParams.get('debugPerf') === '1'
   const timezoneOptions = useMemo(() => {
     const supported =
@@ -1446,21 +1426,6 @@ export default function TableDisplay({
       return
     }
 
-    if (
-      openFilterColumn === 'giftcard_display' &&
-      (tableName === 'class-enrollment' || tableName === 'class-attendance')
-    ) {
-      const loadedEntry: FilterOptionsCacheEntry = {
-        status: 'loaded',
-        allOptions: fastGiftCardFilterOptions,
-        totalCount: fastGiftCardFilterOptions.length,
-        updatedAt: Date.now(),
-      }
-      writeFilterCache(openFilterCacheKey, loadedEntry)
-      setOpenFilterCacheEntry(loadedEntry)
-      return
-    }
-
     const cached = readFilterCache(openFilterCacheKey)
     if (cached) {
       setOpenFilterCacheEntry(cached)
@@ -1703,7 +1668,6 @@ export default function TableDisplay({
     isWorkshopEnrollmentTable,
     openFilterCacheKey,
     openFilterColumn,
-    fastGiftCardFilterOptions,
     rowsWithEnrichment,
     serverSideQuery,
     tableName,
