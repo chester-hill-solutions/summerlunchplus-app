@@ -23,6 +23,46 @@ type GuardianChildRow = {
   primary_child: boolean
 }
 
+const RELATIONSHIP_BATCH_SIZE = 100
+
+export async function resolveConnectedProfileIds(
+  supabase: SupabaseClient<Database>,
+  profileIds: string[]
+): Promise<string[]> {
+  const seen = new Set(profileIds.filter(Boolean))
+  const queue = Array.from(seen)
+
+  while (queue.length) {
+    const batch = queue.splice(0, RELATIONSHIP_BATCH_SIZE)
+    const [guardianResult, childResult] = await Promise.all([
+      supabase
+        .from('person_guardian_child')
+        .select('guardian_profile_id, child_profile_id')
+        .in('guardian_profile_id', batch),
+      supabase
+        .from('person_guardian_child')
+        .select('guardian_profile_id, child_profile_id')
+        .in('child_profile_id', batch),
+    ])
+
+    if (guardianResult.error) throw new Error(guardianResult.error.message)
+    if (childResult.error) throw new Error(childResult.error.message)
+
+    for (const edge of [...(guardianResult.data ?? []), ...(childResult.data ?? [])]) {
+      if (!seen.has(edge.guardian_profile_id)) {
+        seen.add(edge.guardian_profile_id)
+        queue.push(edge.guardian_profile_id)
+      }
+      if (!seen.has(edge.child_profile_id)) {
+        seen.add(edge.child_profile_id)
+        queue.push(edge.child_profile_id)
+      }
+    }
+  }
+
+  return Array.from(seen)
+}
+
 export type FamilyMember = ProfileRow & {
   primaryChildId?: string | null
 }

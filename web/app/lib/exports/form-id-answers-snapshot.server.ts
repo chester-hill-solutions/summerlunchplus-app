@@ -11,8 +11,11 @@ export const buildFormIdAnswersSnapshot = async ({ request }: { request: Request
     throw new Error('Invalid form answers export path.')
   }
 
+  url.searchParams.set('_deferTable', '1')
+  const loaderRequest = new Request(url.toString(), request)
+
   const tableData = await formAnswersLoader({
-    request,
+    request: loaderRequest,
     params: { formID },
   } as unknown as Parameters<typeof formAnswersLoader>[0])
   const columns = Array.isArray(tableData.columns) ? tableData.columns : []
