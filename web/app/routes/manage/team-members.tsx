@@ -108,10 +108,10 @@ export async function action({ request }: Route.ActionArgs) {
   const role = (formData.get('role') as string | null)?.trim() ?? ''
 
   if (!email) {
-    return { error: 'Gmail is required' } satisfies ActionData
+    return { error: 'Email is required' } satisfies ActionData
   }
   if (!isAllowedEmailDomain(email)) {
-    return { error: 'Please enter a valid Gmail address' } satisfies ActionData
+    return { error: 'Please enter a valid email address' } satisfies ActionData
   }
   if (!allowedInviteRoles.includes(role)) {
     return { error: 'You are not allowed to invite this role.' } satisfies ActionData
@@ -193,14 +193,14 @@ export default function TeamMembersTablePage({ loaderData }: Route.ComponentProp
         {canInvite ? (
           <fetcher.Form ref={formRef} method="post" className="mt-4 grid gap-4 md:grid-cols-[1fr_200px_auto]">
             <div className="grid gap-2">
-              <Label htmlFor="team-invite-email">Gmail</Label>
+              <Label htmlFor="team-invite-email">Email</Label>
               <Input
                 id="team-invite-email"
                 name="email"
                 type="email"
-                placeholder="name@gmail.com"
+                placeholder="name@example.com"
                 pattern={ALLOWED_EMAIL_PATTERN}
-                title="Use a valid Gmail address"
+                title="Use a valid email address"
                 required
               />
             </div>
