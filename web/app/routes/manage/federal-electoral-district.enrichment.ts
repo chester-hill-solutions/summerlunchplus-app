@@ -39,6 +39,14 @@ const HOUSEHOLD_TOTAL_PEOPLE_QUESTION_CODE = 'household_total_people'
 const HOUSEHOLD_TOTAL_CHILDREN_QUESTION_CODE = 'household_total_children'
 const MAX_REASONABLE_HOUSEHOLD_PEOPLE = 30
 const MAX_REASONABLE_HOUSEHOLD_CHILDREN = 30
+const ENROLLMENT_PAGE_SIZE = 1000
+const ENROLLMENT_STATUSES = new Set<Database['public']['Enums']['workshop_enrollment_status']>([
+  'pending',
+  'waitlisted',
+  'approved',
+  'rejected',
+  'revoked',
+])
 
 const statusBucketFor = (status: Database['public']['Enums']['workshop_enrollment_status']) => {
   if (status === 'approved') return 'accepted'
@@ -138,7 +146,7 @@ const firstRidingFromLinks = (
   return null
 }
 
-export async function loader({ request }: { request: Request }) {
+async function loadFederalElectoralDistrictEnrichment(request: Request) {
   const auth = await requireAuth(request)
   const { supabase } = createClient(request)
   if (!isRoleAtLeast(auth.claims.role, 'staff')) {
@@ -146,13 +154,22 @@ export async function loader({ request }: { request: Request }) {
   }
 
   const url = new URL(request.url)
+  let requestedRidings: unknown[] = url.searchParams.getAll('riding')
+  let requestedStatusValues: unknown[] = url.searchParams.getAll('enrollmentStatus')
+
+  if (request.method === 'POST') {
+    let payload: { ridings?: unknown; enrollmentStatuses?: unknown }
+    try {
+      payload = (await request.json()) as { ridings?: unknown; enrollmentStatuses?: unknown }
+    } catch {
+      return Response.json({ error: 'Invalid enrichment request body.' }, { status: 400, headers: auth.headers })
+    }
+    requestedRidings = Array.isArray(payload.ridings) ? payload.ridings : []
+    requestedStatusValues = Array.isArray(payload.enrollmentStatuses) ? payload.enrollmentStatuses : []
+  }
+
   const ridingNames = Array.from(
-    new Set(
-      url.searchParams
-        .getAll('riding')
-        .map(value => value.trim())
-        .filter(Boolean)
-    )
+    new Set(requestedRidings.filter((value): value is string => typeof value === 'string').map(value => value.trim()).filter(Boolean))
   )
 
   if (!ridingNames.length) {
@@ -161,6 +178,7 @@ export async function loader({ request }: { request: Request }) {
 
   const byRiding = ridingNames.reduce<Record<string, {
     total: number
+    families: number
     accepted: number
     pending: number
     waitlisted: number
@@ -174,6 +192,7 @@ export async function loader({ request }: { request: Request }) {
     (acc, riding) => {
       acc[riding] = {
         total: 0,
+        families: 0,
         accepted: 0,
         pending: 0,
         waitlisted: 0,
@@ -193,14 +212,21 @@ export async function loader({ request }: { request: Request }) {
     ridingNames.map(riding => [canonicalRiding(riding), riding])
   )
 
+  const invalidStatuses = requestedStatusValues.some(
+    value => typeof value !== 'string' || !ENROLLMENT_STATUSES.has(value as Database['public']['Enums']['workshop_enrollment_status'])
+  )
+  if (invalidStatuses) {
+    return Response.json({ error: 'Invalid enrollment status.' }, { status: 400, headers: auth.headers })
+  }
+  const requestedStatuses = Array.from(new Set(requestedStatusValues as Database['public']['Enums']['workshop_enrollment_status'][]))
+
   const { data: requestedDistrictRows, error: districtError } = await supabase
     .from('federal_electoral_district')
     .select('name, meal_kit')
-    .in('name', ridingNames)
 
   if (districtError) {
     console.error('[federal-electoral-district] failed to load requested district rows', districtError)
-    return Response.json({ byRiding }, { headers: auth.headers })
+    return Response.json({ error: 'Failed to load district rows.' }, { status: 500, headers: auth.headers })
   }
 
   const mealKitByRequestedRiding = new Map(
@@ -209,14 +235,32 @@ export async function loader({ request }: { request: Request }) {
       .filter((entry): entry is [string, boolean] => typeof entry[0] === 'string')
   )
 
-  const { data: enrollmentRows, error: enrollmentError } = await supabase
-    .from('workshop_enrollment')
-    .select('profile_id, status')
-    .not('profile_id', 'is', null)
+  const enrollmentRows: Array<{ profile_id: string | null; status: Database['public']['Enums']['workshop_enrollment_status'] }> = []
+  for (let page = 0; ; page += 1) {
+    let enrollmentQuery = supabase
+      .from('workshop_enrollment')
+      .select('profile_id, status, id')
+      .not('profile_id', 'is', null)
+      .order('id', { ascending: true })
+      .range(page * ENROLLMENT_PAGE_SIZE, (page + 1) * ENROLLMENT_PAGE_SIZE - 1)
 
-  if (enrollmentError) {
-    console.error('[federal-electoral-district] failed to load enrollment rows', enrollmentError)
-    return Response.json({ byRiding }, { headers: auth.headers })
+    if (requestedStatuses.length) {
+      enrollmentQuery = enrollmentQuery.in('status', requestedStatuses)
+    }
+
+    const { data, error: enrollmentError } = await enrollmentQuery
+    if (enrollmentError) {
+      console.error('[federal-electoral-district] failed to load enrollment rows', enrollmentError)
+      return Response.json({ error: 'Failed to load enrollment rows.' }, { status: 500, headers: auth.headers })
+    }
+
+    enrollmentRows.push(
+      ...((data ?? []) as Array<{
+        profile_id: string | null
+        status: Database['public']['Enums']['workshop_enrollment_status']
+      }>)
+    )
+    if (!data?.length || data.length < ENROLLMENT_PAGE_SIZE) break
   }
 
   const profileIds = Array.from(
@@ -240,7 +284,7 @@ export async function loader({ request }: { request: Request }) {
 
     if (error) {
       console.error('[federal-electoral-district] failed to load profile riding map', error)
-      return Response.json({ byRiding }, { headers: auth.headers })
+      return Response.json({ error: 'Failed to load profile data.' }, { status: 500, headers: auth.headers })
     }
 
     profileRows.push(...((data ?? []) as ProfileRidingRow[]))
@@ -285,14 +329,14 @@ export async function loader({ request }: { request: Request }) {
         chunkSize: profileChunk.length,
         error: guardianEdgesError.message,
       })
-      return Response.json({ byRiding }, { headers: auth.headers })
+      return Response.json({ error: 'Failed to load guardian family data.' }, { status: 500, headers: auth.headers })
     }
     if (childEdgesError) {
       console.error('[federal-electoral-district] failed to load child family edges', {
         chunkSize: profileChunk.length,
         error: childEdgesError.message,
       })
-      return Response.json({ byRiding }, { headers: auth.headers })
+      return Response.json({ error: 'Failed to load child family data.' }, { status: 500, headers: auth.headers })
     }
 
     for (const edge of [...(guardianEdges ?? []), ...(childEdges ?? [])] as FamilyEdgeRow[]) {
@@ -318,7 +362,7 @@ export async function loader({ request }: { request: Request }) {
 
     if (relatedProfilesError) {
       console.error('[federal-electoral-district] failed to load related profile ridings', relatedProfilesError)
-      return Response.json({ byRiding }, { headers: auth.headers })
+      return Response.json({ error: 'Failed to load related profile data.' }, { status: 500, headers: auth.headers })
     }
 
     for (const related of relatedProfiles ?? []) {
@@ -402,7 +446,7 @@ export async function loader({ request }: { request: Request }) {
 
     if (error) {
       console.error('[federal-electoral-district] failed to load form submissions by profile', error)
-      continue
+      return Response.json({ error: 'Failed to load form submissions.' }, { status: 500, headers: auth.headers })
     }
 
     for (const row of (submissions ?? []) as FormSubmissionRow[]) {
@@ -418,7 +462,7 @@ export async function loader({ request }: { request: Request }) {
 
     if (error) {
       console.error('[federal-electoral-district] failed to load form submissions by user', error)
-      continue
+      return Response.json({ error: 'Failed to load form submissions.' }, { status: 500, headers: auth.headers })
     }
 
     for (const row of (submissions ?? []) as FormSubmissionRow[]) {
@@ -443,7 +487,7 @@ export async function loader({ request }: { request: Request }) {
 
     if (error) {
       console.error('[federal-electoral-district] failed to load gift card answers', error)
-      continue
+      return Response.json({ error: 'Failed to load form answers.' }, { status: 500, headers: auth.headers })
     }
 
     for (const answer of (answers ?? []) as FormAnswerRow[]) {
@@ -587,6 +631,7 @@ export async function loader({ request }: { request: Request }) {
     if (seenHouseholds.has(householdId)) continue
     seenHouseholds.add(householdId)
     seenHouseholdsByRiding.set(requestedRiding, seenHouseholds)
+    byRiding[requestedRiding].families += 1
 
     const householdPeople = Number(householdPeopleByKey.get(householdId) ?? 0)
     if (Number.isFinite(householdPeople) && householdPeople >= 0) {
@@ -625,4 +670,12 @@ export async function loader({ request }: { request: Request }) {
   }
 
   return Response.json({ byRiding }, { headers: auth.headers })
+}
+
+export async function loader({ request }: { request: Request }) {
+  return loadFederalElectoralDistrictEnrichment(request)
+}
+
+export async function action({ request }: { request: Request }) {
+  return loadFederalElectoralDistrictEnrichment(request)
 }

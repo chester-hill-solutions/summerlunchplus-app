@@ -124,6 +124,7 @@ type ProfileEnrichment = Partial<WorkshopEnrollmentEnrichment & ClassAttendanceE
 
 type FederalDistrictCounts = {
   total: number
+  families: number
   accepted: number
   pending: number
   waitlisted: number
@@ -137,6 +138,7 @@ type FederalDistrictCounts = {
 
 type FederalDistrictEnrichmentResponse = {
   byRiding: Record<string, FederalDistrictCounts>
+  error?: string
 }
 
 export type LoaderData = {
@@ -939,6 +941,8 @@ export default function TableDisplay({
   const [editValues, setEditValues] = useState<Record<string, string>>({})
   const [enrichmentByProfileId, setEnrichmentByProfileId] = useState<Record<string, ProfileEnrichment>>({})
   const [districtCountsByRiding, setDistrictCountsByRiding] = useState<Record<string, FederalDistrictCounts>>({})
+  const [districtMetricsError, setDistrictMetricsError] = useState<string | null>(null)
+  const [districtMetricsRetry, setDistrictMetricsRetry] = useState(0)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
   const [columnMinWidths, setColumnMinWidths] = useState<Record<string, number>>({})
   const [resizeState, setResizeState] = useState<ResizeState | null>(null)
@@ -951,7 +955,7 @@ export default function TableDisplay({
   const [hoverCardPosition, setHoverCardPosition] = useState<{ top: number; left: number } | null>(null)
   const loadingEnrichmentProfileIdsRef = useRef<Set<string>>(new Set())
   const loadedFamilyContextProfileIdsRef = useRef<Set<string>>(new Set())
-  const loadingDistrictRidingsRef = useRef<Set<string>>(new Set())
+  const districtMetricsRequestKeyRef = useRef('')
   const filterButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const filterPopoverRef = useRef<HTMLDivElement | null>(null)
   const hoverCardPopoverRef = useRef<HTMLDivElement | null>(null)
@@ -1042,6 +1046,7 @@ export default function TableDisplay({
           nextRow = {
             ...nextRow,
             total: '...',
+            families: '...',
             accepted: '...',
             pending: '...',
             waitlisted: '...',
@@ -1692,6 +1697,7 @@ export default function TableDisplay({
       const unresolvedCountColumns = districtRows.some(
         row =>
           typeof row.total !== 'number' ||
+          typeof row.families !== 'number' ||
           typeof row.accepted !== 'number' ||
           typeof row.pending !== 'number' ||
           typeof row.waitlisted !== 'number' ||
@@ -1706,6 +1712,7 @@ export default function TableDisplay({
       const totals = unresolvedCountColumns
         ? {
             total: '...',
+            families: '...',
             accepted: '...',
             pending: '...',
             waitlisted: '...',
@@ -1719,6 +1726,7 @@ export default function TableDisplay({
         : districtRows.reduce<FederalDistrictCounts>(
             (acc, row) => {
               acc.total += Number(row.total)
+              acc.families += Number(row.families)
               acc.accepted += Number(row.accepted)
               acc.pending += Number(row.pending)
               acc.waitlisted += Number(row.waitlisted)
@@ -1732,6 +1740,7 @@ export default function TableDisplay({
             },
             {
               total: 0,
+              families: 0,
               accepted: 0,
               pending: 0,
               waitlisted: 0,
@@ -2048,39 +2057,40 @@ export default function TableDisplay({
   useEffect(() => {
     if (!isFederalDistrictTable) return
 
-    const missingRidings = Array.from(
+    const ridingNames = Array.from(
       new Set(
-        paginatedRows
+        rows
           .map(row => (typeof row.name === 'string' ? row.name.trim() : ''))
-          .filter(
-            riding =>
-              Boolean(riding) &&
-              riding !== 'Total' &&
-              !districtCountsByRiding[riding] &&
-              !loadingDistrictRidingsRef.current.has(riding)
-          )
+          .filter(riding => Boolean(riding) && riding !== 'Total')
       )
     )
 
-    if (!missingRidings.length) return
+    if (!ridingNames.length) return
 
-    const requestRidings = missingRidings.slice(0, 30)
-    requestRidings.forEach(riding => loadingDistrictRidingsRef.current.add(riding))
-
+    const statuses = searchParams.getAll('enrollmentStatus')
+    const requestKey = JSON.stringify({ ridingNames, statuses })
+    districtMetricsRequestKeyRef.current = requestKey
+    setDistrictCountsByRiding({})
+    setDistrictMetricsError(null)
     const abortController = new AbortController()
     void (async () => {
       try {
-        const query = new URLSearchParams()
-        requestRidings.forEach(riding => query.append('riding', riding))
-        const response = await fetch(`/manage/federal-electoral-district/enrichment?${query.toString()}`, {
+        const response = await fetch('/manage/federal-electoral-district/enrichment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ridings: ridingNames, enrollmentStatuses: statuses }),
           signal: abortController.signal,
         })
 
-        if (!response.ok) return
-        const payload = (await response.json()) as FederalDistrictEnrichmentResponse
-        const resolved = requestRidings.reduce<Record<string, FederalDistrictCounts>>((acc, riding) => {
+        const payload = (await response.json().catch(() => ({}))) as FederalDistrictEnrichmentResponse
+        if (!response.ok) {
+          throw new Error(payload.error ?? `District metrics request failed (${response.status}).`)
+        }
+        if (districtMetricsRequestKeyRef.current !== requestKey) return
+        const resolved = ridingNames.reduce<Record<string, FederalDistrictCounts>>((acc, riding) => {
           acc[riding] = payload?.byRiding?.[riding] ?? {
             total: 0,
+            families: 0,
             accepted: 0,
             pending: 0,
             waitlisted: 0,
@@ -2094,20 +2104,20 @@ export default function TableDisplay({
           return acc
         }, {})
 
-        setDistrictCountsByRiding(prev => ({ ...prev, ...resolved }))
+        setDistrictCountsByRiding(resolved)
+        setDistrictMetricsError(null)
       } catch (error) {
-        if ((error as Error).name !== 'AbortError') {
+        if ((error as Error).name !== 'AbortError' && districtMetricsRequestKeyRef.current === requestKey) {
+          setDistrictMetricsError(error instanceof Error ? error.message : 'Unable to load district metrics.')
           console.error('[table display] federal district enrichment fetch failed', error)
         }
-      } finally {
-        requestRidings.forEach(riding => loadingDistrictRidingsRef.current.delete(riding))
       }
     })()
 
     return () => {
       abortController.abort()
     }
-  }, [districtCountsByRiding, isFederalDistrictTable, paginatedRows])
+  }, [isFederalDistrictTable, rows, searchParams, districtMetricsRetry])
 
   const updateSort = (column: string) => {
     if (sortColumn !== column) {
@@ -3085,6 +3095,15 @@ export default function TableDisplay({
         {headerActions ? <div className="ml-auto">{headerActions}</div> : null}
       </div>
 
+      {isFederalDistrictTable && districtMetricsError ? (
+        <div className="mx-6 flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <span>Unable to load district metrics: {districtMetricsError}</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => setDistrictMetricsRetry(previous => previous + 1)}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+
       {canInlineInsert && showCreate ? (
         <section className="relative z-30 mx-6 overflow-visible rounded-lg border bg-card p-4">
           <div className="space-y-3">
@@ -3183,15 +3202,16 @@ export default function TableDisplay({
             ))}
             {canInlineUpdate ? <col key="col-actions" style={{ width: `${ACTIONS_COLUMN_WIDTH}px` }} /> : null}
           </colgroup>
-          <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground">
+          <thead className={`${hasStickyColumnHeaders ? 'sticky top-0 z-30' : ''} bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground`}>
             <tr>
               {columns.map(column => {
                 const hasActiveFilter = hasOwn(filters, column)
+                const isStickyDistrictNameColumn = isFederalDistrictTable && column === 'name'
                 return (
                   <th
                     key={`head-${column}`}
                     title={columnMeta[column]?.headerTooltip}
-                    className={`${isNumericColumn(column) ? 'w-24' : ''} relative px-4 py-2 text-left ${hasStickyColumnHeaders ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''}`}
+                    className={`${isNumericColumn(column) ? 'w-24' : ''} relative px-4 py-2 text-left ${hasStickyColumnHeaders ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''} ${isStickyDistrictNameColumn ? 'left-0 z-40' : ''}`}
                   >
                     <div className="relative flex items-center gap-1">
                       <button
@@ -3903,14 +3923,14 @@ export default function TableDisplay({
                       )
 
                       return (
-                        <td
-                          key={`cell-${absoluteRowIndex}-${column}`}
-                          title={cellValue || '(empty)'}
-                          className={
-                            isNumericColumn(column)
-                              ? `w-24 whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''} ${extraCellClass}`
-                              : `px-4 py-2 font-mono select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''} ${extraCellClass}`
-                          }
+                    <td
+                      key={`cell-${absoluteRowIndex}-${column}`}
+                      title={cellValue || '(empty)'}
+                      className={
+                        isNumericColumn(column)
+                          ? `w-24 whitespace-nowrap px-4 py-2 text-right font-mono tabular-nums select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''} ${extraCellClass}`
+                          : `px-4 py-2 font-mono select-text ${canClickFilter ? 'cursor-pointer hover:bg-muted/30' : ''} ${extraCellClass} ${isFederalDistrictTable && column === 'name' ? `sticky left-0 z-20 ${row.__is_total_row === true ? 'bg-muted' : absoluteRowIndex % 2 === 0 ? 'bg-card' : 'bg-background'}` : ''}`
+                      }
                           onClick={event => {
                             const interactiveTarget = (event.target as HTMLElement | null)?.closest(
                               'a,button,input,select,textarea,label'

@@ -1,6 +1,7 @@
-import { Form, useLocation, useNavigation } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { Form, useLocation, useNavigation, useSearchParams } from 'react-router'
 
-import { Download, Loader2 } from 'lucide-react'
+import { Check, ChevronDown, Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV } from '@/lib/exports/types'
 import TableDisplay from './table-display'
@@ -23,7 +24,7 @@ export async function loader(args: Route.LoaderArgs) {
   const request = new Request(url.toString(), args.request)
   const base = await baseLoader({ ...args, request })
 
-  const columns = base.columns.includes('accepted')
+  const columns = base.columns.includes('accepted') && base.columns.includes('families')
     ? base.columns
     : [
         'code',
@@ -31,6 +32,7 @@ export async function loader(args: Route.LoaderArgs) {
         'whitelist',
         'meal_kit',
         'total',
+        'families',
         'accepted',
         'pending',
         'waitlisted',
@@ -47,6 +49,7 @@ export async function loader(args: Route.LoaderArgs) {
     return {
       ...row,
       total: null,
+      families: null,
       accepted: null,
       pending: null,
       waitlisted: null,
@@ -76,6 +79,7 @@ export async function loader(args: Route.LoaderArgs) {
         preferredWidth: 360,
       },
       total: { label: 'total', numeric: true },
+      families: { label: 'families', numeric: true, minWidth: 90, preferredWidth: 90 },
       accepted: { label: 'accepted', numeric: true, minWidth: 90, preferredWidth: 90 },
       pending: { label: 'pending', numeric: true, minWidth: 90, preferredWidth: 90 },
       waitlisted: { label: 'waitlisted', numeric: true, minWidth: 90, preferredWidth: 90 },
@@ -91,6 +95,116 @@ export async function loader(args: Route.LoaderArgs) {
 
 export const action = createTableAction('federal-electoral-district')
 
+const enrollmentStatusOptions = [
+  ['pending', 'Pending'],
+  ['waitlisted', 'Waitlisted'],
+  ['approved', 'Accepted'],
+  ['rejected', 'Rejected'],
+  ['revoked', 'Revoked'],
+] as const
+
+function EnrollmentStatusFilter() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selected = searchParams.getAll('enrollmentStatus')
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<string[]>(selected)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (open) setDraft(selected)
+  }, [open, searchParams])
+
+  useEffect(() => {
+    if (!open) return
+    const onMouseDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  const apply = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('enrollmentStatus')
+    enrollmentStatusOptions.forEach(([value]) => {
+      if (draft.includes(value)) next.append('enrollmentStatus', value)
+    })
+    next.delete('page')
+    setSearchParams(next, { replace: true })
+    setOpen(false)
+  }
+
+  const summary = selected.length ? `${selected.length} selected` : 'All statuses'
+
+  return (
+    <div ref={containerRef} className="relative">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls="federal-district-enrollment-status-filter"
+        onClick={() => setOpen(previous => !previous)}
+      >
+        Enrollment status: {summary}
+        <ChevronDown className="ml-1 size-4" />
+      </Button>
+      {open ? (
+        <div
+          id="federal-district-enrollment-status-filter"
+          role="dialog"
+          aria-label="Filter enrollment statuses"
+          className="absolute right-0 z-50 mt-2 w-64 rounded-md border bg-popover p-3 text-popover-foreground shadow-lg"
+        >
+          <div className="mb-2 text-xs text-muted-foreground">Select one or more current enrollment statuses.</div>
+          <div className="space-y-1" role="group" aria-label="Enrollment statuses">
+            {enrollmentStatusOptions.map(([value, label]) => {
+              const checked = draft.includes(value)
+              return (
+                <label key={value} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => setDraft(previous => (checked ? previous.filter(item => item !== value) : [...previous, value]))}
+                    className="sr-only"
+                  />
+                  <span className={`flex size-4 items-center justify-center rounded border ${checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input'}`}>
+                    {checked ? <Check className="size-3" /> : null}
+                  </span>
+                  {label}
+                </label>
+              )
+            })}
+          </div>
+          <div className="mt-3 flex items-center justify-between border-t pt-3 text-xs">
+            <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setDraft([])}>
+              Clear
+            </button>
+            <div className="flex gap-2">
+              <button type="button" className="rounded px-2 py-1 hover:bg-muted" onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="rounded bg-primary px-2 py-1 text-primary-foreground" onClick={apply}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export default function FederalElectoralDistrictTablePage() {
   const location = useLocation()
   const navigation = useNavigation()
@@ -100,6 +214,7 @@ export default function FederalElectoralDistrictTablePage() {
   return (
     <TableDisplay
       filterOptionsMode="client"
+      headerActions={<EnrollmentStatusFilter />}
       paginationActions={
         <Form method="post" action="/manage/exports" className="flex items-center gap-2">
           <input type="hidden" name="intent" value="create-export" />
