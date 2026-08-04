@@ -6,6 +6,7 @@ import type { ExportJobStatus } from './types'
 
 type AnyClient = SupabaseClient<any>
 const EXPORT_JOB_ROW_INSERT_BATCH_SIZE = 1000
+const EXPORT_JOB_ROW_READ_PAGE_SIZE = 1000
 
 export type ExportJobRecord = {
   id: string
@@ -162,16 +163,25 @@ export const claimExportJobById = async ({ jobId }: { jobId: string }) => {
 }
 
 export const listExportJobRows = async ({ jobId }: { jobId: string }) => {
-  const { data, error } = await (adminClient.from('export_job_row' as any) as any)
-    .select('row_index, row_data')
-    .eq('job_id', jobId)
-    .order('row_index', { ascending: true })
+  const rows: Array<{ row_index: number; row_data: Record<string, unknown> }> = []
 
-  if (error) {
-    throw new Error(error.message)
+  for (let from = 0; ; from += EXPORT_JOB_ROW_READ_PAGE_SIZE) {
+    const { data, error } = await (adminClient.from('export_job_row' as any) as any)
+      .select('row_index, row_data')
+      .eq('job_id', jobId)
+      .order('row_index', { ascending: true })
+      .range(from, from + EXPORT_JOB_ROW_READ_PAGE_SIZE - 1)
+
+    if (error) {
+      throw new Error(error.message)
+    }
+
+    const pageRows = (data ?? []) as Array<{ row_index: number; row_data: Record<string, unknown> }>
+    rows.push(...pageRows)
+    if (pageRows.length < EXPORT_JOB_ROW_READ_PAGE_SIZE) break
   }
 
-  return (data ?? []) as Array<{ row_index: number; row_data: Record<string, unknown> }>
+  return rows
 }
 
 export const completeExportJob = async ({
