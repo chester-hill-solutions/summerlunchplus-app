@@ -3832,7 +3832,8 @@ export default function TableDisplay({
                         column.includes('join_url') && typeof rawCellValue === 'string' && isHttpUrl(rawCellValue)
                       const shouldTruncate = columnMeta[column]?.truncate ?? tableVariant !== 'pivot'
                       const filterable = columnMeta[column]?.filterable ?? true
-                      const canClickFilter = enableCellClickFilter && filterable
+                      const isFederalDistrictNameColumn = isFederalDistrictTable && column === 'name'
+                      const canClickFilter = enableCellClickFilter && filterable && !isFederalDistrictNameColumn
                       const cellValue = getCellValue(column, row, tableName)
                       const rowCellClassByColumn =
                         row._cell_class_by_column && typeof row._cell_class_by_column === 'object' && !Array.isArray(row._cell_class_by_column)

@@ -214,23 +214,25 @@ export default function FederalElectoralDistrictTablePage() {
   return (
     <TableDisplay
       filterOptionsMode="client"
-      headerActions={<EnrollmentStatusFilter />}
       paginationActions={
-        <Form method="post" action="/manage/exports" className="flex items-center gap-2">
-          <input type="hidden" name="intent" value="create-export" />
-          <input type="hidden" name="export_type" value={EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV} />
-          <input type="hidden" name="source_path" value={sourcePath} />
-          <Button
-            type="submit"
-            variant="outline"
-            size="icon-sm"
-            disabled={isCreatingExport}
-            aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
-            title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
-          >
-            {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-          </Button>
-        </Form>
+        <div className="flex items-center gap-2">
+          <EnrollmentStatusFilter />
+          <Form method="post" action="/manage/exports" className="flex items-center gap-2">
+            <input type="hidden" name="intent" value="create-export" />
+            <input type="hidden" name="export_type" value={EXPORT_TYPE_FEDERAL_ELECTORAL_DISTRICT_CSV} />
+            <input type="hidden" name="source_path" value={sourcePath} />
+            <Button
+              type="submit"
+              variant="outline"
+              size="icon-sm"
+              disabled={isCreatingExport}
+              aria-label={isCreatingExport ? 'Exporting CSV' : 'Export CSV'}
+              title={isCreatingExport ? 'Exporting CSV...' : 'Export CSV'}
+            >
+              {isCreatingExport ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+            </Button>
+          </Form>
+        </div>
       }
     />
   )
