@@ -5,6 +5,7 @@ import {
   resolveGiftCardShortfallForProvider,
 } from '@/lib/gift-cards/inventory-alerts'
 import { loadGiftCardAllocationForecastSnapshot, type GiftCardProvider } from '@/lib/gift-cards/forecast.server'
+import { resolveGiftCardFulfillmentByProfileId } from '@/lib/gift-cards/provider.server'
 import {
   eligibleAfterIso,
   isEligibilityTimingEnabled,
@@ -15,7 +16,6 @@ import {
 } from '@/lib/gift-cards/release.server'
 import { scanByIdKeyset } from '@/lib/supabase/keyset-pagination.server'
 import { adminClient } from '@/lib/supabase/adminClient'
-import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
 
 import { hashGlrToken, newGlrToken } from './token.server'
 
@@ -376,11 +376,8 @@ const sendMealKitPickupReminders = async () => {
     }
   }
 
-  const enrichment = await loadWorkshopEnrollmentEnrichment(profileIds)
-  const mealKitProfileIds = profileIds.filter(profileId => {
-    const value = (enrichment[profileId]?.giftcard_display ?? '').trim().toLowerCase()
-    return value === 'meal kit'
-  })
+  const { fulfillmentByProfileId } = await resolveGiftCardFulfillmentByProfileId(profileIds)
+  const mealKitProfileIds = profileIds.filter(profileId => fulfillmentByProfileId.get(profileId) === 'meal_kit')
 
   if (!mealKitProfileIds.length) {
     return {
@@ -577,21 +574,6 @@ const resolveRecipientEmail = async (profileId: string, fallbackEmail: string | 
   return ''
 }
 
-const requestedProviderFromDisplay = (value: string | null | undefined) => {
-  const normalized = (value ?? '').trim().toLowerCase()
-  if (!normalized) return null
-
-  const compact = normalized.replace(/[^a-z0-9]+/g, '')
-  if (compact.includes('mealkit')) return 'meal_kit'
-  if (compact.includes('sobeys')) return 'Sobeys'
-  if (compact.includes('pc') || compact.includes('presidentschoice')) return 'PC'
-
-  if (normalized.includes('meal kit')) return 'meal_kit'
-  if (normalized.includes('sobeys') || normalized.includes("sobey's")) return 'Sobeys'
-  if (normalized.includes('pc') || normalized.includes('president')) return 'PC'
-  return null
-}
-
 const emptyScanCounters = (): GiftCardScanCounters => ({
   pagesRead: 0,
   rowsScanned: 0,
@@ -676,10 +658,9 @@ const allocateGiftCards = async (): Promise<AllocationSummary> => {
     const uncachedProfileIds = profileIds.filter(profileId => !requestedProviderByProfileId.has(profileId))
     if (uncachedProfileIds.length) {
       try {
-        const enrichment = await loadWorkshopEnrollmentEnrichment(uncachedProfileIds)
+        const { fulfillmentByProfileId } = await resolveGiftCardFulfillmentByProfileId(uncachedProfileIds)
         for (const profileId of uncachedProfileIds) {
-          const display = enrichment[profileId]?.giftcard_display
-          requestedProviderByProfileId.set(profileId, requestedProviderFromDisplay(display))
+          requestedProviderByProfileId.set(profileId, fulfillmentByProfileId.get(profileId) ?? 'PC')
         }
       } catch (error) {
         console.warn('[gift-cards] provider preference enrichment failed', {
