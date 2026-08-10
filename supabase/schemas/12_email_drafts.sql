@@ -678,16 +678,16 @@ begin
   values (
     'gift_card_inventory_low_v1',
     'Gift card inventory low alert',
-    'Admin/staff alert when gift card inventory falls below configured provider threshold.',
-    'Sent once per low-inventory transition for each provider until inventory recovers.',
+    'Admin/staff alert when available cards cannot cover qualified attendance this week or next week.',
+    'Sent at 9 AM and 9 PM Toronto time when a provider has a current or upcoming weekly shortfall.',
     'gift_card_inventory.low',
     'web/app/lib/gift-cards/runner.server.ts',
     'transactional',
     'draft',
     true,
-    '{"required": ["provider", "availableCount", "threshold", "nearTermDemand", "upcomingDemand", "projectedDemand", "projectedShortfall", "manageUrl"]}'::jsonb,
-    'Low gift card inventory alert ({{provider}})',
-    E'Gift card inventory is low for {{provider}}.\n\nAvailable: {{availableCount}}\nThreshold: {{threshold}}\nNear-term demand: {{nearTermDemand}}\nUpcoming demand: {{upcomingDemand}}\nProjected demand: {{projectedDemand}}\nProjected shortfall: {{projectedShortfall}}\n\nReview inventory: {{manageUrl}}'
+    '{"required": ["provider", "availableCount", "thisWeekLabel", "thisWeekNeeded", "thisWeekShortfall", "upcomingWeekLabel", "upcomingWeekNeeded", "upcomingWeekShortfall", "manageUrl"]}'::jsonb,
+    'Gift card shortfall alert ({{provider}})',
+    E'Gift card inventory cannot cover upcoming qualified attendance for {{provider}}.\n\nAvailable: {{availableCount}}\nThis week ({{thisWeekLabel}}) still needed: {{thisWeekNeeded}}\nThis week shortfall: {{thisWeekShortfall}}\nUpcoming week ({{upcomingWeekLabel}}) still needed: {{upcomingWeekNeeded}}\nUpcoming week shortfall: {{upcomingWeekShortfall}}\n\nReview inventory: {{manageUrl}}'
   )
   on conflict (draft_key)
   do update
@@ -728,13 +728,13 @@ begin
   values (
     v_draft_id,
     1,
-    'Low gift card inventory alert ({{provider}})',
-    E'Gift card inventory is low for {{provider}}.\n\nAvailable: {{availableCount}}\nThreshold: {{threshold}}\nNear-term demand: {{nearTermDemand}}\nUpcoming demand: {{upcomingDemand}}\nProjected demand: {{projectedDemand}}\nProjected shortfall: {{projectedShortfall}}\n\nReview inventory: {{manageUrl}}',
-    'Low gift card inventory alert ({{provider}})',
-    '<p>Gift card inventory is low for <strong>{{provider}}</strong>.</p><p>Available: <strong>{{availableCount}}</strong><br />Threshold: <strong>{{threshold}}</strong><br />Near-term demand: <strong>{{nearTermDemand}}</strong><br />Upcoming demand: <strong>{{upcomingDemand}}</strong><br />Projected demand: <strong>{{projectedDemand}}</strong><br />Projected shortfall: <strong>{{projectedShortfall}}</strong></p><p><a href="{{manageUrl}}">Review inventory</a></p>',
-    E'Gift card inventory is low for {{provider}}.\n\nAvailable: {{availableCount}}\nThreshold: {{threshold}}\nNear-term demand: {{nearTermDemand}}\nUpcoming demand: {{upcomingDemand}}\nProjected demand: {{projectedDemand}}\nProjected shortfall: {{projectedShortfall}}\n\nReview inventory: {{manageUrl}}',
-    '{"required": ["provider", "availableCount", "threshold", "nearTermDemand", "upcomingDemand", "projectedDemand", "projectedShortfall", "manageUrl"]}'::jsonb,
-    'Seeded low gift-card inventory alert draft content.',
+    'Gift card shortfall alert ({{provider}})',
+    E'Gift card inventory cannot cover upcoming qualified attendance for {{provider}}.\n\nAvailable: {{availableCount}}\nThis week ({{thisWeekLabel}}) still needed: {{thisWeekNeeded}}\nThis week shortfall: {{thisWeekShortfall}}\nUpcoming week ({{upcomingWeekLabel}}) still needed: {{upcomingWeekNeeded}}\nUpcoming week shortfall: {{upcomingWeekShortfall}}\n\nReview inventory: {{manageUrl}}',
+    'Gift card shortfall alert ({{provider}})',
+    '<p>Gift card inventory cannot cover upcoming qualified attendance for <strong>{{provider}}</strong>.</p><p>Available: <strong>{{availableCount}}</strong><br />This week ({{thisWeekLabel}}) still needed: <strong>{{thisWeekNeeded}}</strong><br />This week shortfall: <strong>{{thisWeekShortfall}}</strong><br />Upcoming week ({{upcomingWeekLabel}}) still needed: <strong>{{upcomingWeekNeeded}}</strong><br />Upcoming week shortfall: <strong>{{upcomingWeekShortfall}}</strong></p><p><a href="{{manageUrl}}">Review inventory</a></p>',
+    E'Gift card inventory cannot cover upcoming qualified attendance for {{provider}}.\n\nAvailable: {{availableCount}}\nThis week ({{thisWeekLabel}}) still needed: {{thisWeekNeeded}}\nThis week shortfall: {{thisWeekShortfall}}\nUpcoming week ({{upcomingWeekLabel}}) still needed: {{upcomingWeekNeeded}}\nUpcoming week shortfall: {{upcomingWeekShortfall}}\n\nReview inventory: {{manageUrl}}',
+    '{"required": ["provider", "availableCount", "thisWeekLabel", "thisWeekNeeded", "thisWeekShortfall", "upcomingWeekLabel", "upcomingWeekNeeded", "upcomingWeekShortfall", "manageUrl"]}'::jsonb,
+    'Seeded gift-card shortfall alert draft content.',
     now()
   )
   on conflict (email_draft_id, version_number) do nothing;

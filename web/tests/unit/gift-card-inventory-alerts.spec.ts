@@ -1,20 +1,32 @@
 import { expect, test } from '@playwright/test'
 
-import { lowInventoryAlertEventKey, resolveLowInventoryTransition } from '../../app/lib/gift-cards/inventory-alerts'
+import {
+  giftCardInventoryAlertEventKey,
+  hasGiftCardShortfall,
+  resolveGiftCardShortfall,
+} from '../../app/lib/gift-cards/inventory-alerts'
 
-test('low-inventory transition matrix covers enter, stay, recover, and ok states', async () => {
-  expect(resolveLowInventoryTransition({ wasLow: false, isLow: true })).toBe('enter_low')
-  expect(resolveLowInventoryTransition({ wasLow: true, isLow: true })).toBe('stay_low')
-  expect(resolveLowInventoryTransition({ wasLow: true, isLow: false })).toBe('recover')
-  expect(resolveLowInventoryTransition({ wasLow: false, isLow: false })).toBe('stay_ok')
+test('reserves this-week cards before evaluating the upcoming-week shortfall', () => {
+  expect(resolveGiftCardShortfall({ available: 5, thisWeekNeeded: 4, upcomingWeekNeeded: 4 })).toEqual({
+    available: 5,
+    thisWeekNeeded: 4,
+    thisWeekShortfall: 0,
+    upcomingWeekNeeded: 4,
+    upcomingWeekShortfall: 3,
+  })
 })
 
-test('low inventory event key is stable and normalizes recipient casing/spacing', async () => {
+test('reports a shortfall when either week cannot be covered', () => {
+  expect(hasGiftCardShortfall(resolveGiftCardShortfall({ available: 3, thisWeekNeeded: 4, upcomingWeekNeeded: 0 }))).toBe(true)
+  expect(hasGiftCardShortfall(resolveGiftCardShortfall({ available: 8, thisWeekNeeded: 4, upcomingWeekNeeded: 4 }))).toBe(false)
+})
+
+test('alert event key is stable within a scheduler slot and normalizes recipient email', () => {
   expect(
-    lowInventoryAlertEventKey({
+    giftCardInventoryAlertEventKey({
       provider: 'Sobeys',
-      threshold: 8,
+      slot: '2026-08-10-09',
       toEmail: ' Staff@Example.com ',
     })
-  ).toBe('gift-card-inventory-low:Sobeys:8:staff@example.com')
+  ).toBe('gift-card-inventory-shortfall:Sobeys:2026-08-10-09:staff@example.com')
 })
