@@ -13,6 +13,7 @@ import { participantStatusFromAnswer } from '@/lib/participant-status'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
+import { loadWorkshopEnrollmentEnrichment } from './workshop-enrollment-enrichment.server'
 
 type LoaderData = {
   columns: string[]
@@ -32,7 +33,6 @@ type LoaderData = {
 const ANSWER_BATCH_SIZE = 200
 const ANSWER_PAGE_SIZE = 1000
 const PROFILE_FILTER_BATCH_SIZE = 100
-const PRIOR_PARTICIPATION_QUESTION_CODES = ['onboarding_prior_participation', 'child_prior_participation'] as const
 
 type SubmissionRow = {
   id: string
@@ -54,11 +54,6 @@ type SubmissionRow = {
     | null
 }
 
-type DerivedProfileValues = {
-  riding_display: string
-  participant_status_display: string
-}
-
 const chunkArray = <T,>(items: T[], size: number): T[][] => {
   if (size <= 0 || !items.length) return []
   const chunks: T[][] = []
@@ -77,77 +72,6 @@ const toAnswerDisplayValue = (value: unknown) => {
   }
   if (value === null || typeof value === 'undefined') return ''
   return JSON.stringify(value as Json)
-}
-
-const loadDerivedProfileValues = async (profileIds: string[]) => {
-  const valuesByProfileId: Record<string, DerivedProfileValues> = {}
-  const normalizedProfileIds = Array.from(new Set(profileIds.filter(Boolean)))
-  if (!normalizedProfileIds.length) return valuesByProfileId
-
-  for (const profileIdChunk of chunkArray(normalizedProfileIds, PROFILE_FILTER_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('profile')
-      .select('id, federal_electoral_district_name')
-      .in('id', profileIdChunk)
-
-    if (error) throw new Error(error.message)
-    for (const profile of data ?? []) {
-      valuesByProfileId[profile.id] = {
-        riding_display: profile.federal_electoral_district_name?.trim() || 'Not looked up',
-        participant_status_display: 'N/A',
-      }
-    }
-  }
-
-  const submissionsById = new Map<string, { profileId: string; submittedAt: number }>()
-  for (const profileIdChunk of chunkArray(normalizedProfileIds, PROFILE_FILTER_BATCH_SIZE)) {
-    for (let from = 0; ; from += ANSWER_PAGE_SIZE) {
-      const { data, error } = await adminClient
-        .from('form_submission')
-        .select('id, profile_id, submitted_at')
-        .in('profile_id', profileIdChunk)
-        .order('submitted_at', { ascending: false })
-        .range(from, from + ANSWER_PAGE_SIZE - 1)
-
-      if (error) throw new Error(error.message)
-      const pageRows = data ?? []
-      for (const submission of pageRows) {
-        if (!submission.profile_id) continue
-        submissionsById.set(submission.id, {
-          profileId: submission.profile_id,
-          submittedAt: Date.parse(submission.submitted_at) || 0,
-        })
-      }
-      if (pageRows.length < ANSWER_PAGE_SIZE) break
-    }
-  }
-
-  const latestStatusByProfileId = new Map<string, { status: string; submittedAt: number }>()
-  for (const submissionIdChunk of chunkArray(Array.from(submissionsById.keys()), ANSWER_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('form_answer')
-      .select('submission_id, value')
-      .in('submission_id', submissionIdChunk)
-      .in('question_code', PRIOR_PARTICIPATION_QUESTION_CODES)
-
-    if (error) throw new Error(error.message)
-    for (const answer of data ?? []) {
-      const submission = submissionsById.get(answer.submission_id)
-      const status = participantStatusFromAnswer(answer.value)
-      if (!submission || status === 'N/A') continue
-      const existing = latestStatusByProfileId.get(submission.profileId)
-      if (!existing || submission.submittedAt > existing.submittedAt) {
-        latestStatusByProfileId.set(submission.profileId, { status, submittedAt: submission.submittedAt })
-      }
-    }
-  }
-
-  for (const [profileId, status] of latestStatusByProfileId) {
-    const values = valuesByProfileId[profileId]
-    if (values) values.participant_status_display = status.status
-  }
-
-  return valuesByProfileId
 }
 
 const safeReturnTo = (input: string | null) => {
@@ -327,7 +251,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return acc
   }, {})
 
-  const derivedValuesByProfileId = await loadDerivedProfileValues(submissionRows.map(row => row.profile_id))
+  const enrichmentByProfileId = await loadWorkshopEnrollmentEnrichment(
+    Array.from(new Set(submissionRows.map(row => row.profile_id).filter(Boolean)))
+  )
 
   const rows = submissionRows.map(row => {
     const profile = Array.isArray(row.profile) ? row.profile[0] : row.profile
@@ -340,10 +266,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return {
       profile_display: profileLabel,
       profile_id: row.profile_id,
-      ...(derivedValuesByProfileId[row.profile_id] ?? {
-        riding_display: 'Not looked up',
-        participant_status_display: 'N/A',
-      }),
+      ...(enrichmentByProfileId[row.profile_id]
+        ? {
+            riding_display: enrichmentByProfileId[row.profile_id].riding_display,
+            participant_status_display: participantStatusFromAnswer(
+              enrichmentByProfileId[row.profile_id].prior_participation_display
+            ),
+          }
+        : {
+            riding_display: 'Not looked up',
+            participant_status_display: 'N/A',
+          }),
       submitted_at: row.submitted_at,
       ...Object.fromEntries(answerColumns.map(code => [code, values[code] ?? ''])),
     }
