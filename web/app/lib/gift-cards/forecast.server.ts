@@ -1,71 +1,15 @@
 import { adminClient } from '@/lib/supabase/adminClient'
-import { parseGiftCardProviderFromDisplay } from '@/lib/gift-cards/inventory.server'
 import { loadWorkshopEnrollmentEnrichment } from '@/routes/manage/workshop-enrollment-enrichment.server'
 
 const TORONTO_TIME_ZONE = 'America/Toronto'
 const IN_CLAUSE_BATCH_SIZE = 10
 const RELATIONSHIP_BATCH_SIZE = 10
 
-export type ForecastWindowDays = 2 | 7 | 14
 export type GiftCardProvider = 'PC' | 'Sobeys'
-export type GiftCardPreferenceBucket = GiftCardProvider | 'meal_kit'
-
-type PreferenceCounts = {
-  profiles: number
-  families: number
-}
-
-export type WindowSnapshot = {
-  days: ForecastWindowDays
-  accepted: {
-    totalProfiles: number
-    totalFamilies: number
-    byPreference: Record<GiftCardPreferenceBucket, PreferenceCounts>
-  }
-  allocation: Record<
-    GiftCardProvider,
-    {
-      eligibleProfiles: number
-      eligibleFamilies: number
-      allocatedProfiles: number
-      allocatedFamilies: number
-      blockedProfiles: number
-      pendingAttendanceRows: number
-      pendingProfiles: number
-      pendingFamilies: number
-      pendingFamilyClassRows: number
-    }
-  >
-  inventory: Record<
-    GiftCardProvider,
-    {
-      available: number
-      allocated: number
-      sent: number
-      opened: number
-      leftAfterPending: number
-      shortfallNow: number
-    }
-  >
-}
-
-export type GiftCardAllocationForecastSnapshot = {
-  generatedAt: string
-  timezone: typeof TORONTO_TIME_ZONE
-  windows: {
-    d2: WindowSnapshot
-    d7: WindowSnapshot
-    d14: WindowSnapshot
-  }
-}
 
 type ClassScopeRow = {
   id: string
   workshop_id: string | null
-}
-
-type EnrollmentRow = {
-  profile_id: string | null
 }
 
 type AttendanceRow = {
@@ -80,6 +24,7 @@ type AttendanceRow = {
 type AllocationRow = {
   class_id: string
   profile_id: string | null
+  asset: { provider: GiftCardProvider } | Array<{ provider: GiftCardProvider }> | null
 }
 
 type FamilyEdgeRow = {
@@ -87,141 +32,119 @@ type FamilyEdgeRow = {
   child_profile_id: string
 }
 
-type ProfileUserRow = {
-  id: string
-  user_id: string | null
-  federal_electoral_district_name: string | null
+export type GiftCardWeekRange = {
+  startsAt: string
+  endsAt: string
 }
 
-type RidingRow = {
-  name: string
-  meal_kit: boolean
+export type GiftCardWeekSnapshot = GiftCardWeekRange & {
+  acceptedFamilies: Record<GiftCardProvider, number>
+  allocated: Record<GiftCardProvider, number>
+  stillNeeded: Record<GiftCardProvider, number>
 }
 
-type FormSubmissionRow = {
-  id: string
-  profile_id: string | null
-  user_id: string | null
-  submitted_at: string | null
+export type GiftCardAllocationForecastSnapshot = {
+  generatedAt: string
+  timezone: typeof TORONTO_TIME_ZONE
+  available: Record<GiftCardProvider, number>
+  weeks: [GiftCardWeekSnapshot, GiftCardWeekSnapshot, GiftCardWeekSnapshot]
 }
 
-type FormAnswerRow = {
-  submission_id: string
-  value: unknown
+const providers: GiftCardProvider[] = ['PC', 'Sobeys']
+const weekdayIndexByLabel: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
 }
 
-type AssetStatus = 'available' | 'allocated' | 'sent' | 'opened'
-type AssetCountResult = Record<GiftCardProvider, Record<AssetStatus, number>>
+const torontoDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TORONTO_TIME_ZONE,
+  weekday: 'short',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
 
 const unique = <T,>(items: T[]) => Array.from(new Set(items))
 
 const chunkArray = <T,>(items: T[], size: number): T[][] => {
-  if (size <= 0 || items.length === 0) return []
   const chunks: T[][] = []
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size))
-  }
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size))
   return chunks
 }
 
-const emptyPreferenceCounts = (): PreferenceCounts => ({
-  profiles: 0,
-  families: 0,
-})
+const emptyProviderCounts = (): Record<GiftCardProvider, number> => ({ PC: 0, Sobeys: 0 })
 
-const emptyPreferenceMap = (): Record<GiftCardPreferenceBucket, PreferenceCounts> => ({
-  PC: emptyPreferenceCounts(),
-  Sobeys: emptyPreferenceCounts(),
-  meal_kit: emptyPreferenceCounts(),
-})
+const torontoPartsForDate = (date: Date) => {
+  const parts = torontoDateFormatter.formatToParts(date)
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? ''
+  return {
+    weekday: get('weekday'),
+    year: Number.parseInt(get('year'), 10),
+    month: Number.parseInt(get('month'), 10),
+    day: Number.parseInt(get('day'), 10),
+  }
+}
 
-const emptyProviderAllocation = () => ({
-  eligibleProfiles: 0,
-  eligibleFamilies: 0,
-  allocatedProfiles: 0,
-  allocatedFamilies: 0,
-  blockedProfiles: 0,
-  pendingAttendanceRows: 0,
-  pendingProfiles: 0,
-  pendingFamilies: 0,
-  pendingFamilyClassRows: 0,
-})
+const addDays = (year: number, month: number, day: number, days: number) => {
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() }
+}
 
-const emptyProviderInventory = () => ({
-  available: 0,
-  allocated: 0,
-  sent: 0,
-  opened: 0,
-  leftAfterPending: 0,
-  shortfallNow: 0,
-})
+const torontoMidnightIso = (year: number, month: number, day: number) => {
+  for (let hour = 0; hour < 24; hour += 1) {
+    const candidate = new Date(Date.UTC(year, month - 1, day, hour))
+    const local = torontoPartsForDate(candidate)
+    if (local.year === year && local.month === month && local.day === day) return candidate.toISOString()
+  }
+  throw new Error(`Unable to resolve Toronto midnight for ${year}-${month}-${day}`)
+}
 
-const mapGiftCardDisplayToBucket = (giftcardDisplay: string | null | undefined): GiftCardPreferenceBucket => {
-  const normalized = (giftcardDisplay ?? '').trim().toLowerCase()
+export const buildGiftCardWeekRanges = (now = new Date()): [GiftCardWeekRange, GiftCardWeekRange, GiftCardWeekRange] => {
+  const local = torontoPartsForDate(now)
+  const weekday = weekdayIndexByLabel[local.weekday]
+  const thisSunday = addDays(local.year, local.month, local.day, -weekday)
+
+  return [0, 7, 14].map(days => {
+    const start = addDays(thisSunday.year, thisSunday.month, thisSunday.day, days)
+    const end = addDays(start.year, start.month, start.day, 7)
+    return {
+      startsAt: torontoMidnightIso(start.year, start.month, start.day),
+      endsAt: torontoMidnightIso(end.year, end.month, end.day),
+    }
+  }) as [GiftCardWeekRange, GiftCardWeekRange, GiftCardWeekRange]
+}
+
+const allocationKey = (classId: string, profileId: string) => `${classId}::${profileId}`
+
+const providerFromDisplay = (value: string | null | undefined): GiftCardProvider | null => {
+  const normalized = (value ?? '').trim().toLowerCase()
   const compact = normalized.replace(/[^a-z0-9]+/g, '')
-  if (compact.includes('mealkit')) return 'meal_kit'
-  if (compact.includes('sobeys')) return 'Sobeys'
-  if (normalized.includes('meal kit')) return 'meal_kit'
-  if (normalized.includes('sobeys') || normalized.includes("sobey's")) return 'Sobeys'
-  return 'PC'
+  if (compact.includes('mealkit') || normalized.includes('meal kit')) return null
+  return compact.includes('sobeys') || normalized.includes('sobeys') || normalized.includes("sobey's") ? 'Sobeys' : 'PC'
 }
 
-const toValidDateMs = (value: string | null | undefined) => {
-  const parsed = Date.parse((value ?? '').trim())
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-const toFamilySet = (profileIds: Iterable<string>, familyIdByProfileId: Map<string, string>): Set<string> => {
-  const set = new Set<string>()
-  for (const profileId of profileIds) {
-    set.add(familyIdByProfileId.get(profileId) ?? profileId)
-  }
-  return set
-}
-
-const buildPreferenceSets = (
-  profileIds: string[],
-  preferenceByProfileId: Map<string, GiftCardPreferenceBucket>
-): Record<GiftCardPreferenceBucket, Set<string>> => {
-  const sets: Record<GiftCardPreferenceBucket, Set<string>> = {
-    PC: new Set<string>(),
-    Sobeys: new Set<string>(),
-    meal_kit: new Set<string>(),
-  }
-
-  for (const profileId of profileIds) {
-    const bucket = preferenceByProfileId.get(profileId) ?? 'PC'
-    sets[bucket].add(profileId)
-  }
-
-  return sets
-}
-
-const loadWindowScope = async (days: ForecastWindowDays): Promise<{ classIds: string[]; workshopIds: string[] }> => {
-  const now = new Date()
-  const end = new Date(now)
-  end.setUTCDate(end.getUTCDate() + days)
-
+const loadWeekScope = async ({ startsAt, endsAt }: GiftCardWeekRange) => {
   const { data, error } = await adminClient
     .from('class')
     .select('id, workshop_id')
-    .gte('starts_at', now.toISOString())
-    .lte('starts_at', end.toISOString())
+    .gte('starts_at', startsAt)
+    .lt('starts_at', endsAt)
 
-  if (error) {
-    throw new Error(`Failed to load class scope for ${days}d window: ${error.message}`)
-  }
+  if (error) throw new Error(`Failed to load weekly class scope: ${error.message}`)
 
   const rows = (data ?? []) as ClassScopeRow[]
   return {
-    classIds: unique(rows.map(row => row.id).filter(Boolean)),
+    classIds: unique(rows.map(row => row.id)),
     workshopIds: unique(rows.map(row => row.workshop_id).filter((id): id is string => Boolean(id))),
   }
 }
 
-const loadApprovedProfiles = async (workshopIds: string[]): Promise<string[]> => {
-  if (!workshopIds.length) return []
-
+const loadApprovedProfiles = async (workshopIds: string[]) => {
   const profileIds = new Set<string>()
   for (const chunk of chunkArray(workshopIds, IN_CLAUSE_BATCH_SIZE)) {
     const { data, error } = await adminClient
@@ -229,462 +152,162 @@ const loadApprovedProfiles = async (workshopIds: string[]): Promise<string[]> =>
       .select('profile_id')
       .in('workshop_id', chunk)
       .eq('status', 'approved')
-
-    if (error) {
-      throw new Error(`Failed to load approved enrollments: ${error.message}`)
-    }
-
-    for (const row of (data ?? []) as EnrollmentRow[]) {
-      if (row.profile_id) profileIds.add(row.profile_id)
-    }
+    if (error) throw new Error(`Failed to load approved enrollments: ${error.message}`)
+    for (const row of data ?? []) if (row.profile_id) profileIds.add(row.profile_id)
   }
-
   return Array.from(profileIds)
 }
 
-const loadPreferenceByProfileId = async (profileIds: string[]): Promise<Map<string, GiftCardPreferenceBucket>> => {
-  const byProfileId = new Map<string, GiftCardPreferenceBucket>()
-  if (!profileIds.length) return byProfileId
-
-  const normalizedProfileIds = unique(profileIds.filter(Boolean))
-  const profiles: ProfileUserRow[] = []
-  for (const chunk of chunkArray(normalizedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('profile')
-      .select('id, user_id, federal_electoral_district_name')
-      .in('id', chunk)
-
-    if (error) {
-      throw new Error(`Failed to load profiles for gift-card preference buckets: ${error.message}`)
-    }
-
-    profiles.push(...((data ?? []) as ProfileUserRow[]))
-  }
-
-  const ridingNames = unique(
-    profiles
-      .map(profile => (profile.federal_electoral_district_name ?? '').trim())
-      .filter(Boolean)
-  )
-
-  const mealKitRidingNames = new Set<string>()
-  for (const chunk of chunkArray(ridingNames, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('federal_electoral_district')
-      .select('name, meal_kit')
-      .in('name', chunk)
-
-    if (error) {
-      throw new Error(`Failed to load federal district meal-kit flags: ${error.message}`)
-    }
-
-    for (const row of (data ?? []) as RidingRow[]) {
-      if (row.meal_kit) mealKitRidingNames.add(row.name)
-    }
-  }
-
-  const profilesByUserId = new Map<string, string[]>()
-  const targetProfileIdSet = new Set(normalizedProfileIds)
-  const mealKitProfiles = new Set<string>()
-  for (const profile of profiles) {
-    if (profile.user_id) {
-      const bucket = profilesByUserId.get(profile.user_id) ?? []
-      if (!bucket.includes(profile.id)) {
-        bucket.push(profile.id)
-        profilesByUserId.set(profile.user_id, bucket)
-      }
-    }
-
-    const ridingName = (profile.federal_electoral_district_name ?? '').trim()
-    if (ridingName && mealKitRidingNames.has(ridingName)) {
-      mealKitProfiles.add(profile.id)
-    }
-  }
-
-  const submissionsById = new Map<string, FormSubmissionRow>()
-  for (const chunk of chunkArray(normalizedProfileIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('form_submission')
-      .select('id, profile_id, user_id, submitted_at')
-      .in('profile_id', chunk)
-
-    if (error) {
-      throw new Error(`Failed to load profile form submissions for gift-card preference buckets: ${error.message}`)
-    }
-
-    for (const row of (data ?? []) as FormSubmissionRow[]) {
-      submissionsById.set(row.id, row)
-    }
-  }
-
-  const userIds = Array.from(profilesByUserId.keys())
-  for (const chunk of chunkArray(userIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient
-      .from('form_submission')
-      .select('id, profile_id, user_id, submitted_at')
-      .in('user_id', chunk)
-
-    if (error) {
-      throw new Error(`Failed to load user form submissions for gift-card preference buckets: ${error.message}`)
-    }
-
-    for (const row of (data ?? []) as FormSubmissionRow[]) {
-      submissionsById.set(row.id, row)
-    }
-  }
-
-  const latestValueByProfileId = new Map<string, { value: string; submittedAtMs: number }>()
-  const submissionIds = Array.from(submissionsById.keys())
-  for (const chunk of chunkArray(submissionIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data: answerRows, error: answerError } = await adminClient
-      .from('form_answer')
-      .select('submission_id, value')
-      .eq('question_code', 'gift_card_store_preference')
-      .in('submission_id', chunk)
-
-    if (answerError) {
-      throw new Error(`Failed to load gift-card preference answers for buckets: ${answerError.message}`)
-    }
-
-    for (const answer of (answerRows ?? []) as FormAnswerRow[]) {
-      const submission = submissionsById.get(answer.submission_id)
-      if (!submission) continue
-
-      const value = typeof answer.value === 'string' ? answer.value.trim() : ''
-      if (!value) continue
-
-      const submittedAtMs = toValidDateMs(submission.submitted_at)
-      const associatedProfileIds = new Set<string>()
-
-      if (submission.profile_id && targetProfileIdSet.has(submission.profile_id)) {
-        associatedProfileIds.add(submission.profile_id)
-      }
-
-      if (submission.user_id) {
-        for (const relatedProfileId of profilesByUserId.get(submission.user_id) ?? []) {
-          if (targetProfileIdSet.has(relatedProfileId)) {
-            associatedProfileIds.add(relatedProfileId)
-          }
-        }
-      }
-
-      for (const associatedProfileId of associatedProfileIds) {
-        const existing = latestValueByProfileId.get(associatedProfileId)
-        if (!existing || submittedAtMs > existing.submittedAtMs) {
-          latestValueByProfileId.set(associatedProfileId, { value, submittedAtMs })
-        }
-      }
-    }
-  }
-
-  for (const profileId of normalizedProfileIds) {
-    if (mealKitProfiles.has(profileId)) {
-      byProfileId.set(profileId, 'meal_kit')
-      continue
-    }
-
-    const preferenceValue = latestValueByProfileId.get(profileId)?.value ?? null
-    const provider = parseGiftCardProviderFromDisplay(preferenceValue)
-    byProfileId.set(profileId, provider ? provider : 'meal_kit')
-  }
-
-  return byProfileId
-}
-
-const loadFamilyIdByProfileId = async (profileIds: string[]): Promise<Map<string, string>> => {
-  const normalized = unique(profileIds.filter(Boolean))
-  const familyIdByProfileId = new Map<string, string>()
-  if (!normalized.length) return familyIdByProfileId
-
-  const seen = new Set<string>(normalized)
-  const queue = [...normalized]
-  const edges: FamilyEdgeRow[] = []
-
-  while (queue.length) {
-    const batch = queue.splice(0, Math.min(queue.length, RELATIONSHIP_BATCH_SIZE))
-    if (!batch.length) continue
-
-    const [guardianQuery, childQuery] = await Promise.all([
-      adminClient
-        .from('person_guardian_child')
-        .select('guardian_profile_id, child_profile_id')
-        .in('guardian_profile_id', batch),
-      adminClient
-        .from('person_guardian_child')
-        .select('guardian_profile_id, child_profile_id')
-        .in('child_profile_id', batch),
-    ])
-
-    if (guardianQuery.error) {
-      throw new Error(`Failed to load family edges by guardian profile: ${guardianQuery.error.message}`)
-    }
-    if (childQuery.error) {
-      throw new Error(`Failed to load family edges by child profile: ${childQuery.error.message}`)
-    }
-
-    const merged = [...(guardianQuery.data ?? []), ...(childQuery.data ?? [])] as FamilyEdgeRow[]
-    const seenEdges = new Set<string>()
-    for (const edge of merged) {
-      const edgeKey = `${edge.guardian_profile_id}::${edge.child_profile_id}`
-      if (seenEdges.has(edgeKey)) continue
-      seenEdges.add(edgeKey)
-      edges.push(edge)
-      if (!seen.has(edge.guardian_profile_id)) {
-        seen.add(edge.guardian_profile_id)
-        queue.push(edge.guardian_profile_id)
-      }
-      if (!seen.has(edge.child_profile_id)) {
-        seen.add(edge.child_profile_id)
-        queue.push(edge.child_profile_id)
-      }
-    }
-  }
-
-  const adjacency = new Map<string, Set<string>>()
-  for (const id of seen) adjacency.set(id, new Set<string>())
-  for (const edge of edges) {
-    adjacency.get(edge.guardian_profile_id)?.add(edge.child_profile_id)
-    adjacency.get(edge.child_profile_id)?.add(edge.guardian_profile_id)
-  }
-
-  const visited = new Set<string>()
-  for (const id of seen) {
-    if (visited.has(id)) continue
-
-    const component: string[] = []
-    const bfs = [id]
-    visited.add(id)
-
-    while (bfs.length) {
-      const current = bfs.shift() as string
-      component.push(current)
-      for (const neighbor of adjacency.get(current) ?? []) {
-        if (!visited.has(neighbor)) {
-          visited.add(neighbor)
-          bfs.push(neighbor)
-        }
-      }
-    }
-
-    component.sort((a, b) => a.localeCompare(b))
-    const familyId = component[0]
-    for (const member of component) {
-      familyIdByProfileId.set(member, familyId)
-    }
-  }
-
-  for (const profileId of normalized) {
-    if (!familyIdByProfileId.has(profileId)) {
-      familyIdByProfileId.set(profileId, profileId)
-    }
-  }
-
-  return familyIdByProfileId
-}
-
-const allocationKey = (classId: string, profileId: string) => `${classId}::${profileId}`
-
-const loadAttendanceRows = async (classIds: string[]): Promise<AttendanceRow[]> => {
-  if (!classIds.length) return []
-
+const loadAttendanceRows = async (classIds: string[]) => {
   const rows: AttendanceRow[] = []
-  for (const classChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+  for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
     const { data, error } = await adminClient
       .from('class_attendance')
       .select('class_id, profile_id, state, camera_on, photo_status, gift_card_blocked')
-      .in('class_id', classChunk)
-
-    if (error) {
-      throw new Error(`Failed to load attendance rows: ${error.message}`)
-    }
-
+      .in('class_id', chunk)
+    if (error) throw new Error(`Failed to load attendance rows: ${error.message}`)
     rows.push(...((data ?? []) as AttendanceRow[]))
   }
-
   return rows
 }
 
-const loadAllocatedPairs = async (classIds: string[]): Promise<Set<string>> => {
-  const allocated = new Set<string>()
-  if (!classIds.length) return allocated
-
-  for (const classChunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
-    const { data, error } = await adminClient.from('gift_card_allocation').select('class_id, profile_id').in('class_id', classChunk)
-
-    if (error) {
-      throw new Error(`Failed to load gift card allocations: ${error.message}`)
-    }
-
-    for (const row of (data ?? []) as AllocationRow[]) {
-      if (!row.profile_id) continue
-      allocated.add(allocationKey(row.class_id, row.profile_id))
-    }
+const loadAllocations = async (classIds: string[]) => {
+  const rows: AllocationRow[] = []
+  for (const chunk of chunkArray(classIds, IN_CLAUSE_BATCH_SIZE)) {
+    const { data, error } = await adminClient
+      .from('gift_card_allocation')
+      .select('class_id, profile_id, asset:gift_card_asset_id(provider)')
+      .in('class_id', chunk)
+    if (error) throw new Error(`Failed to load gift-card allocations: ${error.message}`)
+    rows.push(...((data ?? []) as AllocationRow[]))
   }
-
-  return allocated
+  return rows
 }
 
-const loadInventoryCounts = async (): Promise<AssetCountResult> => {
-  const result: AssetCountResult = {
-    PC: { available: 0, allocated: 0, sent: 0, opened: 0 },
-    Sobeys: { available: 0, allocated: 0, sent: 0, opened: 0 },
+const loadFamilyIdByProfileId = async (profileIds: string[]) => {
+  const seen = new Set(profileIds)
+  const queue = [...seen]
+  const edges: FamilyEdgeRow[] = []
+
+  while (queue.length) {
+    const batch = queue.splice(0, RELATIONSHIP_BATCH_SIZE)
+    const [guardianQuery, childQuery] = await Promise.all([
+      adminClient.from('person_guardian_child').select('guardian_profile_id, child_profile_id').in('guardian_profile_id', batch),
+      adminClient.from('person_guardian_child').select('guardian_profile_id, child_profile_id').in('child_profile_id', batch),
+    ])
+    if (guardianQuery.error) throw new Error(`Failed to load family guardians: ${guardianQuery.error.message}`)
+    if (childQuery.error) throw new Error(`Failed to load family children: ${childQuery.error.message}`)
+
+    for (const edge of [...(guardianQuery.data ?? []), ...(childQuery.data ?? [])] as FamilyEdgeRow[]) {
+      edges.push(edge)
+      for (const profileId of [edge.guardian_profile_id, edge.child_profile_id]) {
+        if (!seen.has(profileId)) {
+          seen.add(profileId)
+          queue.push(profileId)
+        }
+      }
+    }
   }
 
-  const providers: GiftCardProvider[] = ['PC', 'Sobeys']
-  const statuses: AssetStatus[] = ['available', 'allocated', 'sent', 'opened']
+  const adjacent = new Map<string, Set<string>>()
+  for (const profileId of seen) adjacent.set(profileId, new Set())
+  for (const edge of edges) {
+    adjacent.get(edge.guardian_profile_id)?.add(edge.child_profile_id)
+    adjacent.get(edge.child_profile_id)?.add(edge.guardian_profile_id)
+  }
 
-  for (const provider of providers) {
-    for (const status of statuses) {
+  const familyIdByProfileId = new Map<string, string>()
+  for (const profileId of seen) {
+    if (familyIdByProfileId.has(profileId)) continue
+    const component = [profileId]
+    const members: string[] = []
+    while (component.length) {
+      const current = component.pop() as string
+      if (familyIdByProfileId.has(current)) continue
+      familyIdByProfileId.set(current, profileId)
+      members.push(current)
+      for (const next of adjacent.get(current) ?? []) component.push(next)
+    }
+    const familyId = members.sort((left, right) => left.localeCompare(right))[0]
+    for (const member of members) familyIdByProfileId.set(member, familyId)
+  }
+  return familyIdByProfileId
+}
+
+const loadAvailableCounts = async () => {
+  const available = emptyProviderCounts()
+  await Promise.all(
+    providers.map(async provider => {
       const { count, error } = await adminClient
         .from('gift_card_asset')
         .select('id', { count: 'exact', head: true })
         .eq('provider', provider)
-        .eq('status', status)
-
-      if (error) {
-        throw new Error(`Failed inventory count (${provider}/${status}): ${error.message}`)
-      }
-
-      result[provider][status] = count ?? 0
-    }
-  }
-
-  return result
+        .eq('status', 'available')
+      if (error) throw new Error(`Failed to count available ${provider} cards: ${error.message}`)
+      available[provider] = count ?? 0
+    })
+  )
+  return available
 }
 
-const buildWindowSnapshot = async (days: ForecastWindowDays): Promise<WindowSnapshot> => {
-  const { classIds, workshopIds } = await loadWindowScope(days)
-  const approvedProfiles = await loadApprovedProfiles(workshopIds)
-  const attendanceRows = await loadAttendanceRows(classIds)
-  const allocatedPairs = await loadAllocatedPairs(classIds)
-  const attendanceProfileIds = unique(
-    attendanceRows.map(row => row.profile_id).filter((profileId): profileId is string => Boolean(profileId))
-  )
-  const relevantProfileIds = unique([...approvedProfiles, ...attendanceProfileIds])
-  const enrichmentByProfileId = await loadWorkshopEnrollmentEnrichment(relevantProfileIds)
-  const preferenceByProfileId = new Map<string, GiftCardPreferenceBucket>()
-  for (const profileId of relevantProfileIds) {
-    preferenceByProfileId.set(
-      profileId,
-      mapGiftCardDisplayToBucket(enrichmentByProfileId[profileId]?.giftcard_display)
-    )
-  }
-  const familyIdByProfileId = await loadFamilyIdByProfileId(relevantProfileIds)
-  const inventoryCounts = await loadInventoryCounts()
+const buildWeekSnapshot = async (range: GiftCardWeekRange): Promise<GiftCardWeekSnapshot> => {
+  const { classIds, workshopIds } = await loadWeekScope(range)
+  const [approvedProfiles, attendanceRows, allocations] = await Promise.all([
+    loadApprovedProfiles(workshopIds),
+    loadAttendanceRows(classIds),
+    loadAllocations(classIds),
+  ])
+  const attendanceProfileIds = attendanceRows.map(row => row.profile_id).filter((id): id is string => Boolean(id))
+  const profileIds = unique([...approvedProfiles, ...attendanceProfileIds])
+  const [enrichment, familyIdByProfileId] = await Promise.all([
+    loadWorkshopEnrollmentEnrichment(profileIds),
+    loadFamilyIdByProfileId(profileIds),
+  ])
+  const providerByProfileId = new Map(profileIds.map(id => [id, providerFromDisplay(enrichment[id]?.giftcard_display)]))
 
-  const profilesByPreference = buildPreferenceSets(approvedProfiles, preferenceByProfileId)
-  const acceptedByPreference = emptyPreferenceMap()
-  for (const bucket of ['PC', 'Sobeys', 'meal_kit'] as const) {
-    acceptedByPreference[bucket] = {
-      profiles: profilesByPreference[bucket].size,
-      families: toFamilySet(profilesByPreference[bucket], familyIdByProfileId).size,
+  const acceptedFamilies = emptyProviderCounts()
+  for (const provider of providers) {
+    const families = new Set<string>()
+    for (const profileId of approvedProfiles) {
+      if (providerByProfileId.get(profileId) === provider) families.add(familyIdByProfileId.get(profileId) ?? profileId)
     }
+    acceptedFamilies[provider] = families.size
   }
 
-  const attendanceRowsByProvider: Record<GiftCardProvider, AttendanceRow[]> = {
-    PC: [],
-    Sobeys: [],
+  const allocated = emptyProviderCounts()
+  const allocatedPairs = new Set<string>()
+  for (const allocation of allocations) {
+    if (!allocation.profile_id) continue
+    allocatedPairs.add(allocationKey(allocation.class_id, allocation.profile_id))
+    const asset = Array.isArray(allocation.asset) ? allocation.asset[0] : allocation.asset
+    if (asset?.provider === 'PC' || asset?.provider === 'Sobeys') allocated[asset.provider] += 1
   }
 
-  for (const row of attendanceRows) {
-    if (!row.profile_id) continue
-    const bucket = preferenceByProfileId.get(row.profile_id) ?? 'PC'
-    if (bucket === 'meal_kit') continue
-    attendanceRowsByProvider[bucket].push(row)
-  }
-
-  const allocation: WindowSnapshot['allocation'] = {
-    PC: emptyProviderAllocation(),
-    Sobeys: emptyProviderAllocation(),
-  }
-
-  for (const provider of ['PC', 'Sobeys'] as const) {
-    const providerAttendanceRows = attendanceRowsByProvider[provider]
-    const eligibleProfiles = new Set<string>()
-    const allocatedEligibleProfiles = new Set<string>()
-    const blockedEligibleProfiles = new Set<string>()
-    const pendingProfiles = new Set<string>()
-    const pendingAttendanceRows = new Set<string>()
-    const pendingFamilyClassRows = new Set<string>()
-
-    for (const row of providerAttendanceRows) {
-      if (!row.profile_id) continue
-
-      const isActive = row.state === 'active'
-      const key = allocationKey(row.class_id, row.profile_id)
-
-      if (row.gift_card_blocked) {
-        blockedEligibleProfiles.add(row.profile_id)
-      }
-
-      if (!isActive || row.gift_card_blocked) continue
-
-      eligibleProfiles.add(row.profile_id)
-      if (allocatedPairs.has(key)) {
-        allocatedEligibleProfiles.add(row.profile_id)
-        continue
-      }
-
-      pendingProfiles.add(row.profile_id)
-      pendingAttendanceRows.add(key)
-      const familyId = familyIdByProfileId.get(row.profile_id) ?? row.profile_id
-      pendingFamilyClassRows.add(`${familyId}::${row.class_id}`)
-    }
-
-
-    allocation[provider] = {
-      eligibleProfiles: eligibleProfiles.size,
-      eligibleFamilies: toFamilySet(eligibleProfiles, familyIdByProfileId).size,
-      allocatedProfiles: allocatedEligibleProfiles.size,
-      allocatedFamilies: toFamilySet(allocatedEligibleProfiles, familyIdByProfileId).size,
-      blockedProfiles: blockedEligibleProfiles.size,
-      pendingAttendanceRows: pendingAttendanceRows.size,
-      pendingProfiles: pendingProfiles.size,
-      pendingFamilies: toFamilySet(pendingProfiles, familyIdByProfileId).size,
-      pendingFamilyClassRows: pendingFamilyClassRows.size,
-    }
-  }
-
-  const inventory: WindowSnapshot['inventory'] = {
-    PC: emptyProviderInventory(),
-    Sobeys: emptyProviderInventory(),
-  }
-
-  for (const provider of ['PC', 'Sobeys'] as const) {
-    const available = inventoryCounts[provider].available
-    const pending = allocation[provider].pendingAttendanceRows
-    inventory[provider] = {
-      available,
-      allocated: inventoryCounts[provider].allocated,
-      sent: inventoryCounts[provider].sent,
-      opened: inventoryCounts[provider].opened,
-      leftAfterPending: available - pending,
-      shortfallNow: Math.max(0, pending - available),
-    }
+  const neededPairs: Record<GiftCardProvider, Set<string>> = { PC: new Set(), Sobeys: new Set() }
+  for (const attendance of attendanceRows) {
+    if (!attendance.profile_id || attendance.state !== 'active' || attendance.gift_card_blocked) continue
+    if (attendance.camera_on !== true && attendance.photo_status !== 'accepted') continue
+    const key = allocationKey(attendance.class_id, attendance.profile_id)
+    if (allocatedPairs.has(key)) continue
+    const provider = providerByProfileId.get(attendance.profile_id)
+    if (provider) neededPairs[provider].add(key)
   }
 
   return {
-    days,
-    accepted: {
-      totalProfiles: approvedProfiles.length,
-      totalFamilies: toFamilySet(approvedProfiles, familyIdByProfileId).size,
-      byPreference: acceptedByPreference,
-    },
-    allocation,
-    inventory,
+    ...range,
+    acceptedFamilies,
+    allocated,
+    stillNeeded: { PC: neededPairs.PC.size, Sobeys: neededPairs.Sobeys.size },
   }
 }
 
 export const loadGiftCardAllocationForecastSnapshot = async (): Promise<GiftCardAllocationForecastSnapshot> => {
-  const [d2, d7, d14] = await Promise.all([buildWindowSnapshot(2), buildWindowSnapshot(7), buildWindowSnapshot(14)])
-
+  const ranges = buildGiftCardWeekRanges()
+  const [available, ...weeks] = await Promise.all([loadAvailableCounts(), ...ranges.map(buildWeekSnapshot)])
   return {
     generatedAt: new Date().toISOString(),
     timezone: TORONTO_TIME_ZONE,
-    windows: {
-      d2,
-      d7,
-      d14,
-    },
+    available,
+    weeks: weeks as [GiftCardWeekSnapshot, GiftCardWeekSnapshot, GiftCardWeekSnapshot],
   }
 }
