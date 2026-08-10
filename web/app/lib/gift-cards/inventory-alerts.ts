@@ -1,20 +1,47 @@
-import type { GiftCardProvider } from '@/lib/gift-cards/inventory.server'
+import type { GiftCardAllocationForecastSnapshot, GiftCardProvider } from '@/lib/gift-cards/forecast.server'
 
-export type LowInventoryTransition = 'enter_low' | 'stay_low' | 'recover' | 'stay_ok'
-
-export const resolveLowInventoryTransition = ({ wasLow, isLow }: { wasLow: boolean; isLow: boolean }): LowInventoryTransition => {
-  if (!wasLow && isLow) return 'enter_low'
-  if (wasLow && isLow) return 'stay_low'
-  if (wasLow && !isLow) return 'recover'
-  return 'stay_ok'
+export type GiftCardShortfall = {
+  available: number
+  thisWeekNeeded: number
+  thisWeekShortfall: number
+  upcomingWeekNeeded: number
+  upcomingWeekShortfall: number
 }
 
-export const lowInventoryAlertEventKey = ({
+export const resolveGiftCardShortfall = ({
+  available,
+  thisWeekNeeded,
+  upcomingWeekNeeded,
+}: {
+  available: number
+  thisWeekNeeded: number
+  upcomingWeekNeeded: number
+}): GiftCardShortfall => {
+  const thisWeekShortfall = Math.max(0, thisWeekNeeded - available)
+  const availableAfterThisWeek = Math.max(0, available - thisWeekNeeded)
+  const upcomingWeekShortfall = Math.max(0, upcomingWeekNeeded - availableAfterThisWeek)
+  return { available, thisWeekNeeded, thisWeekShortfall, upcomingWeekNeeded, upcomingWeekShortfall }
+}
+
+export const resolveGiftCardShortfallForProvider = (
+  snapshot: GiftCardAllocationForecastSnapshot,
+  provider: GiftCardProvider
+) =>
+  resolveGiftCardShortfall({
+    available: snapshot.available[provider],
+    thisWeekNeeded: snapshot.weeks[0].stillNeeded[provider],
+    upcomingWeekNeeded: snapshot.weeks[1].stillNeeded[provider],
+  })
+
+export const hasGiftCardShortfall = (shortfall: GiftCardShortfall) =>
+  shortfall.thisWeekShortfall > 0 || shortfall.upcomingWeekShortfall > 0
+
+export const giftCardInventoryAlertEventKey = ({
   provider,
-  threshold,
+  slot,
   toEmail,
 }: {
   provider: GiftCardProvider
-  threshold: number
+  slot: string
   toEmail: string
-}) => `gift-card-inventory-low:${provider}:${threshold}:${toEmail.trim().toLowerCase()}`
+}) => `gift-card-inventory-shortfall:${provider}:${slot}:${toEmail.trim().toLowerCase()}`

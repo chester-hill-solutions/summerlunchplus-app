@@ -1,4 +1,5 @@
 */5 * * * * /bin/bash /app/scripts/zoom-jobs.sh
 */5 * * * * /bin/bash /app/scripts/gift-card-jobs.sh
+0 9,21 * * * /bin/bash /app/scripts/gift-card-inventory-alerts.sh
 */5 * * * * /bin/bash /app/scripts/export-jobs.sh
 5 * * * * /bin/bash /app/scripts/export-cleanup.sh

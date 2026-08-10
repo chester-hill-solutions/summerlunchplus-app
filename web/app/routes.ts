@@ -38,6 +38,7 @@ export default [
   route("internal/export-jobs/run", "routes/internal/export-jobs.run.ts"),
   route("internal/export-jobs/cleanup", "routes/internal/export-jobs.cleanup.ts"),
   route("internal/gift-card-jobs/run", "routes/internal/gift-card-jobs.run.ts"),
+  route("internal/gift-card-inventory-alerts/run", "routes/internal/gift-card-inventory-alerts.run.ts"),
   route("internal/zoom-jobs/run", "routes/internal/zoom-jobs.run.ts"),
   route("internal/zoom-jobs/reset", "routes/internal/zoom-jobs.reset.ts"),
   route("manage", "routes/manage/team.tsx", [
@@ -102,6 +103,7 @@ export default [
     route("email-drafts/:draftId", "routes/manage/email-drafts.$draftId.tsx"),
     route("form-answer", "routes/manage/form-answer.tsx"),
     route("gift-cards", "routes/manage/gift-cards.tsx"),
+    route("gift-cards/stats-data", "routes/manage/gift-cards.stats-data.ts"),
     route("gift-cards/table-data", "routes/manage/gift-cards.table-data.ts"),
     route("gift-cards/upload", "routes/manage/gift-cards.upload.tsx"),
     route("family-multi-approved", "routes/manage/family-multi-approved.tsx"),

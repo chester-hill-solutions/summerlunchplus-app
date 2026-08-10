@@ -1,6 +1,10 @@
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
-import { lowInventoryAlertEventKey, resolveLowInventoryTransition } from '@/lib/gift-cards/inventory-alerts'
-import { loadGiftCardInventorySnapshot, type GiftCardProvider } from '@/lib/gift-cards/inventory.server'
+import {
+  giftCardInventoryAlertEventKey,
+  hasGiftCardShortfall,
+  resolveGiftCardShortfallForProvider,
+} from '@/lib/gift-cards/inventory-alerts'
+import { loadGiftCardAllocationForecastSnapshot, type GiftCardProvider } from '@/lib/gift-cards/forecast.server'
 import {
   eligibleAfterIso,
   isEligibilityTimingEnabled,
@@ -25,9 +29,6 @@ type GiftCardJobResult = {
   mealKitRemindersSent: number
   mealKitRemindersSkipped: number
   mealKitReminderFailures: number
-  lowInventoryAlertsSent: number
-  lowInventoryAlertsSkipped: number
-  lowInventoryAlertFailures: number
   allocationScan: GiftCardScanCounters
   reminderScan: GiftCardScanCounters
   errors: string[]
@@ -79,7 +80,7 @@ const parseHourMinuteEnv = (name: string, fallback: number) => {
 const isProductionRuntime = process.env.NODE_ENV === 'production'
 const ensureOrigin = (origin: string) => origin.replace(/\/+$/, '')
 
-const resolvePublicHubOrigin = (fallbackOrigin: string) => {
+export const resolvePublicHubOrigin = (fallbackOrigin: string) => {
   const railwayPublicDomain = (process.env.RAILWAY_PUBLIC_DOMAIN ?? '').trim()
   const railwayPublicOrigin = railwayPublicDomain ? `https://${railwayPublicDomain}` : ''
   const explicitOrigin = [
@@ -442,7 +443,7 @@ const sendMealKitPickupReminders = async () => {
   }
 }
 
-const resolveLowInventoryAlertRecipients = async () => {
+export const resolveLowInventoryAlertRecipients = async () => {
   const recipientEmails = new Set<string>()
   const { data: roleRows, error: roleError } = await adminClient
     .from('user_roles')
@@ -473,175 +474,64 @@ const resolveLowInventoryAlertRecipients = async () => {
   return Array.from(recipientEmails)
 }
 
-const upsertLowInventoryState = async ({
-  provider,
-  isLow,
-  available,
-  threshold,
-  alertedAt,
-  recoveredAt,
-}: {
-  provider: GiftCardProvider
-  isLow: boolean
-  available: number
-  threshold: number
-  alertedAt?: string | null
-  recoveredAt?: string | null
-}) => {
-  const { error } = await adminClient.from('gift_card_inventory_alert_state').upsert(
-    {
-      provider,
-      is_low: isLow,
-      last_inventory_count: available,
-      last_threshold: threshold,
-      last_alerted_at: alertedAt ?? null,
-      last_recovered_at: recoveredAt ?? null,
-    },
-    { onConflict: 'provider' }
-  )
-
-  if (error) {
-    throw new Error(`Failed to upsert low-inventory state (${provider}): ${error.message}`)
-  }
+const formatTorontoWeekLabel = ({ startsAt, endsAt }: { startsAt: string; endsAt: string }) => {
+  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: TORONTO_TIME_ZONE, month: 'short', day: 'numeric' })
+  return `${formatter.format(new Date(startsAt))}-${formatter.format(new Date(Date.parse(endsAt) - 1))}`
 }
 
-const processLowInventoryAlerts = async (appOrigin: string) => {
-  const snapshot = await loadGiftCardInventorySnapshot()
-  const recipients = await resolveLowInventoryAlertRecipients()
-  const nowIso = new Date().toISOString()
+const inventoryAlertSlot = (now: Date) => {
+  const parts = torontoPartsForDate(now)
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}-${String(parts.hour).padStart(2, '0')}`
+}
+
+export const runGiftCardInventoryAlerts = async ({ appOrigin, now = new Date() }: { appOrigin: string; now?: Date }) => {
+  const [snapshot, recipients] = await Promise.all([loadGiftCardAllocationForecastSnapshot(), resolveLowInventoryAlertRecipients()])
+  const slot = inventoryAlertSlot(now)
   const manageUrl = `${resolvePublicHubOrigin(appOrigin)}/manage/gift-cards`
-
-  const { data: stateRows, error: stateError } = await adminClient
-    .from('gift_card_inventory_alert_state')
-    .select('provider, is_low, last_alerted_at, last_recovered_at')
-    .in('provider', ['PC', 'Sobeys'])
-
-  if (stateError) {
-    throw new Error(`Failed to load low-inventory state: ${stateError.message}`)
-  }
-
-  const priorStateByProvider = new Map<GiftCardProvider, { isLow: boolean; lastAlertedAt: string | null; lastRecoveredAt: string | null }>()
-  for (const row of stateRows ?? []) {
-    const provider = row.provider === 'Sobeys' ? 'Sobeys' : 'PC'
-    priorStateByProvider.set(provider, {
-      isLow: row.is_low,
-      lastAlertedAt: row.last_alerted_at,
-      lastRecoveredAt: row.last_recovered_at,
-    })
-  }
-
-  let lowInventoryAlertsSent = 0
-  let lowInventoryAlertsSkipped = 0
-  let lowInventoryAlertFailures = 0
+  const thisWeekLabel = formatTorontoWeekLabel(snapshot.weeks[0])
+  const upcomingWeekLabel = formatTorontoWeekLabel(snapshot.weeks[1])
+  let alertsSent = 0
+  let alertsSkipped = 0
+  let alertFailures = 0
   const errors: string[] = []
 
   for (const provider of ['PC', 'Sobeys'] as const) {
-    const summary = snapshot.providers[provider]
-    const prior = priorStateByProvider.get(provider)
-    const wasLow = prior?.isLow === true
-    const isLow = summary.isLow
-    const transition = resolveLowInventoryTransition({ wasLow, isLow })
-
-    if (transition === 'stay_ok' || transition === 'recover') {
-      await upsertLowInventoryState({
-        provider,
-        isLow: false,
-        available: summary.available,
-        threshold: summary.threshold,
-        alertedAt: prior?.lastAlertedAt ?? null,
-        recoveredAt: transition === 'recover' ? nowIso : prior?.lastRecoveredAt ?? null,
-      })
-      continue
-    }
-
-    if (transition === 'stay_low') {
-      await upsertLowInventoryState({
-        provider,
-        isLow: true,
-        available: summary.available,
-        threshold: summary.threshold,
-        alertedAt: prior?.lastAlertedAt ?? null,
-        recoveredAt: prior?.lastRecoveredAt ?? null,
-      })
-      lowInventoryAlertsSkipped += 1
-      continue
-    }
-
+    const shortfall = resolveGiftCardShortfallForProvider(snapshot, provider)
+    if (!hasGiftCardShortfall(shortfall)) continue
     if (!recipients.length) {
-      errors.push(`low-inventory ${provider}: no staff/admin recipients resolved`)
-      lowInventoryAlertFailures += 1
+      alertFailures += 1
+      errors.push(`gift-card shortfall ${provider}: no staff/admin recipients resolved`)
       continue
     }
-
-    let providerAlertFailed = false
-    let providerAlertSent = false
 
     for (const email of recipients) {
-      const emailResult = await sendTemplateEmail({
+      const result = await sendTemplateEmail({
         toEmail: email,
         templateKey: 'gift_card_inventory_low_v1',
         templateData: {
           provider,
-          availableCount: summary.available,
-          threshold: summary.threshold,
-          nearTermDemand: summary.nearTermDemand,
-          upcomingDemand: summary.upcomingDemand,
-          projectedDemand: summary.projectedDemand,
-          projectedShortfall: summary.projectedShortfall,
+          availableCount: shortfall.available,
+          thisWeekLabel,
+          thisWeekNeeded: shortfall.thisWeekNeeded,
+          thisWeekShortfall: shortfall.thisWeekShortfall,
+          upcomingWeekLabel,
+          upcomingWeekNeeded: shortfall.upcomingWeekNeeded,
+          upcomingWeekShortfall: shortfall.upcomingWeekShortfall,
           manageUrl,
         },
-        eventKey: lowInventoryAlertEventKey({ provider, threshold: summary.threshold, toEmail: email }),
+        eventKey: giftCardInventoryAlertEventKey({ provider, slot, toEmail: email }),
       })
-
-      if (emailResult.status === 'failed') {
-        providerAlertFailed = true
-        errors.push(`low-inventory ${provider} -> ${email}: ${emailResult.error ?? 'send failed'}`)
-      } else if (emailResult.status === 'sent') {
-        providerAlertSent = true
+      if (result.status === 'sent') alertsSent += 1
+      else if (result.status === 'skipped') alertsSkipped += 1
+      else {
+        alertFailures += 1
+        errors.push(`gift-card shortfall ${provider} -> ${email}: ${result.error ?? 'send failed'}`)
       }
     }
-
-    if (providerAlertFailed) {
-      lowInventoryAlertFailures += 1
-      continue
-    }
-
-    await upsertLowInventoryState({
-      provider,
-      isLow: true,
-      available: summary.available,
-      threshold: summary.threshold,
-      alertedAt: nowIso,
-      recoveredAt: prior?.lastRecoveredAt ?? null,
-    })
-
-    if (providerAlertSent) {
-      lowInventoryAlertsSent += 1
-    } else {
-      lowInventoryAlertsSkipped += 1
-    }
   }
 
-  console.info('[gift-cards][low-inventory]', {
-    lowInventoryAlertsSent,
-    lowInventoryAlertsSkipped,
-    lowInventoryAlertFailures,
-    thresholds: {
-      PC: snapshot.providers.PC.threshold,
-      Sobeys: snapshot.providers.Sobeys.threshold,
-    },
-    available: {
-      PC: snapshot.providers.PC.available,
-      Sobeys: snapshot.providers.Sobeys.available,
-    },
-  })
-
-  return {
-    lowInventoryAlertsSent,
-    lowInventoryAlertsSkipped,
-    lowInventoryAlertFailures,
-    errors,
-  }
+  console.info('[gift-cards][inventory-alerts]', { slot, alertsSent, alertsSkipped, alertFailures })
+  return { slot, alertsSent, alertsSkipped, alertFailures, errors }
 }
 
 const resolveRecipientEmail = async (profileId: string, fallbackEmail: string | null) => {
@@ -1339,9 +1229,6 @@ export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string;
       mealKitRemindersSent: 0,
       mealKitRemindersSkipped: 0,
       mealKitReminderFailures: 0,
-      lowInventoryAlertsSent: 0,
-      lowInventoryAlertsSkipped: 0,
-      lowInventoryAlertFailures: 0,
       allocationScan: emptyScanCounters(),
       reminderScan: emptyScanCounters(),
       errors: ['gift-card runner lock not acquired'],
@@ -1400,19 +1287,6 @@ export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string;
       errors.push(error instanceof Error ? error.message : 'meal-kit reminder step failed')
     }
 
-    let lowInventoryAlertsSent = 0
-    let lowInventoryAlertsSkipped = 0
-    let lowInventoryAlertFailures = 0
-    try {
-      const lowInventoryResult = await processLowInventoryAlerts(appOrigin)
-      lowInventoryAlertsSent = lowInventoryResult.lowInventoryAlertsSent
-      lowInventoryAlertsSkipped = lowInventoryResult.lowInventoryAlertsSkipped
-      lowInventoryAlertFailures = lowInventoryResult.lowInventoryAlertFailures
-      errors.push(...lowInventoryResult.errors)
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : 'low inventory alert step failed')
-    }
-
     return {
       runId,
       allocated,
@@ -1423,9 +1297,6 @@ export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string;
       mealKitRemindersSent,
       mealKitRemindersSkipped,
       mealKitReminderFailures,
-      lowInventoryAlertsSent,
-      lowInventoryAlertsSkipped,
-      lowInventoryAlertFailures,
       allocationScan,
       reminderScan,
       errors,
