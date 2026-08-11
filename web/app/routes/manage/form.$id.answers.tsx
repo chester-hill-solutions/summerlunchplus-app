@@ -44,12 +44,14 @@ type SubmissionRow = {
         firstname: string | null
         surname: string | null
         email: string | null
+        role: string | null
       }
     | Array<{
         id: string
         firstname: string | null
         surname: string | null
         email: string | null
+        role: string | null
       }>
     | null
 }
@@ -72,6 +74,13 @@ const toAnswerDisplayValue = (value: unknown) => {
   }
   if (value === null || typeof value === 'undefined') return ''
   return JSON.stringify(value as Json)
+}
+
+const respondentRoleDisplay = (role: string | null | undefined) => {
+  if (role === 'guardian') return 'Parent/Guardian'
+  if (role === 'student') return 'Student'
+  if (role === 'unassigned') return 'Unassigned'
+  return role || 'Unknown'
 }
 
 const safeReturnTo = (input: string | null) => {
@@ -138,13 +147,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const returnTo = safeReturnTo(url.searchParams.get('returnTo'))
   if (!deferTable) {
     return {
-      columns: ['profile_display', 'riding_display', 'participant_status_display', 'submitted_at'],
+      columns: ['profile_display', 'respondent_role', 'riding_display', 'participant_status_display', 'submitted_at'],
       rows: [],
       label,
       tableName: 'form-answers',
       tableVariant: 'pivot',
       columnMeta: {
         profile_display: { label: 'Profile', truncate: true },
+        respondent_role: { label: 'Respondent', filterable: true },
         riding_display: { label: 'Riding', filterable: true },
         participant_status_display: { label: 'Participant status', filterable: true },
         submitted_at: { label: 'Timestamp', truncate: false },
@@ -190,7 +200,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       for (let from = 0; ; from += ANSWER_PAGE_SIZE) {
         let submissionQuery = supabase
           .from('form_submission')
-          .select('id, profile_id, submitted_at, profile:profile_id ( id, firstname, surname, email )')
+          .select('id, profile_id, submitted_at, profile:profile_id ( id, firstname, surname, email, role )')
           .eq('form_id', formId)
 
         if (profileIdChunk) {
@@ -266,6 +276,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return {
       profile_display: profileLabel,
       profile_id: row.profile_id,
+      respondent_role: respondentRoleDisplay(profile?.role),
       ...(enrichmentByProfileId[row.profile_id]
         ? {
             riding_display: enrichmentByProfileId[row.profile_id].riding_display,
@@ -282,9 +293,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   })
 
-  const columns = ['profile_display', 'riding_display', 'participant_status_display', 'submitted_at', ...answerColumns]
+  const columns = [
+    'profile_display',
+    'respondent_role',
+    'riding_display',
+    'participant_status_display',
+    'submitted_at',
+    ...answerColumns,
+  ]
   const columnMeta: LoaderData['columnMeta'] = {
     profile_display: { label: 'Profile', truncate: true },
+    respondent_role: { label: 'Respondent', filterable: true },
     riding_display: { label: 'Riding', filterable: true },
     participant_status_display: { label: 'Participant status', filterable: true },
     submitted_at: { label: 'Timestamp', truncate: false },
@@ -330,13 +349,14 @@ export default function ManageFormAnswersPage() {
     <DeferredTableDisplay
       dataPath={`/manage/form/${form.id}/answers/table-data`}
       fallbackData={{
-        columns: ['profile_display', 'riding_display', 'participant_status_display', 'submitted_at'],
+        columns: ['profile_display', 'respondent_role', 'riding_display', 'participant_status_display', 'submitted_at'],
         rows: [],
         label: `${form.name} answers${audience === 'approved-families' ? ' - accepted families' : ''}`,
         tableName: 'form-answers',
         tableVariant: 'pivot',
         columnMeta: {
           profile_display: { label: 'Profile', truncate: true },
+          respondent_role: { label: 'Respondent', filterable: true },
           riding_display: { label: 'Riding', filterable: true },
           participant_status_display: { label: 'Participant status', filterable: true },
           submitted_at: { label: 'Timestamp', truncate: false },
