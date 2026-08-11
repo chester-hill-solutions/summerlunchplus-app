@@ -11,7 +11,6 @@ import { buildEmailMessageSnapshot } from '@/lib/exports/email-message-snapshot.
 import { buildFederalElectoralDistrictSnapshot } from '@/lib/exports/federal-electoral-district-snapshot.server'
 import { buildFormIdAnswersSnapshot } from '@/lib/exports/form-id-answers-snapshot.server'
 import { buildFormAnswerSnapshot } from '@/lib/exports/form-answer-snapshot.server'
-import { processExportJobById } from '@/lib/exports/runner.server'
 import {
   createExportJob,
   getExportJobById,
@@ -143,18 +142,9 @@ const EXPORT_CONFIG: Record<string, ExportConfig> = {
   },
 }
 
-const triggerExportRunnerWithFallback = async ({ request, jobId }: { request: Request; jobId: string }) => {
-  const triggerResult = await triggerExportRunner({ request })
+const triggerExportRunnerWithFallback = async ({ request }: { request: Request }) => {
+  const triggerResult = await triggerExportRunner({ request, enqueueOnly: true })
   if (triggerResult.ok) {
-    return { warning: undefined as string | undefined }
-  }
-
-  const fallbackResult = await processExportJobById({ jobId })
-  if (fallbackResult.processed && fallbackResult.jobId === jobId) {
-    console.warn('[exports] immediate trigger failed, local fallback processed queued job', {
-      jobId,
-      triggerResult,
-    })
     return { warning: undefined as string | undefined }
   }
 
@@ -164,9 +154,7 @@ const triggerExportRunnerWithFallback = async ({ request, jobId }: { request: Re
       : `Export queued, but immediate processing trigger failed${typeof triggerResult.status === 'number' ? ` (HTTP ${triggerResult.status})` : ''}${triggerResult.body ? `: ${triggerResult.body}` : ''}. The scheduler can still pick this up.`
 
   console.error('[exports] immediate process trigger failed', {
-    jobId,
     triggerResult,
-    fallbackResult,
   })
   return { warning }
 }
@@ -280,7 +268,7 @@ export async function action({ request }: Route.ActionArgs) {
         rowCount: snapshot.rows.length,
       })
 
-      const triggerOutcome = await triggerExportRunnerWithFallback({ request, jobId: job.id })
+      const triggerOutcome = await triggerExportRunnerWithFallback({ request })
       profile.mark('create_export_trigger_runner', {
         jobId: job.id,
         warning: triggerOutcome.warning ?? null,
@@ -323,7 +311,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     await setExportJobStatus({ supabase, jobId, status: 'queued' })
     profile.mark('retry_export_queue_job', { jobId })
-    const triggerOutcome = await triggerExportRunnerWithFallback({ request, jobId })
+    const triggerOutcome = await triggerExportRunnerWithFallback({ request })
     profile.mark('retry_export_trigger_runner', {
       jobId,
       warning: triggerOutcome.warning ?? null,

@@ -18,14 +18,16 @@ export type InternalTriggerResult = {
   reason?: 'missing-secret' | 'network-error'
 }
 
-export const triggerExportRunner = async ({ request }: { request: Request }) => {
+export const triggerExportRunner = async ({ request, enqueueOnly = false }: { request: Request; enqueueOnly?: boolean }) => {
   const secret = internalSecretForRunner()
   if (!secret) {
     return { attempted: false, ok: false, reason: 'missing-secret' } satisfies InternalTriggerResult
   }
 
   try {
-    const response = await fetch(internalEndpointFor(request, '/internal/export-jobs/run'), {
+    const endpoint = new URL(internalEndpointFor(request, '/internal/export-jobs/run'))
+    if (enqueueOnly) endpoint.search = '?enqueue_only=1'
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         [INTERNAL_RUNNER_HEADER]: secret,
