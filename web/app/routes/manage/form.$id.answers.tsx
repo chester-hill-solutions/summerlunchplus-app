@@ -8,12 +8,12 @@ import { Button } from '@/components/ui/button'
 import { requireAuth } from '@/lib/auth.server'
 import type { Json } from '@/lib/database.types'
 import { EXPORT_TYPE_FORM_ID_ANSWERS_CSV } from '@/lib/exports/types'
+import { loadFormAnswerEnrichment } from '@/lib/form-answer-enrichment.server'
 import { resolveConnectedProfileIds } from '@/lib/family.server'
 import { participantStatusFromAnswer } from '@/lib/participant-status'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
-import { loadWorkshopEnrollmentEnrichment } from './workshop-enrollment-enrichment.server'
 
 type LoaderData = {
   columns: string[]
@@ -251,7 +251,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return acc
   }, {})
 
-  const enrichmentByProfileId = await loadWorkshopEnrollmentEnrichment(
+  const enrichmentByProfileId = await loadFormAnswerEnrichment(
     Array.from(new Set(submissionRows.map(row => row.profile_id).filter(Boolean)))
   )
 

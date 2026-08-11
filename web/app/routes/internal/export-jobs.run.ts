@@ -20,6 +20,10 @@ export async function action({ request }: ActionFunctionArgs) {
     return unauthorized()
   }
 
+  if (new URL(request.url).searchParams.get('enqueue_only') === '1') {
+    return Response.json({ runId: authCheck.runId, queued: true })
+  }
+
   await failStaleRunningJobs({ olderThanMinutes: 30 })
   await cleanupExpiredExports()
 
