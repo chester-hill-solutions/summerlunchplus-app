@@ -12,6 +12,7 @@ export default [
   route("my-forms/:formId", "routes/my-forms.$formId.tsx"),
   route("semester-surveys/:semesterId/pre-program", "routes/semester-surveys.pre.tsx"),
   route("semester-surveys/:semesterId/pre", "routes/semester-surveys.pre-redirect.tsx"),
+  route("semester-surveys/:semesterId/post-program", "routes/semester-surveys.post.tsx"),
   route("login", "routes/auth/login.tsx"),
   route(
     "sign-up",

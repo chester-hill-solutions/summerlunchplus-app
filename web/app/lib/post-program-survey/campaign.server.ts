@@ -84,3 +84,32 @@ export async function loadPostProgramSurveyCampaignForCurrentProfile(
   if (campaignError) throw new Error(campaignError.message)
   return campaign
 }
+
+export async function loadIncompletePostProgramSurveyCampaignsForCurrentProfile(
+  supabase: CampaignClient,
+  now = new Date().toISOString()
+): Promise<PostProgramSurveyCampaign[]> {
+  const { data: profileId, error: profileError } = await supabase.rpc('current_profile_id')
+  if (profileError) throw new Error(profileError.message)
+  if (!profileId) return []
+
+  const { data: membership, error: membershipError } = await supabase
+    .from('post_program_survey_campaign_member')
+    .select('campaign_id')
+    .eq('profile_id', profileId)
+
+  if (membershipError) throw new Error(membershipError.message)
+  const campaignIds = (membership ?? []).map(member => member.campaign_id)
+  if (!campaignIds.length) return []
+
+  const { data: campaigns, error: campaignError } = await supabase
+    .from('post_program_survey_campaign')
+    .select('id, semester_id, form_id, survey_profile_id, available_at, completed_at')
+    .in('id', campaignIds)
+    .is('completed_at', null)
+    .lte('available_at', now)
+    .order('available_at', { ascending: true })
+
+  if (campaignError) throw new Error(campaignError.message)
+  return campaigns ?? []
+}

@@ -12,6 +12,7 @@ import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
 import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
+import { loadIncompletePostProgramSurveyCampaignsForCurrentProfile } from '@/lib/post-program-survey/campaign.server'
 import { createClient } from '@/lib/supabase/server'
 import {
   Table,
@@ -74,6 +75,7 @@ type LoaderData = {
   selectedProfileIdByClass: Record<string, string>
   selectedPhotoStatusByClass: Record<string, string>
   activePhotoUploadClassIdByWorkshop: Record<string, string>
+  postProgramSurveyLinks: Array<{ semesterId: string; campaignId: string }>
   nextClass:
       | {
         classId: string
@@ -212,7 +214,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     familyProfileIds: family.familyProfileIds.length,
   })
 
-  const [familyProfilesResponse, enrollmentsResponse] = await Promise.all([
+  const [familyProfilesResponse, enrollmentsResponse, postProgramSurveyCampaigns] = await Promise.all([
     adminClient
       .from('profile')
       .select('id, role, firstname, surname, email, user_id')
@@ -222,6 +224,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       .select('id, workshop_id, semester_id, status, requested_at, profile_id')
       .in('profile_id', family.familyProfileIds)
       .order('requested_at', { ascending: false }),
+    loadIncompletePostProgramSurveyCampaignsForCurrentProfile(supabase),
   ])
 
   const familyProfilesRaw = familyProfilesResponse.data
@@ -278,6 +281,10 @@ export async function loader({ request }: Route.LoaderArgs) {
       selectedProfileIdByClass: {},
       selectedPhotoStatusByClass: {},
       activePhotoUploadClassIdByWorkshop: {},
+      postProgramSurveyLinks: postProgramSurveyCampaigns.map(campaign => ({
+        semesterId: campaign.semester_id,
+        campaignId: campaign.id,
+      })),
       nextClass: null,
     } satisfies LoaderData
   }
@@ -572,6 +579,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     selectedProfileIdByClass,
     selectedPhotoStatusByClass: selectedPhotoStatusByClassFinal,
     activePhotoUploadClassIdByWorkshop,
+    postProgramSurveyLinks: postProgramSurveyCampaigns.map(campaign => ({
+      semesterId: campaign.semester_id,
+      campaignId: campaign.id,
+    })),
     nextClass,
   } satisfies LoaderData
 }
@@ -887,6 +898,7 @@ export default function Home() {
     selectedProfileIdByClass,
     selectedPhotoStatusByClass,
     activePhotoUploadClassIdByWorkshop,
+    postProgramSurveyLinks,
     nextClass,
   } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
@@ -1253,6 +1265,11 @@ export default function Home() {
         <Button asChild variant={tab === 'manage-family' ? 'default' : 'outline'}>
           <Link to="/home?tab=manage-family">Manage Family</Link>
         </Button>
+        {postProgramSurveyLinks.map(survey => (
+          <Button key={survey.campaignId} asChild className="bg-amber-400 text-slate-950 hover:bg-amber-300">
+            <Link to={`/semester-surveys/${survey.semesterId}/post-program`}>Complete post-program survey</Link>
+          </Button>
+        ))}
       </div>
 
       <header className="space-y-1">
