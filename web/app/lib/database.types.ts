@@ -2058,6 +2058,75 @@ export type Database = {
           },
         ]
       }
+      post_program_survey_email_event: {
+        Row: {
+          attempt_count: number
+          campaign_id: string
+          claim_expires_at: string | null
+          claimed_at: string | null
+          created_at: string
+          due_at: string
+          email_message_id: string | null
+          id: string
+          last_error: string | null
+          next_attempt_at: string | null
+          recipient_email: string
+          sent_at: string | null
+          slot_at: string
+          template_key: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          campaign_id: string
+          claim_expires_at?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          due_at: string
+          email_message_id?: string | null
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string | null
+          recipient_email: string
+          sent_at?: string | null
+          slot_at: string
+          template_key: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          campaign_id?: string
+          claim_expires_at?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          due_at?: string
+          email_message_id?: string | null
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string | null
+          recipient_email?: string
+          sent_at?: string | null
+          slot_at?: string
+          template_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_program_survey_email_event_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "post_program_survey_campaign"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_program_survey_email_event_email_message_id_fkey"
+            columns: ["email_message_id"]
+            isOneToOne: false
+            referencedRelation: "email_message"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile: {
         Row: {
           address_fingerprint: string | null
@@ -2916,6 +2985,17 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      claim_post_program_survey_email_events: {
+        Args: { p_limit?: number; p_now: string }
+        Returns: {
+          attempt_count: number
+          campaign_id: string
+          id: string
+          recipient_email: string
+          slot_at: string
+          template_key: string
+        }[]
+      }
       complete_post_program_survey_campaign: {
         Args: {
           p_answers: Json
@@ -2928,6 +3008,10 @@ export type Database = {
           completed_at: string
           submission_id: string
         }[]
+      }
+      complete_post_program_survey_email_event: {
+        Args: { p_email_message_id: string; p_event_id: string }
+        Returns: boolean
       }
       current_profile_id: { Args: never; Returns: string }
       current_user_role: {
@@ -2963,6 +3047,33 @@ export type Database = {
           p_workshop_enrollment_ids: string[]
         }
         Returns: string
+      }
+      ensure_post_program_survey_email_draft: {
+        Args: {
+          p_body: string
+          p_description: string
+          p_draft_key: string
+          p_subject: string
+          p_title: string
+          p_trigger_summary: string
+        }
+        Returns: undefined
+      }
+      ensure_post_program_survey_gift_card_email_draft: {
+        Args: never
+        Returns: undefined
+      }
+      ensure_post_program_survey_initial_email_draft: {
+        Args: never
+        Returns: undefined
+      }
+      ensure_post_program_survey_reminder_email_draft: {
+        Args: never
+        Returns: undefined
+      }
+      fail_post_program_survey_email_event: {
+        Args: { p_error: string; p_event_id: string }
+        Returns: boolean
       }
       has_completed_required_forms: {
         Args: { p_user_id: string }

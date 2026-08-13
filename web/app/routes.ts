@@ -40,6 +40,7 @@ export default [
   route("internal/export-jobs/cleanup", "routes/internal/export-jobs.cleanup.ts"),
   route("internal/gift-card-jobs/run", "routes/internal/gift-card-jobs.run.ts"),
   route("internal/gift-card-inventory-alerts/run", "routes/internal/gift-card-inventory-alerts.run.ts"),
+  route("internal/post-program-survey-jobs/run", "routes/internal/post-program-survey-jobs.run.ts"),
   route("internal/zoom-jobs/run", "routes/internal/zoom-jobs.run.ts"),
   route("internal/zoom-jobs/reset", "routes/internal/zoom-jobs.reset.ts"),
   route("manage", "routes/manage/team.tsx", [

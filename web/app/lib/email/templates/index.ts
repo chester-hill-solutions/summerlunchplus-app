@@ -26,6 +26,12 @@ import {
   renderMealKitPickupReminderEmail,
   type MealKitPickupReminderTemplateData,
 } from '@/lib/email/templates/meal-kit-pickup-reminder'
+import {
+  renderPostProgramSurveyGiftCardEmail,
+  renderPostProgramSurveyInitialEmail,
+  renderPostProgramSurveyReminderEmail,
+  type PostProgramSurveyTemplateData,
+} from '@/lib/email/templates/post-program-survey'
 
 export type EmailTemplateMap = {
   family_enrollment_requested_v1: FamilyEnrollmentRequestedTemplateData
@@ -35,6 +41,9 @@ export type EmailTemplateMap = {
   gift_card_inventory_low_v1: GiftCardInventoryLowTemplateData
   gift_card_reminder_v1: GiftCardReminderTemplateData
   meal_kit_pickup_reminder_v1: MealKitPickupReminderTemplateData
+  post_program_survey_initial_v1: PostProgramSurveyTemplateData
+  post_program_survey_reminder_v1: PostProgramSurveyTemplateData
+  post_program_survey_gift_card_v1: PostProgramSurveyTemplateData
 }
 
 export type EmailTemplateKey = keyof EmailTemplateMap
@@ -64,6 +73,15 @@ export const emailTemplates: {
   },
   meal_kit_pickup_reminder_v1: {
     render: renderMealKitPickupReminderEmail,
+  },
+  post_program_survey_initial_v1: {
+    render: renderPostProgramSurveyInitialEmail,
+  },
+  post_program_survey_reminder_v1: {
+    render: renderPostProgramSurveyReminderEmail,
+  },
+  post_program_survey_gift_card_v1: {
+    render: renderPostProgramSurveyGiftCardEmail,
   },
 }
 
