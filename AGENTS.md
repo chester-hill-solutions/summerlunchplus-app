@@ -1,4 +1,4 @@
-# Repository Guide
+# Repository Instructions
 
 ## Scope
 - The deployable services are `web/` (React Router SSR), `scheduler/` (Docker cron runner), and `zoom-api/` (FastAPI). Run each service's commands from its directory; the root `package.json` has dependencies only and no scripts.
@@ -11,7 +11,7 @@
 - Add staff-visible `/manage/*` pages to `TEAM_ALLOWED_MANAGE_PATHS` in `app/routes/manage/team.tsx`; route registration alone does not grant staff access.
 - `ONBOARDING_MODE` is `role` unless its value is exactly `permission`.
 - Tests are Playwright only. Run one spec with `npm run test -- tests/e2e/<file>.spec.ts` or `npm run test -- tests/unit/<file>.spec.ts`; `test:e2e` and `test:unit` only target their respective directories.
-- Without `PLAYWRIGHT_BASE_URL`, Playwright starts `npm run dev -- --port 5173`. Admin setup specs skip unless `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are set.
+- Without `PLAYWRIGHT_BASE_URL`, Playwright starts `npm run dev -- --port 5173`, but it does not provision Supabase or `web/.env.local`. Admin setup specs skip unless `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are set.
 - Do not edit generated `build/**` or `.react-router/types/**`.
 
 ## Supabase

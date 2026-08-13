@@ -11,6 +11,18 @@ import { TABLE_DEFINITIONS } from './table-definitions'
 
 const baseLoader = createTableLoader('semester')
 
+type SemesterSurveyKind = 'pre_program_survey' | 'post_program_survey'
+
+const legacyKindFor = (kind: SemesterSurveyKind) => (kind === 'pre_program_survey' ? 'pre_survey' : 'post_survey')
+
+const kindCandidatesFor = (kind: SemesterSurveyKind) => [kind, legacyKindFor(kind)]
+
+const normalizeSemesterSurveyKind = (kind: string): SemesterSurveyKind | null => {
+  if (kind === 'pre_program_survey' || kind === 'pre_survey') return 'pre_program_survey'
+  if (kind === 'post_program_survey' || kind === 'post_survey') return 'post_program_survey'
+  return null
+}
+
 const parseSemesterField = (
   formData: FormData,
   fieldName: string,
@@ -39,52 +51,59 @@ const parseSemesterField = (
 const setSemesterSurveyMapping = async (
   supabase: ReturnType<typeof createClient>['supabase'],
   semesterId: string,
-  kind: 'pre_program_survey' | 'post_program_survey',
+  kind: SemesterSurveyKind,
   formId: string | null
 ) => {
-  if (!formId) {
-    const { error } = await supabase
+  for (const candidateKind of kindCandidatesFor(kind)) {
+    if (!formId) {
+      const { error } = await supabase
+        .from('semester_form_requirement')
+        .update({ is_active: false })
+        .eq('semester_id', semesterId)
+        .eq('kind', candidateKind as never)
+        .eq('is_active', true)
+      if (error?.code === '22P02') continue
+      return error
+    }
+
+    const { error: deactivateError } = await supabase
       .from('semester_form_requirement')
       .update({ is_active: false })
       .eq('semester_id', semesterId)
-      .eq('kind', kind)
+      .eq('kind', candidateKind as never)
       .eq('is_active', true)
-    return error
+      .neq('form_id', formId)
+
+    if (deactivateError?.code === '22P02') continue
+    if (deactivateError) return deactivateError
+
+    const { error: upsertError } = await supabase
+      .from('semester_form_requirement')
+      .upsert(
+        {
+          semester_id: semesterId,
+          kind: candidateKind as never,
+          form_id: formId,
+          is_active: true,
+        },
+        { onConflict: 'semester_id,form_id,kind' }
+      )
+
+    if (upsertError?.code === '22P02') continue
+    if (upsertError) return upsertError
+
+    const { error: cleanupError } = await supabase
+      .from('semester_form_requirement')
+      .update({ is_active: false })
+      .eq('semester_id', semesterId)
+      .eq('kind', candidateKind as never)
+      .eq('is_active', true)
+      .neq('form_id', formId)
+
+    return cleanupError
   }
 
-  const { error: deactivateError } = await supabase
-    .from('semester_form_requirement')
-    .update({ is_active: false })
-    .eq('semester_id', semesterId)
-    .eq('kind', kind)
-    .eq('is_active', true)
-    .neq('form_id', formId)
-
-  if (deactivateError) return deactivateError
-
-  const { error: upsertError } = await supabase
-    .from('semester_form_requirement')
-    .upsert(
-      {
-        semester_id: semesterId,
-        kind,
-        form_id: formId,
-        is_active: true,
-      },
-      { onConflict: 'semester_id,form_id,kind' }
-    )
-
-  if (upsertError) return upsertError
-
-  const { error: cleanupError } = await supabase
-    .from('semester_form_requirement')
-    .update({ is_active: false })
-    .eq('semester_id', semesterId)
-    .eq('kind', kind)
-    .eq('is_active', true)
-    .neq('form_id', formId)
-
-  return cleanupError
+  return { message: `Unsupported survey kind: ${kind}` }
 }
 
 export async function loader(args: LoaderFunctionArgs) {
@@ -114,7 +133,9 @@ export async function loader(args: LoaderFunctionArgs) {
 
   for (const mapping of mappings ?? []) {
     if (!mapping.semester_id || !mapping.form_id || !mapping.kind) continue
-    mappingBySemesterKind.set(`${mapping.semester_id}:${mapping.kind}`, {
+    const kind = normalizeSemesterSurveyKind(mapping.kind)
+    if (!kind) continue
+    mappingBySemesterKind.set(`${mapping.semester_id}:${kind}`, {
       formId: mapping.form_id,
       formName: formNameById.get(mapping.form_id) ?? mapping.form_id,
     })
