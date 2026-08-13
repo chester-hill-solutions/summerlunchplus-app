@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
-  }
   public: {
     Tables: {
       class: {
@@ -1863,6 +1858,275 @@ export type Database = {
           },
         ]
       }
+      post_program_survey_campaign: {
+        Row: {
+          available_at: string
+          completed_at: string | null
+          completed_submission_id: string | null
+          created_at: string
+          family_anchor_profile_id: string
+          form_id: string
+          id: string
+          initial_sent_at: string | null
+          last_normal_reminder_on: string | null
+          manual_completion_reason: string | null
+          manually_completed_at: string | null
+          manually_completed_by_user_id: string | null
+          semester_id: string
+          survey_profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          available_at: string
+          completed_at?: string | null
+          completed_submission_id?: string | null
+          created_at?: string
+          family_anchor_profile_id: string
+          form_id: string
+          id?: string
+          initial_sent_at?: string | null
+          last_normal_reminder_on?: string | null
+          manual_completion_reason?: string | null
+          manually_completed_at?: string | null
+          manually_completed_by_user_id?: string | null
+          semester_id: string
+          survey_profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          available_at?: string
+          completed_at?: string | null
+          completed_submission_id?: string | null
+          created_at?: string
+          family_anchor_profile_id?: string
+          form_id?: string
+          id?: string
+          initial_sent_at?: string | null
+          last_normal_reminder_on?: string | null
+          manual_completion_reason?: string | null
+          manually_completed_at?: string | null
+          manually_completed_by_user_id?: string | null
+          semester_id?: string
+          survey_profile_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_program_survey_campaign_completed_submission_id_fkey"
+            columns: ["completed_submission_id"]
+            isOneToOne: true
+            referencedRelation: "form_submission"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_program_survey_campaign_family_anchor_profile_id_fkey"
+            columns: ["family_anchor_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_program_survey_campaign_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "form"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_program_survey_campaign_semester_id_fkey"
+            columns: ["semester_id"]
+            isOneToOne: false
+            referencedRelation: "semester"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_program_survey_campaign_survey_profile_id_fkey"
+            columns: ["survey_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_program_survey_campaign_audit: {
+        Row: {
+          actor_role: string | null
+          actor_user_id: string | null
+          campaign_id: string
+          created_at: string
+          details: Json
+          event_type: string
+          id: string
+          source: string
+        }
+        Insert: {
+          actor_role?: string | null
+          actor_user_id?: string | null
+          campaign_id: string
+          created_at?: string
+          details?: Json
+          event_type: string
+          id?: string
+          source: string
+        }
+        Update: {
+          actor_role?: string | null
+          actor_user_id?: string | null
+          campaign_id?: string
+          created_at?: string
+          details?: Json
+          event_type?: string
+          id?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_program_survey_campaign_audit_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "post_program_survey_campaign"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_program_survey_campaign_enrollment: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          gift_card_notice_sent_at: string | null
+          workshop_enrollment_id: string
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          gift_card_notice_sent_at?: string | null
+          workshop_enrollment_id: string
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          gift_card_notice_sent_at?: string | null
+          workshop_enrollment_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_program_survey_campaign_enroll_workshop_enrollment_id_fkey"
+            columns: ["workshop_enrollment_id"]
+            isOneToOne: true
+            referencedRelation: "workshop_enrollment"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_program_survey_campaign_enrollment_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "post_program_survey_campaign"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_program_survey_campaign_member: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          profile_id: string
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          profile_id: string
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_program_survey_campaign_member_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "post_program_survey_campaign"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_program_survey_campaign_member_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_program_survey_email_event: {
+        Row: {
+          attempt_count: number
+          campaign_id: string
+          claim_expires_at: string | null
+          claimed_at: string | null
+          created_at: string
+          due_at: string
+          email_message_id: string | null
+          id: string
+          last_error: string | null
+          next_attempt_at: string | null
+          recipient_email: string
+          sent_at: string | null
+          slot_at: string
+          template_key: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          campaign_id: string
+          claim_expires_at?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          due_at: string
+          email_message_id?: string | null
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string | null
+          recipient_email: string
+          sent_at?: string | null
+          slot_at: string
+          template_key: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          campaign_id?: string
+          claim_expires_at?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          due_at?: string
+          email_message_id?: string | null
+          id?: string
+          last_error?: string | null
+          next_attempt_at?: string | null
+          recipient_email?: string
+          sent_at?: string | null
+          slot_at?: string
+          template_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_program_survey_email_event_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "post_program_survey_campaign"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_program_survey_email_event_email_message_id_fkey"
+            columns: ["email_message_id"]
+            isOneToOne: false
+            referencedRelation: "email_message"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile: {
         Row: {
           address_fingerprint: string | null
@@ -2721,6 +2985,34 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      claim_post_program_survey_email_events: {
+        Args: { p_limit?: number; p_now: string }
+        Returns: {
+          attempt_count: number
+          campaign_id: string
+          id: string
+          recipient_email: string
+          slot_at: string
+          template_key: string
+        }[]
+      }
+      complete_post_program_survey_campaign: {
+        Args: {
+          p_answers: Json
+          p_campaign_id: string
+          p_request_metadata?: Json
+        }
+        Returns: {
+          campaign_id: string
+          completed: boolean
+          completed_at: string
+          submission_id: string
+        }[]
+      }
+      complete_post_program_survey_email_event: {
+        Args: { p_email_message_id: string; p_event_id: string }
+        Returns: boolean
+      }
       current_profile_id: { Args: never; Returns: string }
       current_user_role: {
         Args: never
@@ -2744,9 +3036,55 @@ export type Database = {
         Args: never
         Returns: undefined
       }
+      ensure_post_program_survey_campaign: {
+        Args: {
+          p_available_at: string
+          p_family_anchor_profile_id: string
+          p_form_id: string
+          p_member_profile_ids: string[]
+          p_semester_id: string
+          p_survey_profile_id: string
+          p_workshop_enrollment_ids: string[]
+        }
+        Returns: string
+      }
+      ensure_post_program_survey_email_draft: {
+        Args: {
+          p_body: string
+          p_description: string
+          p_draft_key: string
+          p_subject: string
+          p_title: string
+          p_trigger_summary: string
+        }
+        Returns: undefined
+      }
+      ensure_post_program_survey_gift_card_email_draft: {
+        Args: never
+        Returns: undefined
+      }
+      ensure_post_program_survey_initial_email_draft: {
+        Args: never
+        Returns: undefined
+      }
+      ensure_post_program_survey_reminder_email_draft: {
+        Args: never
+        Returns: undefined
+      }
+      fail_post_program_survey_email_event: {
+        Args: { p_error: string; p_event_id: string }
+        Returns: boolean
+      }
       has_completed_required_forms: {
         Args: { p_user_id: string }
         Returns: boolean
+      }
+      manually_complete_post_program_survey_campaign: {
+        Args: { p_campaign_id: string; p_reason: string }
+        Returns: {
+          campaign_id: string
+          completed_at: string
+        }[]
       }
       normalize_address_fingerprint: {
         Args: {
@@ -2900,6 +3238,7 @@ export type Database = {
         | "class_attendance_photo_upload_attempt.read"
         | "class_attendance_photo_upload_attempt.update"
         | "class_attendance_photo_upload_attempt.delete"
+        | "post_program_survey.manage"
       app_role:
         | "unassigned"
         | "admin"
@@ -2930,13 +3269,13 @@ export type Database = {
       form_assignment_status: "pending" | "submitted"
       form_question_type:
         | "text"
+        | "number"
         | "single_choice"
         | "multi_choice"
         | "date"
         | "address"
         | "agreement"
         | "checkbox"
-        | "number"
         | "no-input-text"
       gift_card_allocation_status: "allocated" | "sent" | "opened"
       gift_card_asset_status:
@@ -3168,6 +3507,7 @@ export const Constants = {
         "class_attendance_photo_upload_attempt.read",
         "class_attendance_photo_upload_attempt.update",
         "class_attendance_photo_upload_attempt.delete",
+        "post_program_survey.manage",
       ],
       app_role: [
         "unassigned",
@@ -3202,13 +3542,13 @@ export const Constants = {
       form_assignment_status: ["pending", "submitted"],
       form_question_type: [
         "text",
+        "number",
         "single_choice",
         "multi_choice",
         "date",
         "address",
         "agreement",
         "checkbox",
-        "number",
         "no-input-text",
       ],
       gift_card_allocation_status: ["allocated", "sent", "opened"],

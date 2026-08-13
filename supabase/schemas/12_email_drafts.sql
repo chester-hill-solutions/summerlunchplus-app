@@ -761,6 +761,175 @@ begin
 end;
 $$;
 
+create or replace function public.ensure_post_program_survey_email_draft(
+  p_draft_key text,
+  p_title text,
+  p_description text,
+  p_trigger_summary text,
+  p_subject text,
+  p_body text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_draft_id uuid;
+  v_version_id uuid;
+begin
+  insert into public.email_draft (
+    draft_key,
+    title,
+    description,
+    trigger_summary,
+    trigger_event_key,
+    trigger_owner,
+    channel,
+    status,
+    is_system,
+    variables_schema,
+    current_subject_markdown,
+    current_body_markdown
+  )
+  values (
+    p_draft_key,
+    p_title,
+    p_description,
+    p_trigger_summary,
+    'post_program_survey.email',
+    'web/app/lib/post-program-survey/runner.server.ts',
+    'transactional',
+    'draft',
+    true,
+    '{"required": ["recipientName", "surveyUrl"]}'::jsonb,
+    p_subject,
+    p_body
+  )
+  on conflict (draft_key)
+  do update
+    set
+      title = excluded.title,
+      description = excluded.description,
+      trigger_summary = excluded.trigger_summary,
+      trigger_event_key = excluded.trigger_event_key,
+      trigger_owner = excluded.trigger_owner,
+      channel = excluded.channel,
+      is_system = true,
+      variables_schema = case
+        when public.email_draft.variables_schema = '{}'::jsonb then excluded.variables_schema
+        else public.email_draft.variables_schema
+      end,
+      current_subject_markdown = case
+        when char_length(btrim(public.email_draft.current_subject_markdown)) = 0 then excluded.current_subject_markdown
+        else public.email_draft.current_subject_markdown
+      end,
+      current_body_markdown = case
+        when char_length(btrim(public.email_draft.current_body_markdown)) = 0 then excluded.current_body_markdown
+        else public.email_draft.current_body_markdown
+      end
+  returning id into v_draft_id;
+
+  insert into public.email_draft_version (
+    email_draft_id,
+    version_number,
+    subject_markdown,
+    body_markdown,
+    subject_rendered,
+    html_rendered,
+    text_rendered,
+    variables_schema,
+    change_note,
+    published_at
+  )
+  values (
+    v_draft_id,
+    1,
+    p_subject,
+    p_body,
+    p_subject,
+    replace(replace(p_body, E'\n', '<br />'), '{{surveyUrl}}', '<a href="{{surveyUrl}}">Complete the post-program survey</a>'),
+    p_body,
+    '{"required": ["recipientName", "surveyUrl"]}'::jsonb,
+    'Seeded post-program survey email draft.',
+    now()
+  )
+  on conflict (email_draft_id, version_number) do nothing;
+
+  if exists (
+    select 1
+    from public.email_draft
+    where id = v_draft_id
+      and published_version_id is null
+  ) then
+    select version.id
+      into v_version_id
+    from public.email_draft_version as version
+    where version.email_draft_id = v_draft_id
+    order by version.version_number desc
+    limit 1;
+
+    update public.email_draft
+    set
+      published_version_id = v_version_id,
+      status = 'published'
+    where id = v_draft_id;
+  end if;
+end;
+$$;
+
+create or replace function public.ensure_post_program_survey_initial_email_draft()
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  select public.ensure_post_program_survey_email_draft(
+    'post_program_survey_initial_v1',
+    'Post-program survey initial request',
+    'Initial request for a family to complete its post-program survey.',
+    'Sent August 14, 2026 at 9 AM Toronto time to incomplete campaign guardians.',
+    'Please complete your summerlunch+ post-program evaluation',
+    E'Hi {{recipientName}},\n\nThank you for participating in the summerlunch+ program!\n\nJust as you completed the pre-program questions when you registered, we now have our post-program evaluation for you to complete.\n\nPlease complete the survey: {{surveyUrl}}\n\nThe summerlunch+ Team'
+  );
+$$;
+
+create or replace function public.ensure_post_program_survey_reminder_email_draft()
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  select public.ensure_post_program_survey_email_draft(
+    'post_program_survey_reminder_v1',
+    'Post-program survey reminder',
+    'Regular reminder for a family to complete its post-program survey.',
+    'Sent August 18 and August 20, 2026 at 9 PM Toronto time to incomplete campaign guardians.',
+    'Reminder: complete your summerlunch+ post-program evaluation',
+    E'Hi {{recipientName}},\n\nThis is a quick reminder to complete your summerlunch+ post-program evaluation if you have not already done so.\n\nIt only takes a few minutes, and your feedback is very important to us.\n\nComplete the survey: {{surveyUrl}}\n\nThe summerlunch+ Team'
+  );
+$$;
+
+create or replace function public.ensure_post_program_survey_gift_card_email_draft()
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  select public.ensure_post_program_survey_email_draft(
+    'post_program_survey_gift_card_v1',
+    'Post-program survey gift-card reminder',
+    'Gift-card reminder for a family that has not completed its post-program survey.',
+    'Sent August 25, August 27, September 1, and September 3, 2026 at 9 PM Toronto time to incomplete campaign guardians.',
+    'Complete your survey to receive your final grocery gift card',
+    E'Hi {{recipientName}},\n\nIt looks like you have still not completed your summerlunch+ post-program evaluation.\n\nPlease complete the survey as soon as possible. To receive your final Week 8 grocery gift card, you must complete the post-program evaluation.\n\nComplete the survey: {{surveyUrl}}\n\nThe summerlunch+ Team'
+  );
+$$;
+
+select public.ensure_post_program_survey_initial_email_draft();
+select public.ensure_post_program_survey_reminder_email_draft();
+select public.ensure_post_program_survey_gift_card_email_draft();
+
 grant usage on type public.email_draft_channel to authenticated, supabase_auth_admin;
 grant usage on type public.email_draft_status to authenticated, supabase_auth_admin;
 

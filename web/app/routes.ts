@@ -12,6 +12,7 @@ export default [
   route("my-forms/:formId", "routes/my-forms.$formId.tsx"),
   route("semester-surveys/:semesterId/pre-program", "routes/semester-surveys.pre.tsx"),
   route("semester-surveys/:semesterId/pre", "routes/semester-surveys.pre-redirect.tsx"),
+  route("semester-surveys/:semesterId/post-program", "routes/semester-surveys.post.tsx"),
   route("login", "routes/auth/login.tsx"),
   route(
     "sign-up",
@@ -39,6 +40,7 @@ export default [
   route("internal/export-jobs/cleanup", "routes/internal/export-jobs.cleanup.ts"),
   route("internal/gift-card-jobs/run", "routes/internal/gift-card-jobs.run.ts"),
   route("internal/gift-card-inventory-alerts/run", "routes/internal/gift-card-inventory-alerts.run.ts"),
+  route("internal/post-program-survey-jobs/run", "routes/internal/post-program-survey-jobs.run.ts"),
   route("internal/zoom-jobs/run", "routes/internal/zoom-jobs.run.ts"),
   route("internal/zoom-jobs/reset", "routes/internal/zoom-jobs.reset.ts"),
   route("manage", "routes/manage/team.tsx", [
@@ -101,6 +103,7 @@ export default [
     route("email-message", "routes/manage/email-message.tsx"),
     route("email-drafts", "routes/manage/email-drafts.tsx"),
     route("email-drafts/:draftId", "routes/manage/email-drafts.$draftId.tsx"),
+    route("post-program-surveys", "routes/manage/post-program-surveys.tsx"),
     route("form-answer", "routes/manage/form-answer.tsx"),
     route("gift-cards", "routes/manage/gift-cards.tsx"),
     route("gift-cards/stats-data", "routes/manage/gift-cards.stats-data.ts"),

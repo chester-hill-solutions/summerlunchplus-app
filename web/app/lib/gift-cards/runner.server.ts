@@ -16,6 +16,7 @@ import {
 } from '@/lib/gift-cards/release.server'
 import { scanByIdKeyset } from '@/lib/supabase/keyset-pagination.server'
 import { adminClient } from '@/lib/supabase/adminClient'
+import { getPostProgramSurveyHold } from '@/lib/post-program-survey/gift-card-guard.server'
 
 import { hashGlrToken, newGlrToken } from './token.server'
 
@@ -702,6 +703,12 @@ const allocateGiftCards = async (): Promise<AllocationSummary> => {
         continue
       }
 
+      const postProgramHold = await getPostProgramSurveyHold(row.class_id, row.profile_id)
+      if (postProgramHold.held) {
+        rowsSkipped += 1
+        continue
+      }
+
       const requestedProvider = requestedProviderByProfileId.get(row.profile_id) ?? null
       if (requestedProvider === 'meal_kit') {
         rowsSkipped += 1
@@ -915,6 +922,12 @@ const sendDueReminders = async (appOrigin: string): Promise<ReminderSummary> => 
 
     try {
     if (row.blocked) {
+      remindersSkipped += 1
+      continue
+    }
+
+    const postProgramHold = await getPostProgramSurveyHold(row.class_id, row.profile_id)
+    if (postProgramHold.held) {
       remindersSkipped += 1
       continue
     }

@@ -15,6 +15,7 @@ import {
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
 import { createClient } from '@/lib/supabase/server'
+import { getPostProgramSurveyHold } from '@/lib/post-program-survey/gift-card-guard.server'
 import { runZoomRegistrantForStudent } from '@/lib/zoom-jobs/runner.server'
 import { Download, Loader2 } from 'lucide-react'
 import { Form, Link, useLoaderData, useLocation, useNavigation } from 'react-router'
@@ -1482,6 +1483,12 @@ export async function action({ request }: Route.ActionArgs) {
         already_allocated: true,
         message: 'Gift card already allocated for this class/profile (possibly allocated in another session).',
       }
+    }
+
+    const postProgramHold = await getPostProgramSurveyHold(classId, profileId)
+    if (postProgramHold.held) {
+      outcome = 'allocate_post_program_survey_held'
+      return allocationErrorResponse(409, 'Post-program survey is required before this final gift card can be allocated.')
     }
 
     const pickAvailableAsset = async (provider: 'PC' | 'Sobeys' | null) => {
