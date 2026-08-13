@@ -31,7 +31,7 @@ type ClaimedEvent = {
 
 const publicOrigin = (appOrigin: string) => (process.env.PUBLIC_APP_ORIGIN?.trim().replace(/\/$/, '') || appOrigin)
 
-const ensureCampaigns = async () => {
+const ensureCampaigns = async (availableAt: string) => {
   let afterId = ''
   let campaignsEnsured = 0
 
@@ -55,7 +55,7 @@ const ensureCampaigns = async () => {
       const campaignId = await ensurePostProgramSurveyCampaign({
         semesterId: row.semester_id,
         enrollmentProfileId: row.profile_id,
-        availableAt: POST_PROGRAM_SURVEY_SCHEDULE[0].at,
+        availableAt,
       })
       if (campaignId) campaignsEnsured += 1
     }
@@ -215,7 +215,7 @@ export const runPostProgramSurveyJobs = async ({ appOrigin, runId }: { appOrigin
   let sent = { eventsClaimed: 0, emailsSent: 0, emailsSkipped: 0, emailFailures: 0, errors: [] as string[] }
 
   try {
-    campaignsEnsured = await ensureCampaigns()
+    campaignsEnsured = await ensureCampaigns(new Date().toISOString())
   } catch (error) {
     errors.push(error instanceof Error ? error.message : 'Campaign creation failed')
   }
