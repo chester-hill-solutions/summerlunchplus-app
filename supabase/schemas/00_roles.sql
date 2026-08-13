@@ -32,7 +32,8 @@ create type app_permissions as enum (
   'class_zoom_participant.create', 'class_zoom_participant.read', 'class_zoom_participant.update', 'class_zoom_participant.delete',
   'zlr_click_event.create', 'zlr_click_event.read', 'zlr_click_event.update', 'zlr_click_event.delete',
   'class_attendance_photo.create', 'class_attendance_photo.read', 'class_attendance_photo.update', 'class_attendance_photo.delete',
-  'class_attendance_photo_upload_attempt.create', 'class_attendance_photo_upload_attempt.read', 'class_attendance_photo_upload_attempt.update', 'class_attendance_photo_upload_attempt.delete'
+  'class_attendance_photo_upload_attempt.create', 'class_attendance_photo_upload_attempt.read', 'class_attendance_photo_upload_attempt.update', 'class_attendance_photo_upload_attempt.delete',
+  'post_program_survey.manage'
 );
 
 create table if not exists public.user_roles (
