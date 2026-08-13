@@ -12,6 +12,7 @@ import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
 import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
+import { getPostProgramSurveyHold } from '@/lib/post-program-survey/gift-card-guard.server'
 import { loadIncompletePostProgramSurveyCampaignsForCurrentProfile } from '@/lib/post-program-survey/campaign.server'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -496,7 +497,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         .in('profile_id', family.familyProfileIds)
     : { data: [] }
 
-  const giftCardLinkByClass = ((allocationRowsRaw ?? []) as Array<{
+  const allocationRows = (allocationRowsRaw ?? []) as Array<{
     id: string
     class_id: string
     profile_id: string
@@ -508,7 +509,16 @@ export async function loader({ request }: Route.LoaderArgs) {
       release_ready_at?: string | null
       qualification_since_at?: string | null
     } | null
-  }>).reduce<
+  }>
+  const heldAllocationIds = new Set(
+    (
+      await Promise.all(
+        allocationRows.map(async row => ((await getPostProgramSurveyHold(row.class_id, row.profile_id)).held ? row.id : null))
+      )
+    ).filter((id): id is string => Boolean(id))
+  )
+
+  const giftCardLinkByClass = allocationRows.reduce<
     Record<
       string,
       {
@@ -517,6 +527,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
     >
   >((acc, row) => {
+    if (heldAllocationIds.has(row.id)) return acc
     if (row.blocked) return acc
     const released = resolveGiftCardRelease({
       metadata: row.metadata,

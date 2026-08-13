@@ -1,21 +1,13 @@
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
 import { ensurePostProgramSurveyCampaign } from '@/lib/post-program-survey/campaign.server'
+import { assertPostProgramSurveySchedule, POST_PROGRAM_SURVEY_SCHEDULE } from '@/lib/post-program-survey/schedule'
 import { adminClient } from '@/lib/supabase/adminClient'
 
 const CAMPAIGN_PAGE_SIZE = 200
 const EVENT_CLAIM_LIMIT = 100
 
-const scheduledSlots = [
-  { at: '2026-08-14T13:00:00.000Z', templateKey: 'post_program_survey_initial_v1' },
-  { at: '2026-08-19T01:00:00.000Z', templateKey: 'post_program_survey_reminder_v1' },
-  { at: '2026-08-21T01:00:00.000Z', templateKey: 'post_program_survey_reminder_v1' },
-  { at: '2026-08-26T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-  { at: '2026-08-28T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-  { at: '2026-09-02T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-  { at: '2026-09-04T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-] as const
-
-type TemplateKey = (typeof scheduledSlots)[number]['templateKey']
+type TemplateKey = (typeof POST_PROGRAM_SURVEY_SCHEDULE)[number]['templateKey']
+assertPostProgramSurveySchedule()
 
 type RunSummary = {
   runId: string
@@ -63,7 +55,7 @@ const ensureCampaigns = async () => {
       const campaignId = await ensurePostProgramSurveyCampaign({
         semesterId: row.semester_id,
         enrollmentProfileId: row.profile_id,
-        availableAt: scheduledSlots[0].at,
+        availableAt: POST_PROGRAM_SURVEY_SCHEDULE[0].at,
       })
       if (campaignId) campaignsEnsured += 1
     }
@@ -115,7 +107,7 @@ const createScheduledEvents = async (now: string, appOrigin: string) => {
 
   const eventRows = campaigns.flatMap(campaign =>
     Array.from(emailsByCampaign.get(campaign.id) ?? []).flatMap(recipientEmail =>
-      scheduledSlots.map(slot => ({
+      POST_PROGRAM_SURVEY_SCHEDULE.map(slot => ({
         campaign_id: campaign.id,
         template_key: slot.templateKey,
         slot_at: slot.at,

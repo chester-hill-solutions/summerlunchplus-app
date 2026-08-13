@@ -5,6 +5,7 @@ import { adminClient } from '@/lib/supabase/adminClient'
 
 import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
 import { hashGlrToken } from '@/lib/gift-cards/token.server'
+import { getPostProgramSurveyHold } from '@/lib/post-program-survey/gift-card-guard.server'
 
 const homeMessageRedirect = ({ request, message }: { request: Request; message: string }) => {
   const url = new URL('/home', request.url)
@@ -59,7 +60,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     classEndsAt: (Array.isArray(classRelation) ? classRelation[0] : classRelation)?.ends_at ?? null,
   }).isReleased
 
-  if (!allocation || allocation.blocked || (allocation.status === 'allocated' && !released)) {
+  const postProgramHold = allocation ? await getPostProgramSurveyHold(allocation.class_id, allocation.profile_id) : null
+  if (!allocation || postProgramHold?.held || allocation.blocked || (allocation.status === 'allocated' && !released)) {
     return invalidLink({ request })
   }
 
