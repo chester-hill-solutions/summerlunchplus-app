@@ -103,6 +103,7 @@ export default [
     route("email-message", "routes/manage/email-message.tsx"),
     route("email-drafts", "routes/manage/email-drafts.tsx"),
     route("email-drafts/:draftId", "routes/manage/email-drafts.$draftId.tsx"),
+    route("post-program-surveys", "routes/manage/post-program-surveys.tsx"),
     route("form-answer", "routes/manage/form-answer.tsx"),
     route("gift-cards", "routes/manage/gift-cards.tsx"),
     route("gift-cards/stats-data", "routes/manage/gift-cards.stats-data.ts"),
