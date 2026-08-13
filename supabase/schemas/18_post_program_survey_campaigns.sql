@@ -331,6 +331,7 @@ declare
   v_campaign public.post_program_survey_campaign%rowtype;
   v_actor_profile_id uuid;
   v_submission_id uuid;
+  v_completed_at timestamptz;
   v_question record;
   v_value jsonb;
   v_option text;
@@ -470,7 +471,7 @@ begin
   set completed_submission_id = v_submission_id,
       completed_at = now()
   where id = v_campaign.id
-  returning completed_at into completed_at;
+  returning public.post_program_survey_campaign.completed_at into v_completed_at;
 
   insert into public.post_program_survey_campaign_audit (
     campaign_id,
@@ -487,7 +488,7 @@ begin
     jsonb_build_object('submission_id', v_submission_id, 'respondent_profile_id', v_actor_profile_id)
   );
 
-  return query select v_campaign.id, true, v_submission_id, completed_at;
+  return query select v_campaign.id, true, v_submission_id, v_completed_at;
 end;
 $$;
 
@@ -505,6 +506,7 @@ set search_path = public
 as $$
 declare
   v_campaign public.post_program_survey_campaign%rowtype;
+  v_completed_at timestamptz;
 begin
   if not public.authorize('post_program_survey.manage') then
     raise exception 'Campaign management access denied';
@@ -535,7 +537,7 @@ begin
       manually_completed_by_user_id = auth.uid(),
       manual_completion_reason = btrim(p_reason)
   where id = v_campaign.id
-  returning completed_at into completed_at;
+  returning public.post_program_survey_campaign.completed_at into v_completed_at;
 
   insert into public.post_program_survey_campaign_audit (
     campaign_id,
@@ -554,7 +556,7 @@ begin
     jsonb_build_object('reason', btrim(p_reason))
   );
 
-  return query select v_campaign.id, completed_at;
+  return query select v_campaign.id, v_completed_at;
 end;
 $$;
 
