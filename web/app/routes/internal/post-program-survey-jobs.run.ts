@@ -15,5 +15,5 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const appOrigin = new URL(request.url).origin
   const result = await runPostProgramSurveyJobs({ appOrigin, runId: authCheck.runId })
-  return Response.json(result)
+  return Response.json(result, { status: result.errors.length ? 500 : 200 })
 }

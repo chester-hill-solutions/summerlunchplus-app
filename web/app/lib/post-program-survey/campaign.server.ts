@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/lib/database.types'
+import { chunk } from '@/lib/post-program-survey/batching.server'
 import { resolveConnectedProfileIds } from '@/lib/family.server'
 import { resolveSemesterSurveyForm } from '@/lib/semester-survey.server'
 import { adminClient } from '@/lib/supabase/adminClient'
@@ -74,15 +75,19 @@ export async function loadPostProgramSurveyCampaignForCurrentProfile(
   const campaignIds = (membership ?? []).map(member => member.campaign_id)
   if (!campaignIds.length) return null
 
-  const { data: campaign, error: campaignError } = await supabase
-    .from('post_program_survey_campaign')
-    .select('id, semester_id, form_id, survey_profile_id, available_at, completed_at')
-    .eq('semester_id', semesterId)
-    .in('id', campaignIds)
-    .maybeSingle()
+  for (const ids of chunk(campaignIds)) {
+    const { data: campaigns, error: campaignError } = await supabase
+      .from('post_program_survey_campaign')
+      .select('id, semester_id, form_id, survey_profile_id, available_at, completed_at')
+      .eq('semester_id', semesterId)
+      .in('id', ids)
+      .limit(1)
 
-  if (campaignError) throw new Error(campaignError.message)
-  return campaign
+    if (campaignError) throw new Error(campaignError.message)
+    if (campaigns?.[0]) return campaigns[0]
+  }
+
+  return null
 }
 
 export async function loadIncompletePostProgramSurveyCampaignsForCurrentProfile(
@@ -102,14 +107,19 @@ export async function loadIncompletePostProgramSurveyCampaignsForCurrentProfile(
   const campaignIds = (membership ?? []).map(member => member.campaign_id)
   if (!campaignIds.length) return []
 
-  const { data: campaigns, error: campaignError } = await supabase
-    .from('post_program_survey_campaign')
-    .select('id, semester_id, form_id, survey_profile_id, available_at, completed_at')
-    .in('id', campaignIds)
-    .is('completed_at', null)
-    .lte('available_at', now)
-    .order('available_at', { ascending: true })
+  const campaigns: PostProgramSurveyCampaign[] = []
+  for (const ids of chunk(campaignIds)) {
+    const { data: batch, error: campaignError } = await supabase
+      .from('post_program_survey_campaign')
+      .select('id, semester_id, form_id, survey_profile_id, available_at, completed_at')
+      .in('id', ids)
+      .is('completed_at', null)
+      .lte('available_at', now)
+      .order('available_at', { ascending: true })
 
-  if (campaignError) throw new Error(campaignError.message)
-  return campaigns ?? []
+    if (campaignError) throw new Error(campaignError.message)
+    campaigns.push(...(batch ?? []))
+  }
+
+  return campaigns.sort((left, right) => left.available_at.localeCompare(right.available_at))
 }

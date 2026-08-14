@@ -7,6 +7,31 @@ export type Json =
   | Json[]
 
 export type Database = {
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       class: {
@@ -2127,6 +2152,45 @@ export type Database = {
           },
         ]
       }
+      post_program_survey_runner_lease: {
+        Row: {
+          acquired_at: string
+          expires_at: string
+          job_key: string
+          owner_run_id: string
+        }
+        Insert: {
+          acquired_at: string
+          expires_at: string
+          job_key: string
+          owner_run_id: string
+        }
+        Update: {
+          acquired_at?: string
+          expires_at?: string
+          job_key?: string
+          owner_run_id?: string
+        }
+        Relationships: []
+      }
+      post_program_survey_runner_state: {
+        Row: {
+          job_key: string
+          last_enrollment_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          job_key: string
+          last_enrollment_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          job_key?: string
+          last_enrollment_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profile: {
         Row: {
           address_fingerprint: string | null
@@ -3099,6 +3163,10 @@ export type Database = {
         Args: { target_profile_id: string }
         Returns: boolean
       }
+      release_post_program_survey_runner_lease: {
+        Args: { p_job_key: string; p_owner_run_id: string }
+        Returns: boolean
+      }
       request_family_workshop_enrollment: {
         Args: {
           p_family_profile_ids: string[]
@@ -3121,6 +3189,15 @@ export type Database = {
       sync_auto_assigned_forms_for_user: {
         Args: { p_user_id: string }
         Returns: undefined
+      }
+      try_acquire_post_program_survey_runner_lease: {
+        Args: {
+          p_job_key: string
+          p_lease_seconds?: number
+          p_now: string
+          p_owner_run_id: string
+        }
+        Returns: boolean
       }
       update_class_camera_or_photo_followup_email_copy: {
         Args: never
@@ -3427,6 +3504,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       app_permissions: [
