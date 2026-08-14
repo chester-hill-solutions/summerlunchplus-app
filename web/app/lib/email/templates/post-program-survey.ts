@@ -22,11 +22,12 @@ const renderPostProgramSurveyEmail = ({
 }) => {
   const safeName = escapeHtml(recipientName.trim() || 'there')
   const safeUrl = escapeHtml(surveyUrl)
+  const accessFallback = 'If the link does not work, please log in to hub.summerlunchplus.com to access the survey instead.'
   const htmlParagraphs = paragraphs.map(paragraph => `<p style="margin:0 0 16px 0;">${escapeHtml(paragraph)}</p>`).join('')
 
   return {
     subject,
-    text: `Hi ${recipientName.trim() || 'there'},\n\n${paragraphs.join('\n\n')}\n\nComplete the survey: ${surveyUrl}\n\nThe summerlunch+ Team`,
+    text: `Hi ${recipientName.trim() || 'there'},\n\n${paragraphs.join('\n\n')}\n\nComplete the survey: ${surveyUrl}\n\n${accessFallback}\n\nThe summerlunch+ Team`,
     html: `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background-color:#f6f8fb;">
@@ -43,8 +44,9 @@ const renderPostProgramSurveyEmail = ({
               <td style="padding:8px 24px 24px 24px;font-family:Arial,sans-serif;color:#1f2937;font-size:16px;line-height:24px;">
                 <p style="margin:0 0 16px 0;">Hi ${safeName},</p>
                 ${htmlParagraphs}
-                <p style="margin:0 0 16px 0;"><a href="${safeUrl}">Complete the post-program survey</a></p>
-                <p style="margin:0;">The summerlunch+ Team</p>
+                 <p style="margin:0 0 16px 0;"><a href="${safeUrl}">Complete the post-program survey</a></p>
+                 <p style="margin:0 0 16px 0;">${accessFallback}</p>
+                 <p style="margin:0;">The summerlunch+ Team</p>
               </td>
             </tr>
           </table>
