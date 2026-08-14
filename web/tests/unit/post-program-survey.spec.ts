@@ -23,6 +23,7 @@ test('post-program templates retain their required purpose', async () => {
   expect(renderPostProgramSurveyInitialEmail(data).text).toContain('pre-program questions')
   expect(renderPostProgramSurveyReminderEmail(data).text).toContain('quick reminder')
   expect(renderPostProgramSurveyGiftCardEmail(data).text).toContain('final Week 8 grocery gift card')
+  expect(renderPostProgramSurveyInitialEmail(data).text).toContain('If the link does not work, please log in to hub.summerlunchplus.com to access the survey instead.')
 })
 
 test('only the latest workshop class is a final-card candidate', async () => {

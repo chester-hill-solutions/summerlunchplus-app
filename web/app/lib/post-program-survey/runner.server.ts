@@ -35,7 +35,12 @@ type ClaimedEvent = {
   attempt_count: number
 }
 
-const publicOrigin = (appOrigin: string) => (process.env.PUBLIC_APP_ORIGIN?.trim().replace(/\/$/, '') || appOrigin)
+const publicOrigin = (appOrigin: string) => {
+  const configuredOrigin = process.env.SITE_ORIGIN?.trim() || process.env.PUBLIC_APP_ORIGIN?.trim()
+  if (configuredOrigin) return configuredOrigin.replace(/\/$/, '')
+  if (appOrigin.includes('.railway.internal')) return 'https://hub.summerlunchplus.com'
+  return appOrigin.replace(/\/$/, '')
+}
 
 const ensureCampaigns = async (availableAt: string, afterId: string | null) => {
   let campaignsEnsured = 0
