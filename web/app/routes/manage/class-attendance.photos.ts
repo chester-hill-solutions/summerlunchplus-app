@@ -1,6 +1,7 @@
 import { requireAuth } from '@/lib/auth.server'
 import { isRoleAtLeast } from '@/lib/roles'
 import { adminClient } from '@/lib/supabase/adminClient'
+import { getOrCreateHeicPreview, isHeicPhoto } from '@/lib/class-attendance-photo-preview.server'
 
 import type { Route } from './+types/class-attendance.photos'
 
@@ -14,6 +15,14 @@ type PhotoRow = {
   mime_type: string | null
   byte_size: number | null
   uploaded_at: string
+}
+
+const createSignedUrl = async (storageBucket: string, storagePath: string) => {
+  const { data, error } = await adminClient.storage.from(storageBucket).createSignedUrl(storagePath, SIGNED_URL_EXPIRY_SECONDS)
+  return {
+    signedUrl: error ? null : data?.signedUrl ?? null,
+    error: error?.message ?? null,
+  }
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -44,10 +53,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   const rows = (data ?? []) as PhotoRow[]
   const photos = await Promise.all(
     rows.map(async row => {
-      const { data: signed, error: signedError } = await adminClient
-        .storage
-        .from(row.storage_bucket)
-        .createSignedUrl(row.storage_path, SIGNED_URL_EXPIRY_SECONDS)
+      const original = await createSignedUrl(row.storage_bucket, row.storage_path)
+      const heic = isHeicPhoto(row.file_name, row.mime_type)
+      const preview = heic
+        ? await getOrCreateHeicPreview({
+            photoId: row.id,
+            storageBucket: row.storage_bucket,
+            storagePath: row.storage_path,
+          })
+        : original
 
       return {
         id: row.id,
@@ -55,8 +69,11 @@ export async function loader({ request }: Route.LoaderArgs) {
         mime_type: row.mime_type,
         byte_size: row.byte_size,
         uploaded_at: row.uploaded_at,
-        signed_url: signedError ? null : signed?.signedUrl ?? null,
-        signed_url_error: signedError?.message ?? null,
+        signed_url: preview.signedUrl,
+        signed_url_error: preview.error ?? (original.signedUrl ? null : original.error),
+        original_signed_url: original.signedUrl,
+        preview_mime_type: heic && preview.signedUrl ? 'image/jpeg' : row.mime_type,
+        preview_is_converted: heic && Boolean(preview.signedUrl),
       }
     })
   )
