@@ -1,5 +1,9 @@
 # Repository Instructions
 
+## Communication
+- Always use ASD-STE100 Simplified Technical English.
+- Use short, direct sections and actionable steps. Assume the reader has ADHD: make priorities, decisions, and next actions easy to scan.
+
 ## Services
 - The deployable services are `web/` (React Router SSR), `scheduler/` (Docker cron runner), and `zoom-api/` (FastAPI). Run service commands from that service directory; the root `package.json` has dependencies only and no scripts.
 - `zoom-api/CLAUDE.md` is additional service-specific guidance and must be read before changing that service.
