@@ -1,35 +1,33 @@
 # Repository Instructions
 
-## Scope
-- The deployable services are `web/` (React Router SSR), `scheduler/` (Docker cron runner), and `zoom-api/` (FastAPI). Run each service's commands from its directory; the root `package.json` has dependencies only and no scripts.
-- For local web development, copy `web/.env.template` to `web/.env.local`, run `supabase start --debug` from the root, and use `supabase status -o json` for the local keys.
+## Services
+- The deployable services are `web/` (React Router SSR), `scheduler/` (Docker cron runner), and `zoom-api/` (FastAPI). Run service commands from that service directory; the root `package.json` has dependencies only and no scripts.
+- `zoom-api/CLAUDE.md` is additional service-specific guidance and must be read before changing that service.
 
 ## Web (`web/`)
-- Use `npm ci`, `npm run dev`, `npm run typecheck`, `npm run build && npm run start`, and `npm run test`; there is no lint script.
-- Routes are manual: register every new `app/routes` file in `app/routes.ts`, then run `npm run typecheck` to regenerate React Router types.
-- `createClient(request)` returns cookie response headers. Include its `headers` in redirects and responses so Supabase session changes persist.
-- Add staff-visible `/manage/*` pages to `TEAM_ALLOWED_MANAGE_PATHS` in `app/routes/manage/team.tsx`; route registration alone does not grant staff access.
-- `ONBOARDING_MODE` is `role` unless its value is exactly `permission`.
-- Tests are Playwright only. Run one spec with `npm run test -- tests/e2e/<file>.spec.ts` or `npm run test -- tests/unit/<file>.spec.ts`; `test:e2e` and `test:unit` only target their respective directories.
-- Without `PLAYWRIGHT_BASE_URL`, Playwright starts `npm run dev -- --port 5173`, but it does not provision Supabase or `web/.env.local`. Admin setup specs skip unless `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are set.
-- Do not edit generated `build/**` or `.react-router/types/**`.
+- Local setup: copy `web/.env.template` to `web/.env.local`, run `supabase start --debug` from the repository root, then use `supabase status -o json` to fill the local Supabase keys. Start with `npm run dev`.
+- Install and verify with `npm ci`, `npm run typecheck`, `npm run build && npm run start`, and `npm run test`; there is no lint script.
+- Routes are registered manually in `web/app/routes.ts`. After adding a route file, register it there and run `npm run typecheck` to regenerate React Router types.
+- Server `createClient(request)` returns cookie `headers`; include them in responses and redirects or Supabase session changes will not persist.
+- A staff-visible `/manage/*` route also needs its path in `TEAM_ALLOWED_MANAGE_PATHS` in `web/app/routes/manage/team.tsx`; route registration alone is insufficient.
+- `ONBOARDING_MODE` uses `role` unless its value is exactly `permission`.
+- Playwright starts `npm run dev -- --port 5173` when `PLAYWRIGHT_BASE_URL` is unset, but it does not provision Supabase or `.env.local`. Run a focused spec with `npm run test -- tests/e2e/<file>.spec.ts` or `npm run test -- tests/unit/<file>.spec.ts`; admin setup tests need `SUPABASE_URL` and `SUPABASE_SECRET_KEY` and otherwise skip.
+- Do not edit generated `web/build/**` or `web/.react-router/types/**`.
 
 ## Supabase
-- The source of truth is declarative SQL in `supabase/schemas/`; do not hand-edit existing `supabase/migrations/`. From the root, generate and apply changes with `supabase db diff -f <name>` then `supabase migration up`; commit the schema source and generated migration together.
-- Schema changes require regenerating `web/app/lib/database.types.ts`: `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`. Use its generated enums/constants instead of duplicating enum strings in web code.
-- New user-facing tables need RLS and policies. New app permissions must be added to `app_permissions`, mapped in `role_permission` for at least admin and manager, and used by RLS through `authorize(...)` or expected requests will be denied.
-- PostgreSQL types and policies do not support `IF NOT EXISTS`; omit it from declarative schema files.
-- `supabase/config.toml` defaults local resets to sanitized production snapshot data plus bootstrap seeds. Do not commit raw production snapshots; the API response cap is 1,000 rows, so batch large reads.
+- Declarative SQL in `supabase/schemas/` is the schema source of truth. Do not hand-edit existing `supabase/migrations/`; generate and apply changes from the root with `supabase db diff -f <name>` followed by `supabase migration up`, and keep the schema and generated migration together.
+- After schema changes regenerate `web/app/lib/database.types.ts` with `supabase gen types typescript --project-ref "$(cat supabase/.temp/project-ref)" --schema public > web/app/lib/database.types.ts`; use generated enums/constants rather than duplicate strings.
+- New user-facing tables require RLS and policies. New permissions must be added to `app_permissions`, mapped in `role_permission` for at least admin and manager, and enforced through `authorize(...)` or requests will be denied.
+- Local `supabase db reset` uses the sanitized production snapshot plus bootstrap seeds by default (`supabase/config.toml`). Never commit raw production snapshots; Supabase API results are capped at 1,000 rows, so batch large reads.
 
 ## Scheduler (`scheduler/`)
-- `crontab` is the schedule source of truth; Railway runs it via `railway.toml`.
-- Copy `.env.template` to `.env.local` before `make cron`, `make cron-bg`, or `make smoke-all`, and set `APP_BASE_URL` plus `INTERNAL_RUNNER_SECRET`.
-- Cron requests use `x-internal-runner-secret`; it must match the web service's `INTERNAL_RUNNER_SECRET`.
+- `scheduler/crontab` is the schedule source of truth; Railway starts it through `scheduler/railway.toml`. It currently includes Zoom, gift-card, post-program survey, inventory-alert, export, and export-cleanup jobs.
+- Copy `scheduler/.env.template` to `.env.local` before `make cron`, `make cron-bg`, or `make smoke-all`; set `APP_BASE_URL` and make `INTERNAL_RUNNER_SECRET` match the web service.
+- Internal cron requests authenticate with `x-internal-runner-secret`. `make smoke-all` runs the five smoke targets in the Makefile and does not cover the scheduled inventory-alert job.
 
 ## Zoom API (`zoom-api/`)
-- Read and follow `zoom-api/CLAUDE.md` before changing this service.
-- `make setup` installs only `requirements.txt`; install `requirements-dev.txt` before `make test` in a fresh environment.
-- Keep API-key auth on FastAPI `HTTPBearer` in `app/auth.py`; `tests/test_main.py::test_openapi_declares_security_scheme` protects Swagger's security scheme.
+- `make setup` installs only `requirements.txt`; install `requirements-dev.txt` before `make test` in a fresh environment. Use `make dev` to run locally and `make test` for `pytest tests/ -v`.
+- API-key auth must remain FastAPI `HTTPBearer` in `app/auth.py`, not a raw header parameter; `tests/test_main.py::test_openapi_declares_security_scheme` protects the Swagger security scheme.
 
 ## CI
-- `.github/workflows/tests.yml` runs web Playwright tests on Node 22 after starting local Supabase; CI has no separate lint or typecheck job.
+- `.github/workflows/tests.yml` runs only the web Playwright suite on Node 22 after starting local Supabase; it has no separate lint or typecheck job.
