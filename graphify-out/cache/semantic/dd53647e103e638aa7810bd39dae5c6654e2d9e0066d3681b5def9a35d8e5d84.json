@@ -1,0 +1,1 @@
+{"nodes": [{"id": "supabase_scripts_prod_data_sanitize_exclude_tables_static_bootstrap_tables", "label": "Static/bootstrap tables", "file_type": "concept", "source_file": "supabase/scripts/prod-data-sanitize/exclude-tables.txt", "source_location": "lines 1-17", "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}
