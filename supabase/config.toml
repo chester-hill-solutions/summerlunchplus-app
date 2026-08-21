@@ -66,8 +66,14 @@ enabled = true
 # Default local developer mode (app bootstrap + deterministic dummy fixtures):
 # sql_paths = ["./seeds/app-data/*.sql", "./seeds/dummy-data/*.sql"]
 #
-# Production snapshot mode (sanitized prod snapshot + local bootstrap overrides, no dummy fixtures):
-sql_paths = ["./seeds/prod-data/active/*-sanitized.sql", "./seeds/app-data/*.sql"]
+# Production snapshot mode (sanitized prod snapshot + local bootstrap overrides, no dummy fixtures).
+# Form remapping must run after app-data creates the target forms.
+sql_paths = [
+  "./seeds/prod-data/active/????????-sanitized.sql",
+  "./seeds/prod-data/active/*-semester-survey-requirements-sanitized.sql",
+  "./seeds/app-data/*.sql",
+  "./seeds/prod-data/active/*-zz-form-submission-form-id-remap-sanitized.sql",
+]
 #
 # Dummy-only mode (for fixture-only smoke runs):
 # sql_paths = ["./seeds/dummy-data/*.sql"]
