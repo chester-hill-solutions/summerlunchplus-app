@@ -15,3 +15,15 @@ public.email_draft
 public.email_draft_version
 public.ip_org_policy
 storage.buckets
+
+# Supabase-managed storage tables are created by the local storage service.
+# Their columns can differ from the linked project's storage version.
+storage.objects
+storage.buckets_analytics
+storage.buckets_vectors
+storage.s3_multipart_uploads
+storage.s3_multipart_uploads_parts
+storage.vector_indexes
+
+# High-volume operational history not needed by local application workflows
+public.zoom_job_attempt
