@@ -3139,6 +3139,26 @@ export type Database = {
         Args: { p_error: string; p_event_id: string }
         Returns: boolean
       }
+      get_program_impact: {
+        Args: { p_as_of?: string; p_semester_id?: string }
+        Returns: {
+          blocked_sent_card_count: number
+          children: number
+          children_source: string
+          completed_attendance_rows: number
+          eligible_attendance_rows: number
+          family_key: string
+          newest_row_evidence_count: number
+          participation_classification: string
+          participation_evidence_rows: number
+          people: number
+          people_source: string
+          semester_id: string
+          semester_name: string
+          sent_card_count: number
+          sent_card_value: number
+        }[]
+      }
       has_completed_required_forms: {
         Args: { p_user_id: string }
         Returns: boolean
