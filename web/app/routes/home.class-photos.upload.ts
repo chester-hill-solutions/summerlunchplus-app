@@ -7,7 +7,7 @@ import type { Route } from './+types/home.class-photos.upload'
 
 const PHOTO_BUCKET = 'class-attendance-photos'
 const PHOTO_UPLOAD_GRACE_MS = 15 * 60_000
-const PHOTO_UPLOAD_WINDOW_MS = 7 * 24 * 60 * 60_000
+const PHOTO_UPLOAD_WINDOW_MS = 4 * 24 * 60 * 60_000
 const nowMs = () => Date.now()
 
 const sanitizeFileName = (input: string) => {
@@ -92,7 +92,7 @@ export async function action({ request }: Route.ActionArgs) {
       .is('photo_status', null)
 
     return Response.json(
-      { error: 'Photo upload is available for 7 days after class end. This class upload window has expired.' },
+      { error: 'Photo upload is available for 4 days after class end. This class upload window has expired.' },
       { status: 409, headers: auth.headers }
     )
   }
