@@ -990,9 +990,9 @@
     "semantic_hash": "e3510ab8eede5fa403e8b6b5489a4e90"
   },
   "web/app/lib/database.types.ts": {
-    "mtime": 1787331699.1145248,
-    "seen": 1787331872.2480588,
-    "ast_hash": "4dbe171882f23c5e69aad43076a9c4e4",
+    "mtime": 1787277717.8084025,
+    "seen": 1787277844.7048519,
+    "ast_hash": "9235ca2bccbc07c9a5c94cb42a579ec1",
     "semantic_hash": ""
   },
   "web/app/lib/datetime.ts": {
@@ -2016,9 +2016,9 @@
     "semantic_hash": "d094abff15696151f7c26adbce7f47da"
   },
   "web/app/routes/manage/program-analytics.tsx": {
-    "mtime": 1787331669.1015997,
-    "seen": 1787331872.254566,
-    "ast_hash": "e71a2d6fb61986e451109fa96670bade",
+    "mtime": 1787331086.9106748,
+    "seen": 1787331177.461448,
+    "ast_hash": "49105400f8e35abed1f2a7d1148238e1",
     "semantic_hash": ""
   },
   "web/app/routes/manage/request-metadata.tsx": {
@@ -3066,9 +3066,9 @@
     "semantic_hash": ""
   },
   "web/app/lib/gift-card-household-impact.server.ts": {
-    "mtime": 1787331699.1060092,
-    "seen": 1787331872.249567,
-    "ast_hash": "9e2bb8ca065654d8f79bd18e069f0575",
+    "mtime": 1787331122.8800066,
+    "seen": 1787331177.453867,
+    "ast_hash": "31fe70543fd80c9b892aa2acea3cf3e9",
     "semantic_hash": ""
   }
 }
