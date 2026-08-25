@@ -1,5 +1,8 @@
 import { adminClient } from '@/lib/supabase/adminClient'
+import { loadGiftCardHouseholdImpact } from '@/lib/gift-card-household-impact.server'
+import { useLoaderData } from 'react-router'
 
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import TableDisplay from './table-display'
 
 import type { Route } from './+types/program-analytics'
@@ -46,10 +49,11 @@ const createProgramStatusSets = (): ProgramStatusSets => ({
 })
 
 export async function loader(_: Route.LoaderArgs) {
-  const [{ data: profiles }, { data: enrollments }, { data: districts }] = await Promise.all([
+  const [{ data: profiles }, { data: enrollments }, { data: districts }, giftCardHouseholds] = await Promise.all([
     adminClient.from('profile').select('id, partner_program, federal_electoral_district_name'),
     adminClient.from('workshop_enrollment').select('profile_id, status').not('profile_id', 'is', null),
     adminClient.from('federal_electoral_district').select('name, meal_kit').eq('meal_kit', true),
+    loadGiftCardHouseholdImpact(),
   ])
 
   const mealKitRidingNames = new Set(
@@ -123,6 +127,7 @@ export async function loader(_: Route.LoaderArgs) {
     tableName: 'program-analytics',
     columns: ['program', 'enrolled', 'accepted', 'pending', 'waitlisted', 'rejected', 'revoked'],
     rows,
+    giftCardHouseholds,
     columnMeta: {
       program: { label: 'Program', filterable: false },
       enrolled: { label: 'Enrolled', numeric: true, filterable: false },
@@ -136,5 +141,59 @@ export async function loader(_: Route.LoaderArgs) {
 }
 
 export default function ProgramAnalyticsPage() {
-  return <TableDisplay />
+  const data = useLoaderData<typeof loader>()
+
+  return (
+    <div className="space-y-6">
+      <TableDisplay data={data} />
+      <Card>
+        <CardHeader className="border-b">
+          <CardTitle>Gift-card recipient households</CardTitle>
+          <CardDescription>
+            Household totals for families with at least one sent gift card. People and children use the household counts
+            selected by the program-impact aggregate.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4 pt-6 sm:grid-cols-5">
+          {[
+            ['Families', data.giftCardHouseholds.families],
+            ['People', data.giftCardHouseholds.people],
+            ['Children', data.giftCardHouseholds.children],
+            ['Cards', data.giftCardHouseholds.cards],
+            ['CAD value', new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(data.giftCardHouseholds.value)],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{typeof value === 'number' ? value.toLocaleString('en-CA') : value}</div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="border-b">
+          <CardTitle>Class attendance rows</CardTitle>
+          <CardDescription>
+            Attendance rows are completed class-session records. They are not household children, because one student can
+            have attendance for many classes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4 pt-6 sm:grid-cols-3 lg:grid-cols-5">
+          {[
+            ['All active rows', data.giftCardHouseholds.activeAttendanceRows],
+            ['All students', data.giftCardHouseholds.activeAttendanceProfiles],
+            ['Attendance families', data.giftCardHouseholds.activeAttendanceFamilies],
+            ['Household people', data.giftCardHouseholds.activeAttendancePeople],
+            ['Household children', data.giftCardHouseholds.activeAttendanceChildren],
+            ['Sent-card rows', data.giftCardHouseholds.sentCardAttendanceRows],
+            ['Sent-card students', data.giftCardHouseholds.sentCardAttendanceProfiles],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{Number(value).toLocaleString('en-CA')}</div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  )
 }

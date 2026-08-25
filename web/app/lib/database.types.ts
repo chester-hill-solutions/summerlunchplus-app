@@ -7,31 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       class: {
@@ -3139,6 +3114,16 @@ export type Database = {
         Args: { p_error: string; p_event_id: string }
         Returns: boolean
       }
+      get_attendance_household_impact: {
+        Args: never
+        Returns: {
+          attendance_profiles: number
+          attendance_rows: number
+          children: number
+          families: number
+          people: number
+        }[]
+      }
       get_program_impact: {
         Args: { p_as_of?: string; p_semester_id?: string }
         Returns: {
@@ -3524,9 +3509,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       app_permissions: [
