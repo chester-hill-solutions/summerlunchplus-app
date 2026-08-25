@@ -1,4 +1,5 @@
 import { sendTemplateEmail } from '@/lib/email/send-email.server'
+import { appConfig } from '@/config/app-config.server'
 import {
   giftCardInventoryAlertEventKey,
   hasGiftCardShortfall,
@@ -33,6 +34,7 @@ type GiftCardJobResult = {
   allocationScan: GiftCardScanCounters
   reminderScan: GiftCardScanCounters
   errors: string[]
+  skippedReason?: string
 }
 
 type GiftCardScanCounters = {
@@ -1211,6 +1213,29 @@ const backfillQualifiedAvailabilityStates = async () => {
 }
 
 export const runGiftCardJobs = async ({ appOrigin, runId }: { appOrigin: string; runId: string }): Promise<GiftCardJobResult> => {
+  const sendCutoffMs = Date.parse(appConfig.giftCard.sendCutoffAtIso)
+  if (Number.isFinite(sendCutoffMs) && Date.now() >= sendCutoffMs) {
+    console.info('[gift-cards] automated send cutoff reached, skipping run', {
+      cutoffAt: appConfig.giftCard.sendCutoffAtIso,
+      runId,
+    })
+    return {
+      runId,
+      allocated: 0,
+      availabilityBackfilled: 0,
+      remindersSent: 0,
+      remindersSkipped: 0,
+      reminderFailures: 0,
+      mealKitRemindersSent: 0,
+      mealKitRemindersSkipped: 0,
+      mealKitReminderFailures: 0,
+      allocationScan: emptyScanCounters(),
+      reminderScan: emptyScanCounters(),
+      errors: [],
+      skippedReason: 'gift_card_send_cutoff',
+    }
+  }
+
   const lockAcquired = await tryAcquireGiftCardRunnerLock()
   if (!lockAcquired) {
     return {
