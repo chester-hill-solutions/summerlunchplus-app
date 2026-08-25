@@ -14,7 +14,7 @@
 
 ## Web
 
-- Setup: copy `web/.env.template` to `web/.env.local`, run `supabase start --debug` from the repo root, then use `supabase status -o json` to populate local Supabase keys.
+- Setup: copy `web/.env.template` to `web/.env.local`, run `supabase start --debug` from the repo root, then use `supabase status -o json` to populate local Supabase keys. `supabase/config.toml` reads `env(SITE_URL)` and `env(SMTP_API_KEY)`: create the root `.env` from `.env.template` and set `SITE_URL` (CI uses `http://127.0.0.1:5173`).
 - Install and verify from `web/`: `npm ci`; `npm run typecheck`; `npm run build && npm run start`; `npm run test`. There is no lint script.
 - Focus tests with `npm run test -- tests/e2e/<file>.spec.ts` or `npm run test -- tests/unit/<file>.spec.ts`; use `npm run test:e2e` and `npm run test:unit` for directory scopes.
 - Playwright starts `npm run dev -- --port 5173` unless `PLAYWRIGHT_BASE_URL` is set. It does not provision Supabase or `.env.local`; admin setup tests skip without `SUPABASE_URL` and `SUPABASE_SECRET_KEY`.
