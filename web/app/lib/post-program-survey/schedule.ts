@@ -2,10 +2,6 @@ export const POST_PROGRAM_SURVEY_SCHEDULE = [
   { at: '2026-08-14T13:00:00.000Z', templateKey: 'post_program_survey_initial_v1' },
   { at: '2026-08-19T01:00:00.000Z', templateKey: 'post_program_survey_reminder_v1' },
   { at: '2026-08-21T01:00:00.000Z', templateKey: 'post_program_survey_reminder_v1' },
-  { at: '2026-08-26T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-  { at: '2026-08-28T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-  { at: '2026-09-02T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-  { at: '2026-09-04T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
 ] as const
 
 export const assertPostProgramSurveySchedule = () => {

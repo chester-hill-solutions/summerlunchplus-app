@@ -5,16 +5,12 @@ import { isLastWorkshopClass } from '../../app/lib/post-program-survey/gift-card
 import { chunk } from '../../app/lib/post-program-survey/batching.server'
 import { assertPostProgramSurveySchedule, POST_PROGRAM_SURVEY_SCHEDULE } from '../../app/lib/post-program-survey/schedule'
 
-test('post-program survey schedule has the seven approved Toronto slots', async () => {
+test('post-program survey schedule has the three approved Toronto slots', async () => {
   assertPostProgramSurveySchedule()
   expect(POST_PROGRAM_SURVEY_SCHEDULE).toEqual([
     { at: '2026-08-14T13:00:00.000Z', templateKey: 'post_program_survey_initial_v1' },
     { at: '2026-08-19T01:00:00.000Z', templateKey: 'post_program_survey_reminder_v1' },
     { at: '2026-08-21T01:00:00.000Z', templateKey: 'post_program_survey_reminder_v1' },
-    { at: '2026-08-26T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-    { at: '2026-08-28T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-    { at: '2026-09-02T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
-    { at: '2026-09-04T01:00:00.000Z', templateKey: 'post_program_survey_gift_card_v1' },
   ])
 })
 
