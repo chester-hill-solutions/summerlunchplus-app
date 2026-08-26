@@ -228,6 +228,9 @@ type AttendancePhotoResource = {
   uploaded_at: string
   signed_url: string | null
   signed_url_error: string | null
+  original_signed_url: string | null
+  preview_mime_type: string | null
+  preview_is_converted: boolean
 }
 
 type AttendancePhotoResponse = {
@@ -4233,6 +4236,19 @@ export default function TableDisplay({
                           {photos.length === 0 ? 'No photos uploaded yet.' : currentPhoto?.signed_url_error ?? 'Photo URL unavailable.'}
                         </p>
                       )}
+
+                      {currentPhoto?.original_signed_url ? (
+                        <div className="mt-2 text-center">
+                          <a
+                            href={currentPhoto.original_signed_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-primary underline"
+                          >
+                            Download original{currentPhoto.preview_is_converted ? ' HEIC' : ''}
+                          </a>
+                        </div>
+                      ) : null}
 
                       <div className="mt-2 flex items-center justify-between gap-2">
                         <button
