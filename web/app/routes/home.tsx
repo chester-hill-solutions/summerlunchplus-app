@@ -120,7 +120,7 @@ const shouldLogHomeInstrumentation =
   process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
 
 const PHOTO_UPLOAD_GRACE_MS = 15 * 60_000
-const PHOTO_UPLOAD_WINDOW_MS = 7 * 24 * 60 * 60_000
+const PHOTO_UPLOAD_WINDOW_MS = 4 * 24 * 60 * 60_000
 
 const sendInvite = async ({
   email,

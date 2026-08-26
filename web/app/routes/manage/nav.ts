@@ -62,6 +62,11 @@ export const manageSections: ManageNavSection[] = [
         label: 'Program analytics',
         description: 'Enrollment totals by status for Sobeys, PC, and Meal Kit programs.',
       },
+      {
+        to: '/manage/program-impact',
+        label: 'Program impact',
+        description: 'Household reach, gift-card delivery, and participation totals.',
+      },
     ],
   },
   {

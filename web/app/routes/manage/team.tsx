@@ -35,6 +35,7 @@ const TEAM_ALLOWED_MANAGE_PATHS = new Set([
   '/manage/workshop-enrollment',
   '/manage/gift-cards',
   '/manage/gift-cards/upload',
+  '/manage/program-impact',
   '/manage/families',
 ])
 

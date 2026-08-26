@@ -148,6 +148,8 @@ const createScheduledEvents = async (now: string, appOrigin: string) => {
   return created
 }
 
+const scheduledTemplateKeys = new Set<string>(POST_PROGRAM_SURVEY_SCHEDULE.map(slot => slot.templateKey))
+
 const sendClaimedEvents = async (now: string, appOrigin: string) => {
   const { data: claimed, error: claimError } = await adminClient.rpc('claim_post_program_survey_email_events', {
     p_now: now,
@@ -171,9 +173,25 @@ const sendClaimedEvents = async (now: string, appOrigin: string) => {
   let emailsSent = 0
   let emailsSkipped = 0
   let emailFailures = 0
+  let cancelledUnscheduled = 0
   const errors: string[] = []
 
   for (const event of claimedEvents) {
+    if (!scheduledTemplateKeys.has(event.template_key)) {
+      const { error: cancelError } = await adminClient
+        .from('post_program_survey_email_event')
+        .delete()
+        .eq('id', event.id)
+        .is('sent_at', null)
+      if (cancelError) {
+        emailFailures += 1
+        errors.push(`event ${event.id}: ${cancelError.message}`)
+        continue
+      }
+      cancelledUnscheduled += 1
+      continue
+    }
+
     const campaign = (campaigns ?? []).find(row => row.id === event.campaign_id)
     const semesterId = campaign?.semester_id
     if (!semesterId) {
@@ -226,6 +244,10 @@ const sendClaimedEvents = async (now: string, appOrigin: string) => {
 
     if (result.status === 'sent') emailsSent += 1
     else emailsSkipped += 1
+  }
+
+  if (cancelledUnscheduled > 0) {
+    errors.push(`cancelled ${cancelledUnscheduled} unscheduled survey email events`)
   }
 
   return { eventsClaimed: claimedEvents.length, emailsSent, emailsSkipped, emailFailures, errors }

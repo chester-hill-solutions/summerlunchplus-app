@@ -17,7 +17,8 @@ begin
         ('86e79eb0-21eb-476b-844f-e31ece0522c9'::uuid, 'Guardian Consent'::text, null::text),
         ('b0dad9dd-1423-4b73-bb94-43636c91df5c'::uuid, 'Child Email'::text, null::text),
         ('e5b1f761-b1b9-482d-87b4-5946dee10f8c'::uuid, 'Partner Organization'::text, null::text),
-        ('f65fc3fd-352b-4bc0-860c-929b9daa17ac'::uuid, null::text, 'Pre-Semester Survey - %'::text)
+        ('f65fc3fd-352b-4bc0-860c-929b9daa17ac'::uuid, null::text, 'Pre-Semester Survey - %'::text),
+        ('092baa43-e6cf-46ba-b743-613286339eb3'::uuid, null::text, 'Post-Semester Survey - %'::text)
     ) as t(old_id, target_name, target_like)
   loop
     select count(*)

@@ -66,7 +66,9 @@ const loadQuestions = async (formId: string): Promise<FormQuestionData[]> => {
 
 const loadCampaignForRequest = async (request: Request, semesterId: string) => {
   const auth = await enforceOnboardingGuard(request)
-  const { supabase, headers } = createClient(request)
+  const { supabase, headers: supabaseHeaders } = createClient(request)
+  const headers = new Headers(auth.headers)
+  supabaseHeaders.forEach((value, key) => headers.append(key, value))
   const campaign = await loadPostProgramSurveyCampaignForCurrentProfile(supabase, semesterId)
   if (!campaign || new Date(campaign.available_at).getTime() > Date.now()) {
     throw redirect('/home', { headers })
@@ -132,7 +134,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     return { error: error instanceof Error ? error.message : 'Unable to save the survey.' } satisfies ActionData
   }
 
-  throw redirect('/home', { headers })
+  throw redirect(`/semester-surveys/${semesterId}/post-program`, { headers })
 }
 
 export default function SemesterPostSurveyPage() {

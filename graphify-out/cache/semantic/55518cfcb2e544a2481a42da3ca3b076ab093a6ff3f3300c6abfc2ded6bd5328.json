@@ -1,0 +1,1 @@
+{"nodes": [{"id": "supabase_templates_identity_unlinked_notification_unlinked_sign_in_identity", "label": "Unlinked sign-in identity", "file_type": "concept", "source_file": "supabase/templates/identity_unlinked_notification.html", "source_location": "lines 15-16", "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}

@@ -18,6 +18,7 @@ H2 := $(SEED_DIR)/$(DATE)-zz-form-submission-form-id-remap-sanitized.sql
 ACTIVE_MAIN := $(ACTIVE_DIR)/$(notdir $(SAN))
 ACTIVE_H1 := $(ACTIVE_DIR)/$(notdir $(H1))
 ACTIVE_H2 := $(ACTIVE_DIR)/$(notdir $(H2))
+ACTIVE_SUPERSEDED_DIR := $(ACTIVE_DIR)/superseded
 
 EXCLUDE_TABLES := $(shell sed -e '/^[[:space:]]*\#/d' -e '/^[[:space:]]*$$/d' "$(SCRIPT_DIR)/exclude-tables.txt")
 EXCLUDE_FLAGS := $(foreach t,$(EXCLUDE_TABLES),--exclude $(t))
@@ -60,8 +61,10 @@ rewrite:
 		--map-output "$(MAP)"
 
 verify:
-	python3 "$(SCRIPT_DIR)/verify_email_domains.py" \
+	python3 -u "$(SCRIPT_DIR)/verify_email_domains.py" \
 		--input "$(SAN)" \
+		--raw "$(RAW)" \
+		--map "$(MAP)" \
 		--allowed-domain "chsolutions.ca"
 
 helpers:
@@ -69,11 +72,19 @@ helpers:
 	cp "$(HELPERS_DIR)/zz-form-submission-form-id-remap-sanitized.sql" "$(H2)"
 
 activate:
+	@test -f "$(SAN)" || { echo "Missing $(SAN). Run: make rewrite DATE=$(DATE)"; exit 1; }
+	@test -f "$(H1)" || { echo "Missing $(H1). Run: make helpers DATE=$(DATE)"; exit 1; }
+	@test -f "$(H2)" || { echo "Missing $(H2). Run: make helpers DATE=$(DATE)"; exit 1; }
 	@mkdir -p "$(ACTIVE_DIR)"
-	rm -f "$(ACTIVE_DIR)"/*-sanitized.sql
-	cp "$(SAN)" "$(ACTIVE_MAIN)"
-	cp "$(H1)" "$(ACTIVE_H1)"
-	cp "$(H2)" "$(ACTIVE_H2)"
+	@mkdir -p "$(ACTIVE_SUPERSEDED_DIR)"
+	@stamp=$$(date +%Y%m%d%H%M%S); \
+	for file in "$(ACTIVE_DIR)"/*-sanitized.sql; do \
+		[ -e "$$file" ] || continue; \
+		mv "$$file" "$(ACTIVE_SUPERSEDED_DIR)/$$(basename "$$file").$$stamp"; \
+	done
+	mv "$(SAN)" "$(ACTIVE_MAIN)"
+	mv "$(H1)" "$(ACTIVE_H1)"
+	mv "$(H2)" "$(ACTIVE_H2)"
 
 all: dump rewrite verify helpers activate
 
