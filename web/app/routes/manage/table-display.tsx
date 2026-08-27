@@ -737,6 +737,8 @@ type TableDisplayProps = {
   paginationActions?: ReactNode
   data?: LoaderData
   filterOptionsMode?: 'auto' | 'client' | 'server'
+  rowActions?: (row: Record<string, unknown>) => ReactNode
+  actionsColumnWidth?: number
 }
 
 type ResizeState = {
@@ -899,6 +901,8 @@ export default function TableDisplay({
   paginationActions,
   data,
   filterOptionsMode = 'auto',
+  rowActions,
+  actionsColumnWidth = ACTIONS_COLUMN_WIDTH,
 }: TableDisplayProps = {}) {
   const routeData = useLoaderData() as LoaderData | undefined
   const source = data ?? routeData
@@ -2308,6 +2312,8 @@ export default function TableDisplay({
   const isWorkshopEnrollment = isWorkshopEnrollmentTable
   const canInlineInsert = Boolean(editorConfig?.allowInsert)
   const canInlineUpdate = Boolean(editorConfig?.allowUpdate)
+  const hasRowActions = Boolean(rowActions)
+  const hasActions = canInlineUpdate || hasRowActions
 
   useEffect(() => {
     if (!isClassAttendance) return
@@ -2411,8 +2417,8 @@ export default function TableDisplay({
       (sum, column) => sum + (columnWidths[column] ?? (columnMeta[column]?.numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH)),
       0
     )
-    return totalColumnWidth + (canInlineUpdate ? ACTIONS_COLUMN_WIDTH : 0)
-  }, [canInlineUpdate, columnMeta, columnWidths, columns])
+    return totalColumnWidth + (hasActions ? actionsColumnWidth : 0)
+  }, [actionsColumnWidth, columnMeta, columnWidths, columns, hasActions])
 
   const updateFilterPopoverPosition = () => {
     if (!openFilterColumn) {
@@ -3203,7 +3209,7 @@ export default function TableDisplay({
             {columns.map(column => (
               <col key={`col-${column}`} style={{ width: `${columnWidths[column] ?? (columnMeta[column]?.numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH)}px` }} />
             ))}
-            {canInlineUpdate ? <col key="col-actions" style={{ width: `${ACTIONS_COLUMN_WIDTH}px` }} /> : null}
+            {hasActions ? <col key="col-actions" style={{ width: `${actionsColumnWidth}px` }} /> : null}
           </colgroup>
           <thead className={`${hasStickyColumnHeaders ? 'sticky top-0 z-30' : ''} bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground`}>
             <tr>
@@ -3279,7 +3285,7 @@ export default function TableDisplay({
                   </th>
                 )
               })}
-              {canInlineUpdate ? (
+              {hasActions ? (
                 <th
                   className={`px-4 py-2 text-left ${hasStickyColumnHeaders ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80' : ''}`}
                 >
@@ -3990,37 +3996,42 @@ export default function TableDisplay({
                         </td>
                       )
                     })}
-                    {canInlineUpdate ? (
-                      <td className="px-4 py-2" title={isEditing ? (isWorkshopEnrollment ? 'Close edit modal' : 'Cancel editing row') : 'Edit row'}>
-                        <button
-                          type="button"
-                          className="rounded border border-input px-2 py-1 text-xs"
-                          onClick={() => {
-                            if (isEditing) {
-                              if (isWorkshopEnrollment) {
-                                closeWorkshopEditModal()
-                              } else {
-                                setEditingRowKey(null)
-                                setEditValues({})
-                              }
-                              return
-                            }
-                            if (isWorkshopEnrollment) {
-                              beginWorkshopEditModal(row)
-                              return
-                            }
-                            beginEdit(row)
-                          }}
-                        >
-                          {isEditing ? 'Cancel' : 'Edit'}
-                        </button>
+                    {hasActions ? (
+                      <td className="px-4 py-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canInlineUpdate ? (
+                            <button
+                              type="button"
+                              className="rounded border border-input px-2 py-1 text-xs"
+                              onClick={() => {
+                                if (isEditing) {
+                                  if (isWorkshopEnrollment) {
+                                    closeWorkshopEditModal()
+                                  } else {
+                                    setEditingRowKey(null)
+                                    setEditValues({})
+                                  }
+                                  return
+                                }
+                                if (isWorkshopEnrollment) {
+                                  beginWorkshopEditModal(row)
+                                  return
+                                }
+                                beginEdit(row)
+                              }}
+                            >
+                              {isEditing ? 'Cancel' : 'Edit'}
+                            </button>
+                          ) : null}
+                          {rowActions ? rowActions(row) : null}
+                        </div>
                       </td>
                     ) : null}
                   </tr>
 
                   {isEditing && editorConfig && !isWorkshopEnrollment ? (
                     <tr key={`edit-${rowKey}`} className="border-t bg-muted/10">
-                      <td colSpan={columns.length + (canInlineUpdate ? 1 : 0)} className="px-4 py-3">
+                      <td colSpan={columns.length + (hasActions ? 1 : 0)} className="px-4 py-3">
                         <div className="space-y-3">
                           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                             {fieldKeys.map(fieldName => renderField(fieldName, editorConfig.fields[fieldName], editValues, setEditValues))}
