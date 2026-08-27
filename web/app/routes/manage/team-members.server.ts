@@ -49,6 +49,7 @@ const loadDisabledAuthUserMap = async (): Promise<Map<string, boolean>> => {
     }
     for (const user of data.users ?? []) {
       map.set(user.id, Boolean(user.banned_until))
+      if (user.email) map.set(normalizeEmail(user.email), Boolean(user.banned_until))
     }
     const nextPage = (data as { next_page?: number | null }).next_page ?? null
     if (!nextPage) break
@@ -128,18 +129,22 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const disabledByUserId = await loadDisabledAuthUserMap()
   const result = {
-    columns: ['role', 'email', 'firstname', 'surname', 'phone', 'postcode', 'password_set', 'disabled'],
+    columns: ['role', 'email', 'firstname', 'surname', 'phone', 'postcode', 'password_set', 'disabled', 'actions'],
     rows: (data ?? [])
       .filter(row => TEAM_ROLE_SET.has(String(row.role ?? '')))
       .map(row => ({
         ...row,
-        disabled: row.user_id ? disabledByUserId.get(row.user_id) ?? false : false,
+        disabled:
+          (row.user_id ? disabledByUserId.get(row.user_id) : undefined) ??
+          (row.email ? disabledByUserId.get(normalizeEmail(row.email)) : undefined) ??
+          false,
       })),
     label: 'Team',
     tableName: 'team',
     columnMeta: {
       role: { minWidth: 220, preferredWidth: 220 },
       disabled: { minWidth: 180, preferredWidth: 180 },
+      actions: { label: 'Actions', minWidth: 90, preferredWidth: 90, filterable: false },
     },
     role: auth.claims.role,
     allowedInviteRoles: allowedInviteRolesFor(auth.claims.role),
