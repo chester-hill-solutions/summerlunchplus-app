@@ -27,27 +27,47 @@ type TeamRoleCellProps = {
     role: string | null
     email: string | null
   }
+  value: string
+  onChange: (value: string) => void
 }
 
-const TeamRoleCell = ({ member }: TeamRoleCellProps) => {
+const TeamRoleCell = ({ member, value, onChange }: TeamRoleCellProps) => {
+  return (
+    <div className="min-w-max" onClick={event => event.stopPropagation()}>
+      <select
+        aria-label={`Role for ${member.email ?? member.id}`}
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+      >
+        {MANAGEABLE_TEAM_ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+      </select>
+    </div>
+  )
+}
+
+type TeamRoleSaveCellProps = {
+  member: { id: string; role: string | null }
+  nextRole: string
+  onSaved: () => void
+}
+
+const TeamRoleSaveCell = ({ member, nextRole, onSaved }: TeamRoleSaveCellProps) => {
   const fetcher = useFetcher<ActionData>()
   const busy = fetcher.state !== 'idle'
+
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcher.data?.success) onSaved()
+  }, [fetcher.data, fetcher.state, onSaved])
 
   return (
     <fetcher.Form method="post" className="flex min-w-max items-center gap-2" onClick={event => event.stopPropagation()}>
       <input type="hidden" name="profile_id" value={member.id} />
-      <select
-        aria-label={`Role for ${member.email ?? member.id}`}
-        name="role"
-        defaultValue={String(member.role ?? '')}
-        className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-        disabled={busy}
-      >
-        {MANAGEABLE_TEAM_ROLES.map(role => <option key={role} value={role}>{role}</option>)}
-      </select>
+      <input type="hidden" name="role" value={nextRole} />
       <Button type="submit" name="intent" value="change-role" size="sm" disabled={busy}>
-        {busy ? 'Working...' : 'Save role'}
+        {busy ? 'Saving...' : 'Save'}
       </Button>
+      {fetcher.data?.error ? <span className="text-xs text-destructive">{fetcher.data.error}</span> : null}
     </fetcher.Form>
   )
 }
@@ -97,6 +117,7 @@ const TeamDisabledCell = ({ member }: TeamDisabledCellProps) => {
 export default function TeamMembersTablePage({ loaderData }: Route.ComponentProps) {
   const fetcher = useFetcher<ActionData>()
   const formRef = useRef<HTMLFormElement | null>(null)
+  const [roleDrafts, setRoleDrafts] = useState<Record<string, string>>({})
   const isSubmitting = fetcher.state !== 'idle'
   const canInvite = loaderData.allowedInviteRoles.length > 0
 
@@ -152,7 +173,14 @@ export default function TeamMembersTablePage({ loaderData }: Route.ComponentProp
           const role = String(row.role ?? '')
           const canEditRow = isManageableTeamRole(role) || (loaderData.canManageAllTeamMembers && role === 'admin')
           if (column === 'role' && canEditRow) {
-            return <TeamRoleCell member={{ id: String(row.id ?? ''), role, email: typeof row.email === 'string' ? row.email : null }} />
+            const id = String(row.id ?? '')
+            return (
+              <TeamRoleCell
+                member={{ id, role, email: typeof row.email === 'string' ? row.email : null }}
+                value={roleDrafts[id] ?? role}
+                onChange={nextRole => setRoleDrafts(previous => ({ ...previous, [id]: nextRole }))}
+              />
+            )
           }
           if (column === 'disabled' && canEditRow) {
             return (
@@ -164,6 +192,22 @@ export default function TeamMembersTablePage({ loaderData }: Route.ComponentProp
                   email: typeof row.email === 'string' ? row.email : null,
                   disabled: Boolean(row.disabled),
                 }}
+              />
+            )
+          }
+          if (column === 'actions' && canEditRow) {
+            const id = String(row.id ?? '')
+            const nextRole = roleDrafts[id] ?? role
+            if (nextRole === role) return content
+            return (
+              <TeamRoleSaveCell
+                member={{ id, role }}
+                nextRole={nextRole}
+                onSaved={() => setRoleDrafts(previous => {
+                  const next = { ...previous }
+                  delete next[id]
+                  return next
+                })}
               />
             )
           }
