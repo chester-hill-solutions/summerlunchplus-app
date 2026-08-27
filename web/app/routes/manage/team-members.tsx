@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useFetcher } from 'react-router'
 
 import { Button } from '@/components/ui/button'
@@ -13,26 +13,28 @@ import TableDisplay from './table-display'
 
 export { action, loader } from './team-members.server'
 
-type TeamAccessActionsProps = {
+type TeamMember = {
+  id: string
+  user_id: string | null
+  role: string | null
+  email: string | null
+  disabled?: boolean
+}
+
+type TeamRoleCellProps = {
   member: {
     id: string
-    user_id: string | null
     role: string | null
     email: string | null
-    firstname: string | null
-    surname: string | null
-    disabled?: boolean
   }
 }
 
-const TeamAccessActions = ({ member }: TeamAccessActionsProps) => {
+const TeamRoleCell = ({ member }: TeamRoleCellProps) => {
   const fetcher = useFetcher<ActionData>()
   const busy = fetcher.state !== 'idle'
-  const isDisabled = Boolean(member.disabled)
-  const hasAcceptedInvite = Boolean(member.user_id)
 
   return (
-    <fetcher.Form method="post" className="flex flex-wrap items-center gap-2">
+    <fetcher.Form method="post" className="flex items-center gap-2" onClick={event => event.stopPropagation()}>
       <input type="hidden" name="profile_id" value={member.id} />
       <select
         aria-label={`Role for ${member.email ?? member.id}`}
@@ -46,13 +48,48 @@ const TeamAccessActions = ({ member }: TeamAccessActionsProps) => {
       <Button type="submit" name="intent" value="change-role" size="sm" disabled={busy}>
         {busy ? 'Working...' : 'Save role'}
       </Button>
-      {hasAcceptedInvite ? (
-        <Button type="submit" name="intent" value={isDisabled ? 'enable' : 'disable'} variant="outline" size="sm" disabled={busy}>
-          {isDisabled ? 'Enable' : 'Disable'}
-        </Button>
-      ) : <span className="text-xs text-muted-foreground">Invite pending</span>}
+    </fetcher.Form>
+  )
+}
+
+type TeamDisabledCellProps = {
+  member: TeamMember
+}
+
+const TeamDisabledCell = ({ member }: TeamDisabledCellProps) => {
+  const fetcher = useFetcher<ActionData>()
+  const [disabledOverride, setDisabledOverride] = useState<boolean | null>(null)
+  const busy = fetcher.state !== 'idle'
+  const isDisabled = disabledOverride ?? Boolean(member.disabled)
+  const hasAcceptedInvite = Boolean(member.user_id)
+
+  useEffect(() => {
+    setDisabledOverride(null)
+  }, [member.disabled])
+
+  useEffect(() => {
+    if (fetcher.state !== 'idle' || !fetcher.data?.error) return
+    setDisabledOverride(null)
+  }, [fetcher.data, fetcher.state])
+
+  if (!hasAcceptedInvite) return <span className="text-muted-foreground">Invite pending</span>
+
+  return (
+    <fetcher.Form method="post" className="flex items-center gap-2" onClick={event => event.stopPropagation()}>
+      <input type="hidden" name="profile_id" value={member.id} />
+      <span>{isDisabled ? 'Disabled' : 'Active'}</span>
+      <Button
+        type="submit"
+        name="intent"
+        value={isDisabled ? 'enable' : 'disable'}
+        variant="outline"
+        size="sm"
+        disabled={busy}
+        onClick={() => setDisabledOverride(!isDisabled)}
+      >
+        {busy ? 'Working...' : isDisabled ? 'Enable' : 'Disable'}
+      </Button>
       {fetcher.data?.error ? <span className="text-xs text-destructive">{fetcher.data.error}</span> : null}
-      {fetcher.data?.success && fetcher.data.message ? <span className="text-xs text-emerald-600">{fetcher.data.message}</span> : null}
     </fetcher.Form>
   )
 }
@@ -111,23 +148,26 @@ export default function TeamMembersTablePage({ loaderData }: Route.ComponentProp
       </section>
 
       <TableDisplay
-        actionsColumnWidth={300}
-        rowActions={loaderData.canManageRoles ? row => {
+        renderCell={loaderData.canManageRoles ? (column, row, content) => {
           const role = String(row.role ?? '')
-          if (!isManageableTeamRole(role)) return null
-          return (
-            <TeamAccessActions
-              member={{
-                id: String(row.id ?? ''),
-                user_id: typeof row.user_id === 'string' ? row.user_id : null,
-                role,
-                email: typeof row.email === 'string' ? row.email : null,
-                firstname: typeof row.firstname === 'string' ? row.firstname : null,
-                surname: typeof row.surname === 'string' ? row.surname : null,
-                disabled: Boolean(row.disabled),
-              }}
-            />
-          )
+          const canEditRow = isManageableTeamRole(role) || (loaderData.canManageAllTeamMembers && role === 'admin')
+          if (column === 'role' && canEditRow) {
+            return <TeamRoleCell member={{ id: String(row.id ?? ''), role, email: typeof row.email === 'string' ? row.email : null }} />
+          }
+          if (column === 'disabled' && canEditRow) {
+            return (
+              <TeamDisabledCell
+                member={{
+                  id: String(row.id ?? ''),
+                  user_id: typeof row.user_id === 'string' ? row.user_id : null,
+                  role,
+                  email: typeof row.email === 'string' ? row.email : null,
+                  disabled: Boolean(row.disabled),
+                }}
+              />
+            )
+          }
+          return content
         } : undefined}
       />
     </div>

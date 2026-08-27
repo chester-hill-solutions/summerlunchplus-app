@@ -737,8 +737,7 @@ type TableDisplayProps = {
   paginationActions?: ReactNode
   data?: LoaderData
   filterOptionsMode?: 'auto' | 'client' | 'server'
-  rowActions?: (row: Record<string, unknown>) => ReactNode
-  actionsColumnWidth?: number
+  renderCell?: (column: string, row: Record<string, unknown>, content: ReactNode) => ReactNode
 }
 
 type ResizeState = {
@@ -901,8 +900,7 @@ export default function TableDisplay({
   paginationActions,
   data,
   filterOptionsMode = 'auto',
-  rowActions,
-  actionsColumnWidth = ACTIONS_COLUMN_WIDTH,
+  renderCell,
 }: TableDisplayProps = {}) {
   const routeData = useLoaderData() as LoaderData | undefined
   const source = data ?? routeData
@@ -2312,8 +2310,7 @@ export default function TableDisplay({
   const isWorkshopEnrollment = isWorkshopEnrollmentTable
   const canInlineInsert = Boolean(editorConfig?.allowInsert)
   const canInlineUpdate = Boolean(editorConfig?.allowUpdate)
-  const hasRowActions = Boolean(rowActions)
-  const hasActions = canInlineUpdate || hasRowActions
+  const hasActions = canInlineUpdate
 
   useEffect(() => {
     if (!isClassAttendance) return
@@ -2417,8 +2414,8 @@ export default function TableDisplay({
       (sum, column) => sum + (columnWidths[column] ?? (columnMeta[column]?.numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH)),
       0
     )
-    return totalColumnWidth + (hasActions ? actionsColumnWidth : 0)
-  }, [actionsColumnWidth, columnMeta, columnWidths, columns, hasActions])
+    return totalColumnWidth + (hasActions ? ACTIONS_COLUMN_WIDTH : 0)
+  }, [canInlineUpdate, columnMeta, columnWidths, columns, hasActions])
 
   const updateFilterPopoverPosition = () => {
     if (!openFilterColumn) {
@@ -2889,7 +2886,7 @@ export default function TableDisplay({
     const commonLabel = field.label ?? fieldName.replace(/_/g, ' ')
 
     if (field.type === 'foreign_key') {
-      return (
+                       return (
         <label key={fieldName} className="grid gap-1 text-xs">
           <span className="text-muted-foreground">{commonLabel}</span>
           <Combobox
@@ -3209,7 +3206,7 @@ export default function TableDisplay({
             {columns.map(column => (
               <col key={`col-${column}`} style={{ width: `${columnWidths[column] ?? (columnMeta[column]?.numeric ? DEFAULT_NUMERIC_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH)}px` }} />
             ))}
-            {hasActions ? <col key="col-actions" style={{ width: `${actionsColumnWidth}px` }} /> : null}
+            {hasActions ? <col key="col-actions" style={{ width: `${ACTIONS_COLUMN_WIDTH}px` }} /> : null}
           </colgroup>
           <thead className={`${hasStickyColumnHeaders ? 'sticky top-0 z-30' : ''} bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground`}>
             <tr>
@@ -3874,7 +3871,7 @@ export default function TableDisplay({
                       })
                       const hoverCardCellId = `row-${absoluteRowIndex}-col-${column}`
 
-                      const content = isFormNameLink ? (
+                       const content = isFormNameLink ? (
                         <Link
                           to={{
                             pathname: `/manage/form/${row.id}`,
@@ -3930,9 +3927,11 @@ export default function TableDisplay({
                         <span className={shouldTruncate ? 'block max-w-full truncate' : 'whitespace-normal break-words'}>
                           {displayValue}
                         </span>
-                      )
+                        )
 
-                      return (
+                       const renderedContent = renderCell ? renderCell(column, row, content) : content
+
+                       return (
                     <td
                       key={`cell-${absoluteRowIndex}-${column}`}
                       title={cellValue || '(empty)'}
@@ -3988,10 +3987,10 @@ export default function TableDisplay({
                                 scheduleHoverCardClose(hoverCardCellId)
                               }}
                             >
-                              {content}
+                               {renderedContent}
                             </div>
                           ) : (
-                            content
+                            renderedContent
                           )}
                         </td>
                       )
@@ -4023,7 +4022,6 @@ export default function TableDisplay({
                               {isEditing ? 'Cancel' : 'Edit'}
                             </button>
                           ) : null}
-                          {rowActions ? rowActions(row) : null}
                         </div>
                       </td>
                     ) : null}
