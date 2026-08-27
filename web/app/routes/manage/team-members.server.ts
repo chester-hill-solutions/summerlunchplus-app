@@ -22,8 +22,12 @@ const TEAM_ROLES = ['instructor', 'staff', 'manager', 'admin'] as const
 const TEAM_ROLE_SET = new Set<string>(TEAM_ROLES)
 const AUTH_USERS_PAGE_SIZE = 200
 const AUTH_USERS_MAX_PAGES = 10
+const SUPER_ADMIN_EMAIL = 'sai+admin@chsolutions.ca'
+const ALL_TEAM_ROLES = ['instructor', 'staff', 'manager', 'admin'] as const
 
 const getAdminClient = async () => (await import('@/lib/supabase/adminClient.server')).adminClient
+const isSuperAdmin = (auth: Awaited<ReturnType<typeof requireAuth>>) =>
+  auth.user.email?.toLowerCase() === SUPER_ADMIN_EMAIL
 const shouldLogTeamMembersInstrumentation =
   process.env.NODE_ENV !== 'production' || process.env.VITE_ENABLE_ROUTER_INSTRUMENTATION === 'true'
 
@@ -77,8 +81,8 @@ const loadProfileTarget = async (profileId: string): Promise<
   return { ok: true, row: data }
 }
 
-const guardManageableTarget = (row: ProfileTargetRow): string | null => {
-  if (!isManageableTeamRole(row.role)) {
+const guardManageableTarget = (row: ProfileTargetRow, canManageAdmins: boolean): string | null => {
+  if (!isManageableTeamRole(row.role) && !(canManageAdmins && row.role === 'admin')) {
     return 'Admin accounts cannot be modified here.'
   }
   return null
@@ -87,6 +91,7 @@ const guardManageableTarget = (row: ProfileTargetRow): string | null => {
 export async function loader({ request }: Route.LoaderArgs) {
   const startedAt = Date.now()
   const auth = await requireAuth(request)
+  const canManageAllTeamMembers = isSuperAdmin(auth)
   if (shouldLogTeamMembersInstrumentation) {
     console.info('[manage-team-members-loader]', {
       event: 'start',
@@ -134,7 +139,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     tableName: 'team',
     role: auth.claims.role,
     allowedInviteRoles: allowedInviteRolesFor(auth.claims.role),
-    canManageRoles: auth.claims.role === 'admin',
+    canManageRoles: auth.claims.role === 'admin' || canManageAllTeamMembers,
+    canManageAllTeamMembers,
   }
 
   if (shouldLogTeamMembersInstrumentation) {
@@ -215,7 +221,9 @@ export async function action({ request }: Route.ActionArgs) {
 type RequireAuthResult = Awaited<ReturnType<typeof requireAuth>>
 
 const requireAdmin = (auth: RequireAuthResult) => {
-  if (auth.claims.role !== 'admin') throw new Response('Unauthorized', { status: 403, headers: auth.headers })
+  if (auth.claims.role !== 'admin' && !isSuperAdmin(auth)) {
+    throw new Response('Unauthorized', { status: 403, headers: auth.headers })
+  }
 }
 
 export const changeRoleAction = async ({ auth, formData }: { auth: RequireAuthResult; formData: FormData }): Promise<ActionData> => {
@@ -224,11 +232,11 @@ export const changeRoleAction = async ({ auth, formData }: { auth: RequireAuthRe
   const profileId = String(formData.get('profile_id') ?? '').trim()
   const nextRole = String(formData.get('role') ?? '').trim()
   if (!profileId) return { error: 'Missing team member.' }
-  if (!isManageableTeamRole(nextRole)) return { error: 'Invalid role.' }
+  if (!ALL_TEAM_ROLES.includes(nextRole as (typeof ALL_TEAM_ROLES)[number])) return { error: 'Invalid role.' }
 
   const target = await loadProfileTarget(profileId)
   if (!target.ok) return { error: target.error }
-  const blockedReason = guardManageableTarget(target.row)
+  const blockedReason = guardManageableTarget(target.row, isSuperAdmin(auth))
   if (blockedReason) return { error: blockedReason }
 
   if (target.row.user_id) {
@@ -259,7 +267,7 @@ export const setAccountDisabledAction = async ({
 
   const target = await loadProfileTarget(profileId)
   if (!target.ok) return { error: target.error }
-  const blockedReason = guardManageableTarget(target.row)
+  const blockedReason = guardManageableTarget(target.row, isSuperAdmin(auth))
   if (blockedReason) return { error: blockedReason }
   if (!target.row.user_id) return { error: 'This member has not accepted their invite yet.' }
 
