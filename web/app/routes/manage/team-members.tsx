@@ -13,7 +13,7 @@ import TableDisplay from './table-display'
 
 export { action, loader } from './team-members.server'
 
-type TeamAccessRowProps = {
+type TeamAccessActionsProps = {
   member: {
     id: string
     user_id: string | null
@@ -25,51 +25,35 @@ type TeamAccessRowProps = {
   }
 }
 
-const TeamAccessRow = ({ member }: TeamAccessRowProps) => {
+const TeamAccessActions = ({ member }: TeamAccessActionsProps) => {
   const fetcher = useFetcher<ActionData>()
   const busy = fetcher.state !== 'idle'
-  const displayName = [member.firstname, member.surname].filter(Boolean).join(' ') || 'Unnamed member'
   const isDisabled = Boolean(member.disabled)
   const hasAcceptedInvite = Boolean(member.user_id)
 
   return (
-    <div className="rounded-md border p-3">
-      <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
-        <input type="hidden" name="profile_id" value={member.id} />
-        <div className="min-w-48 flex-1">
-          <p className="text-sm font-medium">{displayName}</p>
-          <p className="text-xs text-muted-foreground">{member.email ?? 'No email'}</p>
-        </div>
-        <div className="grid gap-1">
-          <Label htmlFor={`team-access-role-${member.id}`}>Role</Label>
-          <select
-            id={`team-access-role-${member.id}`}
-            name="role"
-            defaultValue={String(member.role ?? '')}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-            disabled={busy}
-          >
-            {MANAGEABLE_TEAM_ROLES.map(role => (
-              <option key={role} value={role}>{role}</option>
-            ))}
-          </select>
-        </div>
-        <Button type="submit" name="intent" value="change-role" disabled={busy}>
-          {busy ? 'Working...' : 'Save role'}
+    <fetcher.Form method="post" className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="profile_id" value={member.id} />
+      <select
+        aria-label={`Role for ${member.email ?? member.id}`}
+        name="role"
+        defaultValue={String(member.role ?? '')}
+        className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+        disabled={busy}
+      >
+        {MANAGEABLE_TEAM_ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+      </select>
+      <Button type="submit" name="intent" value="change-role" size="sm" disabled={busy}>
+        {busy ? 'Working...' : 'Save role'}
+      </Button>
+      {hasAcceptedInvite ? (
+        <Button type="submit" name="intent" value={isDisabled ? 'enable' : 'disable'} variant="outline" size="sm" disabled={busy}>
+          {isDisabled ? 'Enable' : 'Disable'}
         </Button>
-        {hasAcceptedInvite ? (
-          isDisabled ? (
-            <Button type="submit" name="intent" value="enable" variant="outline" disabled={busy}>Enable account</Button>
-          ) : (
-            <Button type="submit" name="intent" value="disable" variant="outline" disabled={busy}>Disable account</Button>
-          )
-        ) : (
-          <p className="pb-2 text-xs text-muted-foreground">Invite not accepted yet.</p>
-        )}
-      </fetcher.Form>
-      {fetcher.data?.error ? <p className="mt-2 text-sm text-destructive">{fetcher.data.error}</p> : null}
-      {fetcher.data?.success && fetcher.data.message ? <p className="mt-2 text-sm text-emerald-600">{fetcher.data.message}</p> : null}
-    </div>
+      ) : <span className="text-xs text-muted-foreground">Invite pending</span>}
+      {fetcher.data?.error ? <span className="text-xs text-destructive">{fetcher.data.error}</span> : null}
+      {fetcher.data?.success && fetcher.data.message ? <span className="text-xs text-emerald-600">{fetcher.data.message}</span> : null}
+    </fetcher.Form>
   )
 }
 
@@ -126,17 +110,26 @@ export default function TeamMembersTablePage({ loaderData }: Route.ComponentProp
         {fetcher.data?.success ? <p className="mt-3 text-sm text-emerald-600">Invite sent.</p> : null}
       </section>
 
-      {loaderData.canManageRoles ? (
-        <section className="rounded-lg border bg-card p-4 shadow-sm">
-          <h2 className="text-lg font-semibold">Role and access</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Change a member&apos;s role or disable their account. Admin accounts cannot be modified here.</p>
-          <div className="mt-4 space-y-3">
-            {loaderData.rows.filter(row => isManageableTeamRole(String(row.role ?? ''))).map(row => <TeamAccessRow key={row.id} member={row} />)}
-          </div>
-        </section>
-      ) : null}
-
-      <TableDisplay />
+      <TableDisplay
+        actionsColumnWidth={300}
+        rowActions={loaderData.canManageRoles ? row => {
+          const role = String(row.role ?? '')
+          if (!isManageableTeamRole(role)) return null
+          return (
+            <TeamAccessActions
+              member={{
+                id: String(row.id ?? ''),
+                user_id: typeof row.user_id === 'string' ? row.user_id : null,
+                role,
+                email: typeof row.email === 'string' ? row.email : null,
+                firstname: typeof row.firstname === 'string' ? row.firstname : null,
+                surname: typeof row.surname === 'string' ? row.surname : null,
+                disabled: Boolean(row.disabled),
+              }}
+            />
+          )
+        } : undefined}
+      />
     </div>
   )
 }
