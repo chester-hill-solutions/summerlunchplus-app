@@ -34,7 +34,7 @@ const TeamRoleCell = ({ member }: TeamRoleCellProps) => {
   const busy = fetcher.state !== 'idle'
 
   return (
-    <fetcher.Form method="post" className="flex items-center gap-2" onClick={event => event.stopPropagation()}>
+    <fetcher.Form method="post" className="flex min-w-max items-center gap-2" onClick={event => event.stopPropagation()}>
       <input type="hidden" name="profile_id" value={member.id} />
       <select
         aria-label={`Role for ${member.email ?? member.id}`}
