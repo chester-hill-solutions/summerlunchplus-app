@@ -153,8 +153,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       .map(row => ({
         ...row,
         disabled:
-          (row.user_id ? disabledByUserId.get(row.user_id) : undefined) ??
           (row.email ? disabledByUserId.get(normalizeEmail(row.email)) : undefined) ??
+          (row.user_id ? disabledByUserId.get(row.user_id) : undefined) ??
           false,
       })),
     label: 'Team',
