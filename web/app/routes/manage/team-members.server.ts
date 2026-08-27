@@ -60,6 +60,24 @@ const loadDisabledAuthUserMap = async (): Promise<Map<string, boolean>> => {
   return map
 }
 
+const loadCurrentDisabledAuthUserMap = async (
+  adminClient: Awaited<ReturnType<typeof getAdminClient>>,
+  rows: Array<{ user_id: string | null; email: string | null }>
+) => {
+  const map = await loadDisabledAuthUserMap()
+  await Promise.all(
+    rows.map(async row => {
+      if (!row.user_id) return
+      const { data, error } = await adminClient.auth.admin.getUserById(row.user_id)
+      if (error || !data.user) return
+      const disabled = Boolean(data.user.banned_until)
+      map.set(row.user_id, disabled)
+      if (data.user.email) map.set(normalizeEmail(data.user.email), disabled)
+    })
+  )
+  return map
+}
+
 type ProfileTargetRow = {
   id: string
   user_id: string | null
@@ -127,7 +145,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Response(error.message, { status: 500, headers: auth.headers })
   }
 
-  const disabledByUserId = await loadDisabledAuthUserMap()
+  const disabledByUserId = await loadCurrentDisabledAuthUserMap(adminClient, data ?? [])
   const result = {
     columns: ['role', 'email', 'firstname', 'surname', 'phone', 'postcode', 'password_set', 'disabled', 'actions'],
     rows: (data ?? [])
