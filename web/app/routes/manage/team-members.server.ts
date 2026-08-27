@@ -137,6 +137,10 @@ export async function loader({ request }: Route.LoaderArgs) {
       })),
     label: 'Team',
     tableName: 'team',
+    columnMeta: {
+      role: { minWidth: 220, preferredWidth: 220 },
+      disabled: { minWidth: 180, preferredWidth: 180 },
+    },
     role: auth.claims.role,
     allowedInviteRoles: allowedInviteRolesFor(auth.claims.role),
     canManageRoles: auth.claims.role === 'admin' || canManageAllTeamMembers,
