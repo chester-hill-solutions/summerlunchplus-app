@@ -298,9 +298,24 @@ export const setAccountDisabledAction = async ({
   if (blockedReason) return { error: blockedReason }
   if (!target.row.user_id) return { error: 'This member has not accepted their invite yet.' }
 
-  const { error } = await adminClient.auth.admin.updateUserById(target.row.user_id, {
+  const { error: updateError } = await adminClient.auth.admin.updateUserById(target.row.user_id, {
     ban_duration: disabled ? ACCOUNT_DISABLE_BAN_DURATION : ACCOUNT_ENABLE_BAN_DURATION,
   })
-  if (error) return { error: error.message }
+  if (updateError) return { error: updateError.message }
+
+  const { data: updatedUser, error: verifyError } = await adminClient.auth.admin.getUserById(target.row.user_id)
+  if (verifyError) return { error: `Unable to verify account status: ${verifyError.message}` }
+
+  const persistedDisabled = Boolean(updatedUser.user?.banned_until)
+  if (persistedDisabled !== disabled) {
+    console.error('[manage-team-members] account status did not persist', {
+      profileId,
+      userId: target.row.user_id,
+      requestedDisabled: disabled,
+      persistedDisabled,
+    })
+    return { error: 'The account status did not persist. Please try again.' }
+  }
+
   return { success: true, message: disabled ? 'Account disabled.' : 'Account enabled.' }
 }
