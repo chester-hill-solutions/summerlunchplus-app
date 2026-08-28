@@ -108,20 +108,39 @@ test('admin can disable staff and the staff login is blocked', async ({ page }) 
     await page.goto('/manage/team')
     const staffRow = page.locator('tr').filter({ hasText: STAFF_EMAIL })
     await expect(staffRow).toContainText('Active')
+    const disableResponsePromise = page.waitForResponse(response =>
+      response.request().method() === 'POST' && response.url().includes('/manage/team.data')
+    )
     await staffRow.getByRole('button', { name: 'Disable' }).click()
+    const disableResponse = await disableResponsePromise
+    expect(disableResponse.status()).toBe(200)
+    expect(disableResponse.request().postData()).toContain('intent=disable')
     await expect(staffRow.getByRole('button', { name: 'Enable' })).toBeVisible()
     await expect(staffRow).toContainText('Disabled')
+    await expect(staffRow).not.toContainText('account status did not persist')
+
+    await page.reload()
+    const refreshedStaffRow = page.locator('tr').filter({ hasText: STAFF_EMAIL })
+    await expect(refreshedStaffRow).toContainText('Disabled')
+    await expect(refreshedStaffRow.getByRole('button', { name: 'Enable' })).toBeVisible()
 
     const { data: disabledUser, error: disabledUserError } = await admin.auth.admin.getUserById(staffUserId)
     expect(disabledUserError).toBeNull()
     expect(disabledUser.user?.banned_until).toBeTruthy()
 
-    await page.context().clearCookies()
-    await page.goto('/login')
-    await page.getByLabel('Email').fill(STAFF_EMAIL)
-    await page.getByLabel('Password').fill(STAFF_PASSWORD)
-    await page.getByRole('button', { name: 'Login' }).click()
-    await expect(page).toHaveURL(/\/login/)
+    const staffContext = await page.context().browser()?.newContext()
+    if (!staffContext) throw new Error('Could not create a clean staff login context')
+    const staffPage = await staffContext.newPage()
+    try {
+      await staffPage.goto('/login')
+      await staffPage.getByLabel('Email').fill(STAFF_EMAIL)
+      await staffPage.getByLabel('Password').fill(STAFF_PASSWORD)
+      await staffPage.getByRole('button', { name: 'Login' }).click()
+      await expect(staffPage).toHaveURL(/\/login/)
+      await expect(staffPage.getByText(/banned|disabled/i)).toBeVisible()
+    } finally {
+      await staffContext.close()
+    }
   } finally {
     await admin.auth.admin.updateUserById(staffUserId, { ban_duration: 'none' })
   }

@@ -78,19 +78,9 @@ type TeamDisabledCellProps = {
 
 const TeamDisabledCell = ({ member }: TeamDisabledCellProps) => {
   const fetcher = useFetcher<ActionData>()
-  const [disabledOverride, setDisabledOverride] = useState<boolean | null>(null)
   const busy = fetcher.state !== 'idle'
-  const isDisabled = disabledOverride ?? Boolean(member.disabled)
+  const isDisabled = Boolean(member.disabled)
   const hasAcceptedInvite = Boolean(member.user_id)
-
-  useEffect(() => {
-    setDisabledOverride(null)
-  }, [member.disabled])
-
-  useEffect(() => {
-    if (fetcher.state !== 'idle' || !fetcher.data?.error) return
-    setDisabledOverride(null)
-  }, [fetcher.data, fetcher.state])
 
   if (!hasAcceptedInvite) return <span className="text-muted-foreground">Invite pending</span>
 
@@ -105,7 +95,6 @@ const TeamDisabledCell = ({ member }: TeamDisabledCellProps) => {
         variant="outline"
         size="sm"
         disabled={busy}
-        onClick={() => setDisabledOverride(!isDisabled)}
       >
         {busy ? 'Working...' : isDisabled ? 'Enable' : 'Disable'}
       </Button>
