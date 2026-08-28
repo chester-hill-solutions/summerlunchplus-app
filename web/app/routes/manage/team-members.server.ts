@@ -78,6 +78,19 @@ const loadCurrentDisabledAuthUserMap = async (
   return map
 }
 
+const resolveAuthUserId = async (adminClient: Awaited<ReturnType<typeof getAdminClient>>, target: ProfileTargetRow) => {
+  if (target.email) {
+    for (let page = 1; page <= AUTH_USERS_MAX_PAGES; page += 1) {
+      const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage: AUTH_USERS_PAGE_SIZE })
+      if (error) break
+      const matchingUser = data.users.find(user => normalizeEmail(user.email ?? '') === normalizeEmail(target.email ?? ''))
+      if (matchingUser) return matchingUser.id
+      if (data.users.length < AUTH_USERS_PAGE_SIZE) break
+    }
+  }
+  return target.user_id
+}
+
 type ProfileTargetRow = {
   id: string
   user_id: string | null
@@ -296,21 +309,22 @@ export const setAccountDisabledAction = async ({
   if (!target.ok) return { error: target.error }
   const blockedReason = guardManageableTarget(target.row, isSuperAdmin(auth))
   if (blockedReason) return { error: blockedReason }
-  if (!target.row.user_id) return { error: 'This member has not accepted their invite yet.' }
+  const authUserId = await resolveAuthUserId(adminClient, target.row)
+  if (!authUserId) return { error: 'This member has not accepted their invite yet.' }
 
-  const { error: updateError } = await adminClient.auth.admin.updateUserById(target.row.user_id, {
+  const { error: updateError } = await adminClient.auth.admin.updateUserById(authUserId, {
     ban_duration: disabled ? ACCOUNT_DISABLE_BAN_DURATION : ACCOUNT_ENABLE_BAN_DURATION,
   })
   if (updateError) return { error: updateError.message }
 
-  const { data: updatedUser, error: verifyError } = await adminClient.auth.admin.getUserById(target.row.user_id)
+  const { data: updatedUser, error: verifyError } = await adminClient.auth.admin.getUserById(authUserId)
   if (verifyError) return { error: `Unable to verify account status: ${verifyError.message}` }
 
   const persistedDisabled = Boolean(updatedUser.user?.banned_until)
   if (persistedDisabled !== disabled) {
     console.error('[manage-team-members] account status did not persist', {
       profileId,
-      userId: target.row.user_id,
+      userId: authUserId,
       requestedDisabled: disabled,
       persistedDisabled,
     })
