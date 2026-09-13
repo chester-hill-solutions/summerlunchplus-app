@@ -2,6 +2,7 @@ import { data, Form, useLoaderData } from 'react-router'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { requireAuth } from '@/lib/auth.server'
+import { loadGiftCardHouseholdImpact } from '@/lib/gift-card-household-impact.server'
 import { loadProgramImpact } from '@/lib/program-impact.server'
 import { isRoleAtLeast } from '@/lib/roles'
 
@@ -15,8 +16,11 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const url = new URL(request.url)
   const semesterId = url.searchParams.get('semester') || null
-  const result = await loadProgramImpact({ semesterId })
-  return data(result, { headers: auth.headers })
+  const [result, householdImpact] = await Promise.all([
+    loadProgramImpact({ semesterId }),
+    loadGiftCardHouseholdImpact(),
+  ])
+  return data({ ...result, householdImpact }, { headers: auth.headers })
 }
 
 const currency = new Intl.NumberFormat('en-CA', {
@@ -62,7 +66,7 @@ const SummaryCard = ({
   </Card>
 )
 
-export default function ProgramImpactPage() {
+export default function ProgramAnalyticsPage() {
   const result = useLoaderData<typeof loader>()
 
   return (
@@ -70,7 +74,7 @@ export default function ProgramImpactPage() {
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-sm uppercase tracking-wide text-muted-foreground">Analytics</p>
-          <h1 className="text-3xl font-semibold leading-tight">Program impact</h1>
+          <h1 className="text-3xl font-semibold leading-tight">Program analytics</h1>
           <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
             Recipient families have at least one sent gift card. Participating families have an accepted workshop and evidence in more than half of eligible completed class rows, including one of the two newest rows.
           </p>
@@ -95,6 +99,50 @@ export default function ProgramImpactPage() {
         <SummaryCard title="All recipient families" description="Families with at least one sent gift card." summary={result.allRecipients} />
         <SummaryCard title="Participating recipient families" description="Includes provisional families with no completed attendance rows." summary={result.participating} />
       </div>
+
+      <Card>
+        <CardHeader className="border-b">
+          <CardTitle>Gift-card recipient households</CardTitle>
+          <CardDescription>Household totals for families with at least one sent gift card.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4 pt-6 sm:grid-cols-5">
+          {[
+            ['Families', result.householdImpact.families],
+            ['People', result.householdImpact.people],
+            ['Children', result.householdImpact.children],
+            ['Cards', result.householdImpact.cards],
+            ['CAD value', currency.format(result.householdImpact.value)],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{typeof value === 'number' ? number.format(value) : value}</div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="border-b">
+          <CardTitle>Attendance households</CardTitle>
+          <CardDescription>
+            Active attendance rows resolve to unique student profiles, then to one household value pair per family.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4 pt-6 sm:grid-cols-3 lg:grid-cols-5">
+          {[
+            ['Active rows', result.householdImpact.activeAttendanceRows],
+            ['Students', result.householdImpact.activeAttendanceProfiles],
+            ['Families', result.householdImpact.activeAttendanceFamilies],
+            ['People', result.householdImpact.activeAttendancePeople],
+            ['Children', result.householdImpact.activeAttendanceChildren],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{number.format(Number(value))}</div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="border-b">
