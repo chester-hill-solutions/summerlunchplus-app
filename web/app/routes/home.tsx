@@ -9,6 +9,7 @@ import { createActionProfile } from '@/lib/action-profile.server'
 import { enforceOnboardingGuard } from '@/lib/auth.server'
 import { getMaskedEmailHint, normalizeEmail } from '@/lib/email-domain'
 import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
+import { isSemesterAccessExpired } from '@/lib/semester-access.server'
 import { createLoaderProfile } from '@/lib/loader-profile.server'
 import { resolveFamilyGraph } from '@/lib/family.server'
 import { isRoleAtLeast } from '@/lib/roles'
@@ -77,6 +78,7 @@ type LoaderData = {
   selectedPhotoStatusByClass: Record<string, string>
   activePhotoUploadClassIdByWorkshop: Record<string, string>
   postProgramSurveyLinks: Array<{ semesterId: string; campaignId: string }>
+  expiredSemesterIds: string[]
   nextClass:
       | {
         classId: string
@@ -286,6 +288,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         semesterId: campaign.semester_id,
         campaignId: campaign.id,
       })),
+      expiredSemesterIds: [],
       nextClass: null,
     } satisfies LoaderData
   }
@@ -310,6 +313,10 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const workshopsById = Object.fromEntries(workshops.map(workshop => [workshop.id, workshop]))
   const semesterById = Object.fromEntries((semestersRaw ?? []).map(semester => [semester.id, semester])) as LoaderData['semesterById']
+  const expiredSemesterIds = Object.values(semesterById)
+    .filter(semester => isSemesterAccessExpired({ semesterEndsAt: semester.ends_at, now }))
+    .map(semester => semester.id)
+  const expiredSemesterIdSet = new Set(expiredSemesterIds)
 
   const { data: classesRaw } = workshopIds.length
     ? await supabase
@@ -319,6 +326,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         .order('starts_at', { ascending: true })
     : { data: [] }
   const classes = (classesRaw ?? []) as ClassRow[]
+  const classById = new Map(classes.map(classRow => [classRow.id, classRow]))
   const classesByWorkshop = classes.reduce<Record<string, ClassRow[]>>((acc, classRow) => {
     if (!classRow.workshop_id) return acc
     if (!acc[classRow.workshop_id]) acc[classRow.workshop_id] = []
@@ -527,6 +535,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
     >
   >((acc, row) => {
+    const workshopId = classById.get(row.class_id)?.workshop_id
+    const workshop = workshopId ? workshopsById[workshopId] : null
+    if (workshop && expiredSemesterIdSet.has(workshop.semester_id)) return acc
     if (heldAllocationIds.has(row.id)) return acc
     if (row.blocked) return acc
     const released = resolveGiftCardRelease({
@@ -554,7 +565,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   ) as Record<string, string>
 
   const nextClassCandidate = classes
-    .filter(classRow => Boolean(classRow.workshop_id) && approvedWorkshopIds.has(classRow.workshop_id) && new Date(classRow.starts_at).getTime() > now)
+    .filter(classRow => {
+      if (!classRow.workshop_id || !approvedWorkshopIds.has(classRow.workshop_id)) return false
+      const workshop = workshopsById[classRow.workshop_id]
+      return Boolean(workshop && !expiredSemesterIdSet.has(workshop.semester_id) && new Date(classRow.starts_at).getTime() > now)
+    })
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0]
 
   const nextClass = nextClassCandidate?.workshop_id
@@ -594,6 +609,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       semesterId: campaign.semester_id,
       campaignId: campaign.id,
     })),
+    expiredSemesterIds,
     nextClass,
   } satisfies LoaderData
 }
@@ -910,6 +926,7 @@ export default function Home() {
     selectedPhotoStatusByClass,
     activePhotoUploadClassIdByWorkshop,
     postProgramSurveyLinks,
+    expiredSemesterIds,
     nextClass,
   } = useLoaderData<LoaderData>()
   const actionData = useActionData<ActionData>()
@@ -971,8 +988,11 @@ export default function Home() {
     })
 
   const workshopEnrollments = enrollments.filter(enrollment => Boolean(enrollment.workshop_id))
-  const hasWorkshopEnrollment = workshopEnrollments.length > 0
-  const hasPendingWorkshopEnrollment = workshopEnrollments.some(enrollment => enrollment.status === 'pending')
+  const expiredSemesterIdSet = new Set(expiredSemesterIds)
+  const visibleWorkshopEnrollments = workshopEnrollments.filter(enrollment => !expiredSemesterIdSet.has(enrollment.semester_id))
+  const hasExpiredWorkshopEnrollment = workshopEnrollments.some(enrollment => expiredSemesterIdSet.has(enrollment.semester_id))
+  const hasWorkshopEnrollment = visibleWorkshopEnrollments.length > 0
+  const hasPendingWorkshopEnrollment = visibleWorkshopEnrollments.some(enrollment => enrollment.status === 'pending')
   const shouldShowEnrollmentBanner =
     enrollmentStatus === 'error' || (enrollmentStatus === 'success' && hasPendingWorkshopEnrollment)
 
@@ -1093,7 +1113,7 @@ export default function Home() {
     resetUploadModal()
   }
 
-  const sortedWorkshopEnrollments = workshopEnrollments
+  const sortedWorkshopEnrollments = visibleWorkshopEnrollments
     .slice()
     .sort((a, b) => {
       const workshopIdA = a.workshop_id as string
@@ -1307,7 +1327,12 @@ export default function Home() {
             </section>
           ) : null}
 
-          {!hasWorkshopEnrollment ? (
+          {!hasWorkshopEnrollment && hasExpiredWorkshopEnrollment ? (
+            <section className="rounded-lg border bg-card p-6 text-center shadow-sm space-y-3">
+              <h2 className="text-xl font-semibold">The summerlunch+ program is over for this year</h2>
+              <p className="text-sm text-muted-foreground">We hope to see you back next year.</p>
+            </section>
+          ) : !hasWorkshopEnrollment ? (
             <section className="rounded-lg border bg-card p-6 text-center shadow-sm space-y-4">
               <h2 className="text-xl font-semibold">Your family has not enrolled in any workshops</h2>
               <Button asChild>
