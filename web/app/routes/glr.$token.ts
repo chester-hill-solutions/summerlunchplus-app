@@ -6,6 +6,9 @@ import { adminClient } from '@/lib/supabase/adminClient'
 import { resolveGiftCardRelease } from '@/lib/gift-cards/release.server'
 import { hashGlrToken } from '@/lib/gift-cards/token.server'
 import { getPostProgramSurveyHold } from '@/lib/post-program-survey/gift-card-guard.server'
+import { isSemesterAccessExpired } from '@/lib/semester-access.server'
+
+const PROGRAM_ENDED_MESSAGE = 'The summerlunch+ program is over for this year. We hope to see you back next year.'
 
 const homeMessageRedirect = ({ request, message }: { request: Request; message: string }) => {
   const url = new URL('/home', request.url)
@@ -20,6 +23,22 @@ const invalidLink = ({ request }: { request: Request }) =>
     message: 'This gift card link is invalid or unavailable. Please contact support for help.',
   })
 
+const expiredProgramLink = ({ request }: { request: Request }) =>
+  homeMessageRedirect({ request, message: PROGRAM_ENDED_MESSAGE })
+
+type GiftCardClassRelation = {
+  starts_at: string | null
+  ends_at: string | null
+  workshop:
+    | {
+        semester: { ends_at: string | null } | { ends_at: string | null }[] | null
+      }
+    | {
+        semester: { ends_at: string | null } | { ends_at: string | null }[] | null
+      }[]
+    | null
+}
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const token = (params.token ?? '').trim()
   if (!token) return invalidLink({ request })
@@ -27,7 +46,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const tokenHash = hashGlrToken(token)
   const { data: allocationByHash, error: allocationError } = await adminClient
     .from('gift_card_allocation')
-    .select('id, profile_id, blocked, status, metadata, class_id, gift_card_asset_id, asset:gift_card_asset_id(asset_url), class:class_id(starts_at, ends_at)')
+    .select('id, profile_id, blocked, status, metadata, class_id, gift_card_asset_id, asset:gift_card_asset_id(asset_url), class:class_id(starts_at, ends_at, workshop:workshop_id(semester:semester_id(ends_at)))')
     .eq('glr_token_hash', tokenHash)
     .maybeSingle()
 
@@ -44,16 +63,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!allocation && isUuidToken) {
     const { data: allocationById } = await adminClient
       .from('gift_card_allocation')
-      .select('id, profile_id, blocked, status, metadata, class_id, gift_card_asset_id, asset:gift_card_asset_id(asset_url), class:class_id(starts_at, ends_at)')
+      .select('id, profile_id, blocked, status, metadata, class_id, gift_card_asset_id, asset:gift_card_asset_id(asset_url), class:class_id(starts_at, ends_at, workshop:workshop_id(semester:semester_id(ends_at)))')
       .eq('id', token)
       .maybeSingle()
     allocation = allocationById
   }
 
-  const classRelation = allocation?.class
-  const classAt = (Array.isArray(classRelation) ? classRelation[0] : classRelation)?.starts_at ??
-    (Array.isArray(classRelation) ? classRelation[0] : classRelation)?.ends_at ??
+  const classRelation = allocation?.class as GiftCardClassRelation | GiftCardClassRelation[] | null | undefined
+  const classRow = Array.isArray(classRelation) ? classRelation[0] : classRelation
+  const classAt = classRow?.starts_at ??
+    classRow?.ends_at ??
     null
+  const workshopRelation = classRow?.workshop
+  const semesterRelation = Array.isArray(workshopRelation) ? workshopRelation[0]?.semester : workshopRelation?.semester
+  const semesterEndsAt = (Array.isArray(semesterRelation) ? semesterRelation[0] : semesterRelation)?.ends_at ?? null
+  if (isSemesterAccessExpired({ semesterEndsAt })) return expiredProgramLink({ request })
+
   const released = resolveGiftCardRelease({
     metadata: allocation?.metadata ?? null,
     classAt,
