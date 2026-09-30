@@ -1,19 +1,4 @@
-const addCalendarMonth = (date: Date) => {
-  const year = date.getUTCFullYear()
-  const month = date.getUTCMonth()
-  const day = date.getUTCDate()
-  const lastDayOfTargetMonth = new Date(Date.UTC(year, month + 2, 0)).getUTCDate()
-
-  return new Date(Date.UTC(
-    year,
-    month + 1,
-    Math.min(day, lastDayOfTargetMonth),
-    date.getUTCHours(),
-    date.getUTCMinutes(),
-    date.getUTCSeconds(),
-    date.getUTCMilliseconds(),
-  ))
-}
+const SEMESTER_ACCESS_GRACE_MS = 45 * 24 * 60 * 60 * 1000
 
 export const semesterAccessExpiresAt = (semesterEndsAt: string | null | undefined) => {
   if (!semesterEndsAt) return null
@@ -21,7 +6,7 @@ export const semesterAccessExpiresAt = (semesterEndsAt: string | null | undefine
   const endsAt = new Date(semesterEndsAt)
   if (!Number.isFinite(endsAt.getTime())) return null
 
-  return addCalendarMonth(endsAt)
+  return new Date(endsAt.getTime() + SEMESTER_ACCESS_GRACE_MS)
 }
 
 export const isSemesterAccessExpired = ({
