@@ -1,4 +1,4 @@
-const SEMESTER_ACCESS_GRACE_MS = 40 * 24 * 60 * 60 * 1000
+const SEMESTER_ACCESS_GRACE_MS = 45 * 24 * 60 * 60 * 1000
 
 export const semesterAccessExpiresAt = (semesterEndsAt: string | null | undefined) => {
   if (!semesterEndsAt) return null
